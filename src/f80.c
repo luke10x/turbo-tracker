@@ -1131,9 +1131,12 @@ void f80_draw(F80Widget *w) {
         draw_gutter(w,header);
         for(int i=0;i<body && w->scroll+i<w->item_count;++i) {
             int selected=w->scroll+i==w->cursor;
+            int ranged=w->range_active && w->scroll+i>=w->range_first &&
+                w->scroll+i<=w->range_last;
             int y=r.y+i+header;
             const char *line=w->items[w->scroll+i];
-            f80_put(y,r.x,w->kind==F80_TABLE?ascii_offset(line,w->table_hscroll):line,width,w->kind==F80_LISTBOX&&selected?3:2,
+            f80_put(y,r.x,w->kind==F80_TABLE?ascii_offset(line,w->table_hscroll):line,width,
+                    ranged?65:w->kind==F80_LISTBOX&&selected?3:2,
                     selected && w->app && w->app->focus==w);
             if(w->kind==F80_TABLE && selected) {
                 int start=w->table_col_count?w->table_starts[w->table_col]:0;

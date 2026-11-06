@@ -162,6 +162,10 @@ void tt_tracker_message(const char *text) {
 static void send_play(TtPlayType type,int a,int b) {
     if(tt_play_emit((TtPlayEvent){type,a,b,0}))tt_play_flush();
 }
+static void send_play_range(int first,int last,int begin) {
+    if(tt_play_emit((TtPlayEvent){TT_PLAY_SET_ORDER_RANGE,first,last,begin}))
+        tt_play_flush();
+}
 static void leave_follow(void) {
     if(tracker.follow)send_play(TT_PLAY_TOGGLE_FOLLOW,0,0);
 }
@@ -249,10 +253,22 @@ static void selection_bounds(int *top,int *left,int *bottom,int *right) {
     *left=tracker.anchor_channel<tracker.channel?tracker.anchor_channel:tracker.channel;
     *right=tracker.anchor_channel>tracker.channel?tracker.anchor_channel:tracker.channel;
 }
-static int selected_cell(int row,int channel) {
+static int selected_cell(int global,int channel) {
     if(!tracker.selecting || tracker.focus!=FOCUS_PHRASE)return 0;
+    if(tracker.grid_selection_invalid) {
+        int top=tracker.grid_selection_anchor<tracker.grid_selection_end?
+            tracker.grid_selection_anchor:tracker.grid_selection_end;
+        int bottom=tracker.grid_selection_anchor>tracker.grid_selection_end?
+            tracker.grid_selection_anchor:tracker.grid_selection_end;
+        int left=tracker.anchor_channel<tracker.channel?tracker.anchor_channel:tracker.channel;
+        int right=tracker.anchor_channel>tracker.channel?tracker.anchor_channel:tracker.channel;
+        return global>=top && global<=bottom && channel>=left && channel<=right;
+    }
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    return row>=top && row<=bottom && channel>=left && channel<=right;
+    return global%tracker.song.pattern_rows>=top &&
+           global%tracker.song.pattern_rows<=bottom &&
+           global/tracker.song.pattern_rows==tracker.edit_order &&
+           channel>=left && channel<=right;
 }
 static int pattern_is_empty(const TtPattern *pattern) {
     for(int row=0;row<tracker.song.pattern_rows;++row)
@@ -300,6 +316,31 @@ static void order_panel_selected(F80Widget *list,void *user) {
     int at=clamp(list->cursor,0,tracker.song.order_count-1);
     if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return;
     send_play(TT_PLAY_SELECT_ORDER,at,0);
+}
+static int order_at(int x,int y) {
+    if(!tracker.order_list)return -1;
+    F80Rect r=tracker.order_list->rect;
+    if(x<r.x || x>=r.x+r.w || y<r.y || y>=r.y+r.h)return -1;
+    int at=tracker.order_list->scroll+y-r.y;
+    return at<tracker.song.order_count?at:-1;
+}
+static void begin_order_range(int x,int y) {
+    if(tracker.app.modal)return;
+    int at=order_at(x,y);
+    if(at<0)return;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
+    leave_follow();
+    if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return;
+    send_play_range(at,at,1);
+}
+static void drag_order_range(int x,int y) {
+    if(!tracker.order_range_active || tracker.app.modal || !tracker.order_list)return;
+    F80Rect r=tracker.order_list->rect;
+    if(y<r.y)handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,-1});
+    else if(y>=r.y+r.h)handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,1});
+    int at=order_at(clamp(x,r.x,r.x+r.w-1),clamp(y,r.y,r.y+r.h-1));
+    if(at>=0 && at!=tracker.order_range_end)
+        send_play_range(tracker.order_range_anchor,at,0);
 }
 #ifdef __EMSCRIPTEN__
 static void order_panel_scroll(int rows) {
@@ -841,7 +882,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             int pair=!editable?66:editrow && editcol?4:editrow?2:
                      playhead?4:empty?1:
                      field==0?4:field==1?8:9;
-            if(editable && selected_cell(row,channel))pair=65;
+            if(selected_cell(global,channel))pair=tracker.grid_selection_invalid?15:65;
             const char *text=shown+pattern_field_offset(field);
             f80_put(r.y+3+line,x,text,visible,pair,
                     editable && (editrow || playhead));
@@ -1870,6 +1911,11 @@ static void update_labels(void) {
     tracker.wave_frame->style=tracker.wave.pcm?0:15;
     if(tracker.order_list) {
         tracker.order_list->item_count=tracker.song.order_count;
+        tracker.order_list->range_active=tracker.order_range_active;
+        tracker.order_list->range_first=tracker.order_range_anchor<tracker.order_range_end?
+            tracker.order_range_anchor:tracker.order_range_end;
+        tracker.order_list->range_last=tracker.order_range_anchor>tracker.order_range_end?
+            tracker.order_range_anchor:tracker.order_range_end;
         tracker.order_list->cursor=clamp(tracker.order_list->cursor,0,
                                         tracker.song.order_count-1);
         for(int i=0;i<tracker.song.order_count;++i) {
@@ -2364,6 +2410,12 @@ EMSCRIPTEN_KEEPALIVE void tt_tracker_touch_scroll_fields(int fields) {
 EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_order(int rows) {
     order_panel_scroll(rows);
 }
+EMSCRIPTEN_KEEPALIVE void tt_tracker_hold_order_selection(int x,int y) {
+    begin_order_range(x,y);
+}
+EMSCRIPTEN_KEEPALIVE void tt_tracker_drag_order_selection(int x,int y) {
+    drag_order_range(x,y);
+}
 EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_table(int ticks) {
     if(tracker.app.modal!=tracker.table_dialog || !tracker.table_canvas)return;
     f80_grid_scroll(&tracker.table_grid,0,ticks);
@@ -2415,7 +2467,7 @@ EMSCRIPTEN_KEEPALIVE void tt_tracker_flush_input(void) {
 #endif
 #ifndef __EMSCRIPTEN__
 enum { NATIVE_TOUCH_GRID=1, NATIVE_TOUCH_WAVE=2,
-       NATIVE_TOUCH_TABLE=3, NATIVE_TOUCH_WRAP=4 };
+       NATIVE_TOUCH_TABLE=3, NATIVE_TOUCH_WRAP=4, NATIVE_TOUCH_ORDER=5 };
 static struct {
     int down,kind,selecting,moved,x,y,current_x,current_y,last_x,last_y;
     Uint64 started_at;
@@ -2428,6 +2480,10 @@ static void native_poll_hold(void) {
     if(native_touch.kind==NATIVE_TOUCH_WRAP)return;
     if(native_touch.kind==NATIVE_TOUCH_GRID)
         native_touch.selecting=begin_touch_selection(native_touch.current_x,native_touch.current_y);
+    else if(native_touch.kind==NATIVE_TOUCH_ORDER) {
+        begin_order_range(native_touch.current_x,native_touch.current_y);
+        native_touch.selecting=tracker.order_range_active;
+    }
     else if(native_touch.kind==NATIVE_TOUCH_TABLE) {
         f80_grid_mouse(&tracker.table_grid,native_touch.current_x,native_touch.current_y,0);
         f80_grid_hold(&tracker.table_grid);
@@ -2447,7 +2503,11 @@ static void native_move(int x,int y) {
     if(x!=native_touch.x || y!=native_touch.y)
         native_touch.moved=1;
     if(!native_touch.moved && !native_touch.selecting)return;
-    if(native_touch.kind==NATIVE_TOUCH_GRID) {
+    if(native_touch.kind==NATIVE_TOUCH_ORDER) {
+        if(native_touch.selecting)drag_order_range(x,y);
+        else if(native_touch.moved && y!=native_touch.last_y)
+            handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,native_touch.last_y-y});
+    } else if(native_touch.kind==NATIVE_TOUCH_GRID) {
         if(native_touch.selecting)handle_mouse(x,y,2);
         else if(native_touch.moved) {
             if(y!=native_touch.last_y)touch_scroll_rows(native_touch.last_y-y);
@@ -2498,7 +2558,12 @@ static void native_mouse_event(void) {
     if(event.bstate&BUTTON1_PRESSED) {
         if(native_touch.down) { native_move(x,y);return; }
         F80Rect r=tracker.phrase_canvas->rect;
-        if(!tracker.app.modal && x>=r.x+5 && x<r.x+r.w-1 &&
+        if(!tracker.app.modal && tracker.order_list &&
+           order_at(x,y)>=0) {
+            native_touch.kind=NATIVE_TOUCH_ORDER;
+            handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
+        }
+        else if(!tracker.app.modal && x>=r.x+5 && x<r.x+r.w-1 &&
            y>=r.y+3 && y<r.y+r.h) {
             native_touch.kind=NATIVE_TOUCH_GRID;
         } else if(tracker.table_dialog && tracker.app.modal==tracker.table_dialog &&

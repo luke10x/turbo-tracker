@@ -175,7 +175,10 @@ function moveTouch(start, x, y) {
           ['number'], [start.lastX - x]);
     }
   } else if (start.target === 'order') {
-    if (y !== start.lastY)
+    if (start.holdStarted)
+      Module.ccall('tt_tracker_drag_order_selection', null,
+        ['number', 'number'], [x, y]);
+    else if (y !== start.lastY)
       Module.ccall('tt_tracker_scroll_order', null,
         ['number'], [start.lastY - y]);
   } else if (start.target === 'grid') {
@@ -221,7 +224,8 @@ function beginContact(id, x, y) {
   const componentCell = target === 'component-grid' && componentRect &&
     x < componentRect.x + componentRect.width - (componentRect.vertical ? 1 : 0) &&
     y > componentRect.y && y < componentRect.y + componentRect.height - (componentRect.horizontal ? 1 : 0);
-  if (target === 'wave' || target === 'grid' && sampleEditableGridAt(x, y) ||
+  if (target === 'wave' || target === 'order' ||
+      target === 'grid' && sampleEditableGridAt(x, y) ||
       tableCell || componentCell) {
     start.holdTimer = setTimeout(() => {
       if (activeContacts.get(id) !== start || start.swiping) return;
@@ -233,6 +237,9 @@ function beginContact(id, x, y) {
           ['number', 'number'], [start.currentX, start.currentY]);
       else if (target === 'grid')
         Module.ccall('tt_tracker_begin_touch_selection', null,
+          ['number', 'number'], [start.currentX, start.currentY]);
+      else if (target === 'order')
+        Module.ccall('tt_tracker_hold_order_selection', null,
           ['number', 'number'], [start.currentX, start.currentY]);
       else {
         Module.ccall('tt_tracker_begin_wave_gesture', null,

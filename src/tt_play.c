@@ -9,7 +9,7 @@
 static void play_start_now(F80Widget *button,void *user);
 
 static const TtPattern *playing_pattern(void) {
-    if(tracker.play_mode==PLAY_PATTERN)
+    if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
         return tracker.loop_pattern_index==tracker.pattern_index?
                &tracker.pattern:&tracker.song.pattern[tracker.loop_pattern_index];
     int index=tracker.song.order[tracker.play_order];
@@ -88,11 +88,12 @@ void tt_play_play_row(int row) {
        tracker.follow && tracker.order_list)
         tracker.order_list->cursor=tracker.play_order;
     const TtPattern *pattern=playing_pattern();
-    int pattern_index=tracker.play_mode==PLAY_PATTERN?tracker.loop_pattern_index:
+    int pattern_index=tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active?
+                      tracker.loop_pattern_index:
                       tracker.song.order[tracker.play_order];
     if(row==0) {
         char info[192];
-        if(tracker.play_mode==PLAY_PATTERN)
+        if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
             snprintf(info,sizeof(info),"Looping pattern %02X: %.90s%s",
                      pattern_index,tracker.song.name[pattern_index],
                      pattern_is_empty(pattern)?" [empty]":"");
@@ -131,11 +132,13 @@ void tt_play_play_row(int row) {
             tracker.display_head=(tracker.display_head+1)%SONG_DISPLAY_ROWS;
         tracker.display_rows[tracker.display_tail]=(SongDisplayRow){
             tracker.song_written_frames,row,pattern_index,
-            tracker.play_mode==PLAY_SONG?tracker.play_order:-1};
+            tracker.play_mode==PLAY_SONG || tracker.order_range_active?
+                tracker.play_order:-1};
         tracker.display_tail=next;
     } else {
         tt_play_emit((TtPlayEvent){TT_PLAY_ROW_PLAYED,row,pattern_index,
-                                  tracker.play_mode==PLAY_SONG?tracker.play_order:-1});
+                                  tracker.play_mode==PLAY_SONG || tracker.order_range_active?
+                                      tracker.play_order:-1});
         tt_play_flush();
     }
 }
@@ -236,11 +239,16 @@ static void play_start_now(F80Widget *button,void *user) {
     tracker.song_written_frames=0;
     tracker.display_head=tracker.display_tail=0;
     tracker.song_finished=0;
-    tracker.play_order=tracker.order_list?tracker.order_list->cursor:0;
+    tracker.play_order=tracker.order_range_active?
+        (tracker.order_range_anchor<tracker.order_range_end?
+         tracker.order_range_anchor:tracker.order_range_end):
+        tracker.order_list?tracker.order_list->cursor:0;
     tracker.play_step=0;
-    if(tracker.play_mode==PLAY_PATTERN)tracker.loop_pattern_index=tracker.pattern_index;
+    if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
+        tracker.loop_pattern_index=tracker.pattern_index;
     tracker.active_step=tracker.active_pattern_index=tracker.active_order_index=-1;
-    tt_tracker_message(tracker.play_mode==PLAY_PATTERN?"Looping current pattern":"Playing song order");
+    tt_tracker_message(tracker.order_range_active?"Looping selected orders":
+        tracker.play_mode==PLAY_PATTERN?"Looping current pattern":"Playing song order");
 }
 
 static void play_toggle_now(F80Widget *button,void *user) {
@@ -284,8 +292,14 @@ static void advance_playback_now(void) {
                 tracker.tick_phase=0;
                 if(++tracker.play_step>=tracker.song.pattern_rows) {
                     tracker.play_step=0;
-                    if(tracker.play_mode==PLAY_SONG &&
-                       ++tracker.play_order>=tracker.song.order_count) {
+                    if(tracker.order_range_active) {
+                        int first=tracker.order_range_anchor<tracker.order_range_end?
+                            tracker.order_range_anchor:tracker.order_range_end;
+                        int last=tracker.order_range_anchor>tracker.order_range_end?
+                            tracker.order_range_anchor:tracker.order_range_end;
+                        if(++tracker.play_order>last)tracker.play_order=first;
+                    } else if(tracker.play_mode==PLAY_SONG &&
+                              ++tracker.play_order>=tracker.song.order_count) {
                         if(tracker.loop)tracker.play_order=0;
                         else tracker.song_finished=1;
                     }
@@ -346,6 +360,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_TOGGLE_LOOP:name="toggle loop";break;
     case TT_PLAY_TOGGLE_FOLLOW:name="toggle follow";break;
     case TT_PLAY_SELECT_ORDER:name="seek order";break;
+    case TT_PLAY_SET_ORDER_RANGE:name="order range";break;
     case TT_PLAY_AUDITION:name="audition";break;
     case TT_PLAY_AUDITION_CELL:name="audition cell";break;
     case TT_PLAY_ROW_PLAYED:name="row played";break;
@@ -361,6 +376,8 @@ int tt_play_emit(TtPlayEvent event) {
         snprintf(detail,sizeof(detail),"%s row %02X ch %d",name,event.a,event.b+1);
     else if(event.type==TT_PLAY_SELECT_ORDER)
         snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else if(event.type==TT_PLAY_SET_ORDER_RANGE)
+        snprintf(detail,sizeof(detail),"%s %02X-%02X",name,event.a,event.b);
     else snprintf(detail,sizeof(detail),"%s",name);
     if(event.type!=TT_PLAY_ROW_PLAYED || event.a==0)
         tt_tracker_log_event("PLAY",detail);
@@ -376,9 +393,12 @@ void tt_play_flush(void) {
         case TT_PLAY_STOP:play_stop_now(NULL,NULL);break;
         case TT_PLAY_TOGGLE:play_toggle_now(NULL,NULL);break;
         case TT_PLAY_SET_MODE:
-            tracker.play_mode=event.a;play_start_now(NULL,NULL);break;
+            tracker.play_mode=event.a;
+            if(event.a==PLAY_SONG)tracker.order_range_active=0;
+            play_start_now(NULL,NULL);break;
         case TT_PLAY_TOGGLE_MODE:
             tracker.play_mode=tracker.play_mode==PLAY_SONG?PLAY_PATTERN:PLAY_SONG;
+            if(tracker.play_mode==PLAY_SONG)tracker.order_range_active=0;
             play_start_now(NULL,NULL);break;
         case TT_PLAY_TOGGLE_LOOP:
             tracker.loop=!tracker.loop;
@@ -389,6 +409,7 @@ void tt_play_flush(void) {
         case TT_PLAY_SELECT_ORDER: {
             int at=event.a;
             if(at<0 || at>=tracker.song.order_count)break;
+            tracker.order_range_active=0;
             tracker.play_mode=PLAY_SONG;
             if(tracker.playing)play_start_now(NULL,NULL);
             tracker.play_order=at;tracker.play_step=0;
@@ -399,6 +420,24 @@ void tt_play_flush(void) {
             snprintf(status,sizeof(status),"Order %02X plays pattern %02X",
                      at,tracker.song.order[at]);
             tt_tracker_message(status);break;
+        }
+        case TT_PLAY_SET_ORDER_RANGE: {
+            if(event.a<0 || event.a>=tracker.song.order_count ||
+               event.b<0 || event.b>=tracker.song.order_count)break;
+            tracker.order_range_active=1;
+            tracker.order_range_anchor=event.a;
+            tracker.order_range_end=event.b;
+            tracker.play_mode=PLAY_PATTERN;
+            if(event.c && tracker.playing)play_start_now(NULL,NULL);
+            int first=event.a<event.b?event.a:event.b;
+            int last=event.a>event.b?event.a:event.b;
+            if(event.c || tracker.play_order<first || tracker.play_order>last) {
+                tracker.play_order=event.c?event.a:first;tracker.play_step=0;
+                tracker.active_order_index=tracker.play_order;
+                tracker.active_pattern_index=tracker.song.order[tracker.play_order];
+                tracker.active_step=0;
+            }
+            break;
         }
         case TT_PLAY_AUDITION:play_audition_now(NULL,NULL);break;
         case TT_PLAY_AUDITION_CELL:play_audition_cell_now(event.a,event.b);break;
@@ -412,6 +451,7 @@ void tt_play_flush(void) {
         case TT_PLAY_FINISHED:
             tt_audio_end_song();tracker.playing=tracker.started=0;break;
         case TT_PLAY_DOCUMENT_RESET:
+            tracker.order_range_active=0;
             tracker.play_mode=PLAY_SONG;
             tracker.play_order=tracker.play_step=0;
             break;

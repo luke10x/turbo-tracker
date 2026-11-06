@@ -36,6 +36,8 @@ typedef struct {
     int compact_editing;
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
+    int order_range_active,order_range_anchor,order_range_end;
+    int grid_selection_anchor,grid_selection_end,grid_selection_invalid;
     Uint64 next_audition_tick_at;
     int audition_effect_active;
     int tick_phase,tick_remainder;

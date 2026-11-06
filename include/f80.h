@@ -72,6 +72,7 @@ struct F80Widget {
     const char **items;
     int item_count, cursor, scroll;
     int scroll_detached; /* allow list viewport to move without moving its cursor */
+    int range_active,range_first,range_last; /* optional highlighted list rows */
     int selected; /* radio-group selection; -1 when the group is empty */
     unsigned char *checked; /* owned checkbox state, one entry per item */
     int gutter_width; /* optional line-number gutter for list/table content */
