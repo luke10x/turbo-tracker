@@ -232,6 +232,24 @@ int main(void) {
     assert(tracker.marker==5);
     handle_mouse(marker_x+2,3,0);
     assert(tracker.marker==5);
+    tracker.wave.pcm=NULL; /* stack-backed smoke sample is not history-owned */
+    TtEditDoc history_doc=edit_doc();
+    edit_history=tt_edit_history_new(&history_doc);
+    assert(edit_history);
+    int original_note=tracker.pattern.cell[0][4].note;
+    TtEditEvent change={.type=TT_EDIT_CELL_SET};
+    change.cell_set=(TtEditCellSet){0,4,{72,1,TT_EFFECT_NONE,-1}};
+    assert(emit_edit(&change) && tracker.pattern.cell[0][4].note==72);
+    handle_key(26); /* Ctrl-Z */
+    assert(tracker.pattern.cell[0][4].note==original_note);
+    handle_key(25); /* Ctrl-Y */
+    assert(tracker.pattern.cell[0][4].note==72);
+    assert(!strcmp(menus[1].title,"~E~dit"));
+    edit_items[0].action(NULL,NULL);
+    assert(tracker.pattern.cell[0][4].note==original_note);
+    edit_items[1].action(NULL,NULL);
+    assert(tracker.pattern.cell[0][4].note==72);
+    tt_edit_history_free(edit_history);edit_history=NULL;
     puts("default song, ordered grid, and playback follow passed");
     return 0;
 }

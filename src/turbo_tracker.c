@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef __EMSCRIPTEN__
+#include <termios.h>
+#include <unistd.h>
+#endif
 #include "f80.h"
 #include "f80_components.h"
 #include "f80_curses.h"
@@ -55,6 +59,7 @@ EM_JS(int, tt_web_compact_editing, (), {
 #endif
 
 TtTracker tracker;
+static TtEditHistory *edit_history;
 
 #ifndef __EMSCRIPTEN__
 static F80FileDialog file_dialog;
@@ -71,13 +76,14 @@ static TtEditDoc edit_doc(void) {
         .samples=tracker.samples,.active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
         .sample_count=&tracker.sample_count,.sample_index=&tracker.sample_index,
         .active_loaded_path=tracker.loaded_path,.active_csv_path=tracker.csv_path,
+        .song_path=tracker.song_path,
         .msg=edit_message,.msg_size=(int)sizeof(edit_message)
     };
 }
 static int emit_edit(const TtEditEvent *event) {
     TtEditDoc doc=edit_doc();
     edit_message[0]=0;
-    return tt_edit_apply(&doc,event);
+    return tt_edit_apply_recorded(edit_history,&doc,event);
 }
 static void edit_cell(int row,int channel,TtCell cell) {
     TtEditEvent event={.type=TT_EDIT_CELL_SET};
@@ -1274,7 +1280,8 @@ static void show_help(F80Widget *button,void *user) {
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W; values 00-FF.",
         "Note: Z-M and Q-U play two keyboard octaves; [/] change octave.",
-        "Delete clears the selected field. Enter auditions. F9 menu; F10 exits.",
+        "Delete clears a field. Enter auditions. Ctrl+Z/Y undo/redo.",
+        "F9 opens the menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "Sampler > Manage reorders, renames, deletes and retunes samples.",
         "Sampler > Slices sets a base note for each marker-to-marker slice.",
@@ -1284,7 +1291,7 @@ static void show_help(F80Widget *button,void *user) {
         "TBLxx on a pattern channel starts table xx on that channel.",
         "Table: Tab name/grid; swipe to scroll; hold or Shift+arrows selects."
     };
-    F80Widget *dialog=f80_dialog("Sample tracker keys",lines,NULL,17,0);
+    F80Widget *dialog=f80_dialog("Sample tracker keys",lines,NULL,18,0);
     dialog->dialog_align=1;
     f80_add(dialog,f80_button("~C~lose",close_help,NULL));
     f80_show_modal(&tracker.app,dialog);
@@ -1305,11 +1312,53 @@ static void pull_menu(F80Widget *button,void *user) {
     }
     f80_menu_open(tracker.app.menu,0);
 }
+static void restore_history(int redo) {
+    if(redo?!tt_edit_can_redo(edit_history):!tt_edit_can_undo(edit_history)) {
+        tt_tracker_message(redo?"Nothing to redo":"Nothing to undo");return;
+    }
+    if(tracker.app.menu && tracker.app.menu->menu_active)
+        f80_menu_close(tracker.app.menu);
+    if(tracker.app.modal) {
+#ifndef __EMSCRIPTEN__
+        if(f80_file_dialog_active(&file_dialog))f80_file_dialog_close(&file_dialog);
+        else
+#endif
+            if(tracker.app.modal==tracker.manage_dialog)close_manage(NULL,NULL);
+            else if(tracker.app.modal==tracker.slices_dialog)close_slices(NULL,NULL);
+            else if(tracker.app.modal==tracker.order_dialog)close_order(NULL,NULL);
+            else if(tracker.app.modal==tracker.table_dialog)close_table(NULL,NULL);
+            else if(tracker.app.modal==tracker.settings_dialog)close_settings(NULL,NULL);
+            else f80_hide_modal(&tracker.app);
+    }
+    stop_playback(NULL,NULL);
+    TtEditDoc doc=edit_doc();
+    int applied=redo?tt_edit_redo(edit_history,&doc):tt_edit_undo(edit_history,&doc);
+    if(!applied) { tt_tracker_message(edit_message);return; }
+    tracker.step=clamp(tracker.step,0,tracker.song.pattern_rows-1);
+    tracker.edit_order=order_for_pattern(tracker.pattern_index,tracker.edit_order);
+    tracker.phrase_scroll=tracker.edit_order>=0?
+        tracker.edit_order*tracker.song.pattern_rows:0;
+    tracker.zoom=tracker.view_start=tracker.marker=0;
+    tracker.selecting=0;tracker.reveal_cursor=1;
+    if(tracker.order_list)tracker.order_list->cursor=
+        clamp(tracker.order_list->cursor,0,tracker.song.order_count-1);
+    tt_tracker_message(redo?"Redone":"Undone");
+}
+static void undo_edit(F80Widget *button,void *user) {
+    (void)button;(void)user;restore_history(0);
+}
+static void redo_edit(F80Widget *button,void *user) {
+    (void)button;(void)user;restore_history(1);
+}
 static const F80MenuItem file_items[]={
     {"~L~oad WAV...",NULL,open_load,1},
     {"~O~pen song...",NULL,open_song,1},
     {"~S~ave song...",NULL,save_song,1},
     {"~Q~uit",NULL,quit,1}
+};
+static const F80MenuItem edit_items[]={
+    {"~U~ndo","Ctrl+Z",undo_edit,1},
+    {"~R~edo","Ctrl+Y",redo_edit,1}
 };
 static const F80MenuItem play_items[]={
     {"~S~tart song",NULL,start_song,1},
@@ -1334,6 +1383,7 @@ static const F80MenuItem view_items[]={
 static const F80MenuItem help_items[]={ {"~K~eys and format",NULL,show_help,1} };
 static const F80Menu menus[]={
     {"~F~ile",file_items,sizeof(file_items)/sizeof(*file_items)},
+    {"~E~dit",edit_items,sizeof(edit_items)/sizeof(*edit_items)},
     {"~S~ampler",sampler_items,sizeof(sampler_items)/sizeof(*sampler_items)},
     {"S~o~ng",song_items,sizeof(song_items)/sizeof(*song_items)},
     {"~P~lay",play_items,sizeof(play_items)/sizeof(*play_items)},
@@ -1699,6 +1749,8 @@ static void update_labels(void) {
     }
 }
 static void handle_key(int key) {
+    if(key==26) { undo_edit(NULL,NULL);return; }
+    if(key==25) { redo_edit(NULL,NULL);return; }
     if(key==2010) { quit(NULL,NULL);return; }
     if(key==2009) { pull_menu(NULL,NULL);return; }
     if(tracker.app.modal) {
@@ -2280,9 +2332,14 @@ static int frame(void *user) {
     (void)user;
     if(!tracker.app.running) {
         while(tracker.app.modal)f80_hide_modal(&tracker.app);
-        tt_audio_close();tt_free(&tracker.wave);
-        for(int index=0;index<tracker.sample_count;++index)
-            tt_free(&tracker.samples[index].wave);
+        tt_audio_close();
+        if(edit_history) {
+            tt_edit_history_free(edit_history);edit_history=NULL;
+        } else {
+            tt_free(&tracker.wave);
+            for(int index=0;index<tracker.sample_count;++index)
+                tt_free(&tracker.samples[index].wave);
+        }
         f80_free(tracker.root);tracker.root=NULL;
         return 0;
     }
@@ -2502,10 +2559,30 @@ int main(int argc,char **argv) {
         for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
         return 1;
     }
+    TtEditDoc initial_doc=edit_doc();
+    edit_history=tt_edit_history_new(&initial_doc);
+    if(!edit_history) {
+        fprintf(stderr,"Could not allocate undo history\n");
+        tt_free(&tracker.wave);
+        for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
+        return 1;
+    }
     tt_tracker_message("Default song ready");
     if(argc>1)load_path(argv[1],NULL);
+#ifndef __EMSCRIPTEN__
+    struct termios original_terminal;
+    int restore_terminal=tcgetattr(STDIN_FILENO,&original_terminal)==0;
+#endif
     initscr();cbreak();noecho();keypad(stdscr,TRUE);curs_set(0);f80_colors();
 #ifndef __EMSCRIPTEN__
+    struct termios shortcut_terminal;
+    if(tcgetattr(STDIN_FILENO,&shortcut_terminal)==0) {
+        shortcut_terminal.c_cc[VSUSP]=_POSIX_VDISABLE;
+#ifdef VDSUSP
+        shortcut_terminal.c_cc[VDSUSP]=_POSIX_VDISABLE;
+#endif
+        tcsetattr(STDIN_FILENO,TCSANOW,&shortcut_terminal);
+    }
     define_key("\033[1;5D",KEY_F(60));
     define_key("\033[1;5C",KEY_F(61));
     define_key("\033[5D",KEY_F(60));
@@ -2562,6 +2639,7 @@ int main(int argc,char **argv) {
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__
+    if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);
     fputs("\033[?1002l",stdout);fflush(stdout);
 #endif
     return 0;

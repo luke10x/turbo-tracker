@@ -3,8 +3,8 @@
 ## Goal
 
 Route every change to the song through an event layer. This is a prerequisite for
-undo/redo. This step is a refactor only: behaviour must stay the same, and no
-undo/redo is implemented yet.
+undo/redo. The event refactor keeps behaviour the same; undo/redo now records
+bounded document snapshots after successful edit events.
 
 ## Two event channels
 
@@ -140,3 +140,6 @@ Mark a chunk `[x]` when done.
 - [ ] C9. Final grep check (no direct song writes in turbo_tracker.c) and
       full native TUI smoke test. Mutation grep and launch/play/exit smoke pass;
       interactive checks of every edit dialog remain.
+- [x] C10. Undo/redo: Edit menu and Ctrl+Z/Ctrl+Y, 32 document snapshots,
+      shared WAV buffer ownership, redo invalidation after a new edit, and
+      regression tests for sample deletion and document replacement.

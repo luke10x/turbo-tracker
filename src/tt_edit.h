@@ -24,6 +24,8 @@ typedef struct {
     int *sample_index;
     char *active_loaded_path;
     char *active_csv_path;
+    char *song_path;            /* file association restored with document */
+    int retain_waves;           /* history owns audio buffers across removals */
     char *msg;                  /* result/rejection text */
     int msg_size;
 } TtEditDoc;
@@ -159,6 +161,18 @@ typedef struct {
 /* Apply one song-edit event. Returns 1 when applied, 0 when rejected
    (doc->msg then holds the reason). */
 int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event);
+
+/* Bounded document snapshots. Wave buffers are shared across snapshots and
+   owned by the history until it is destroyed. */
+typedef struct TtEditHistory TtEditHistory;
+TtEditHistory *tt_edit_history_new(const TtEditDoc *doc);
+void tt_edit_history_free(TtEditHistory *history);
+int tt_edit_apply_recorded(TtEditHistory *history,TtEditDoc *doc,
+                           const TtEditEvent *event);
+int tt_edit_undo(TtEditHistory *history,TtEditDoc *doc);
+int tt_edit_redo(TtEditHistory *history,TtEditDoc *doc);
+int tt_edit_can_undo(const TtEditHistory *history);
+int tt_edit_can_redo(const TtEditHistory *history);
 
 /* Reset every cell of a pattern to empty (used to build fresh documents). */
 void tt_edit_clear_pattern(TtPattern *pattern);

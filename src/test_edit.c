@@ -10,7 +10,7 @@ static TtStored samples[TT_SONG_SAMPLES];
 static TtWave wave;
 static TtPhrase phrase;
 static int active_index,sample_count,sample_index;
-static char loaded_path[512],csv_path[256],message[192];
+static char loaded_path[512],csv_path[256],song_path[512],message[192];
 static TtEditDoc doc;
 
 static void setup(void) {
@@ -22,11 +22,13 @@ static void setup(void) {
     sample_count=2;sample_index=0;
     strcpy(samples[1].wave.name,"Two");samples[1].wave.frames=1600;
     tt_phrase_init(&samples[1].phrase,1600);
-    strcpy(loaded_path,"one.wav");csv_path[0]=0;message[0]=0;
+    strcpy(loaded_path,"one.wav");csv_path[0]=0;
+    strcpy(song_path,"old.song");message[0]=0;
     doc=(TtEditDoc){.song=&song,.active=&active,.active_index=&active_index,
         .samples=samples,.active_wave=&wave,.active_phrase=&phrase,
         .sample_count=&sample_count,.sample_index=&sample_index,
         .active_loaded_path=loaded_path,.active_csv_path=csv_path,
+        .song_path=song_path,
         .msg=message,.msg_size=sizeof(message)};
 }
 static int apply(TtEditEvent event) {
@@ -170,6 +172,67 @@ int main(void) {
     assert(apply(e) && sample_count==1 && !strcmp(wave.name,"Replacement"));
     assert(!incoming[0].wave.pcm);
     tt_free(&wave);
-    puts("edit events, rejection, and sample renumbering passed");
+
+    setup();
+    wave.pcm=malloc(sizeof(float));
+    samples[1].wave.pcm=malloc(sizeof(float));
+    assert(wave.pcm && samples[1].wave.pcm);
+    TtWave *original_pcm_owner=&wave;
+    float *original_pcm=original_pcm_owner->pcm;
+    TtEditHistory *history=tt_edit_history_new(&doc);
+    assert(history && !tt_edit_can_undo(history));
+    e=(TtEditEvent){.type=TT_EDIT_CELL_SET};
+    e.cell_set=(TtEditCellSet){0,0,{61,1,0,-1}};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(tt_edit_can_undo(history) && active.cell[0][0].note==61);
+    assert(tt_edit_undo(history,&doc) && active.cell[0][0].note==60);
+    assert(tt_edit_can_redo(history));
+    assert(tt_edit_redo(history,&doc) && active.cell[0][0].note==61);
+    e=(TtEditEvent){.type=TT_EDIT_SAMPLE_SWAP};
+    e.sample.index=0;e.sample.other=1;
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(sample_index==1 && active.cell[0][0].instrument==2);
+    assert(tt_edit_undo(history,&doc));
+    assert(sample_index==0 && active.cell[0][0].instrument==1 && wave.pcm==original_pcm);
+    assert(tt_edit_redo(history,&doc) && sample_index==1);
+    e=(TtEditEvent){.type=TT_EDIT_SAMPLE_DELETE};e.sample.index=1;
+    assert(tt_edit_apply_recorded(history,&doc,&e) && sample_count==1);
+    assert(tt_edit_undo(history,&doc) && sample_count==2);
+    assert(wave.pcm==original_pcm);
+    assert(tt_edit_redo(history,&doc) && sample_count==1);
+    assert(tt_edit_undo(history,&doc) && sample_count==2);
+    e=(TtEditEvent){.type=TT_EDIT_BPM};e.bpm=140;
+    assert(tt_edit_apply_recorded(history,&doc,&e) && song.bpm==140);
+    assert(!tt_edit_can_redo(history));
+    strcpy(song_path,"saved.song");
+    assert(tt_edit_undo(history,&doc) && !strcmp(song_path,"saved.song"));
+    assert(tt_edit_redo(history,&doc) && song.bpm==140);
+    strcpy(song_path,"old.song");
+    TtSong replacement2;tt_song_init(&replacement2);
+    TtStored incoming2[TT_SONG_SAMPLES]={0};
+    incoming2[0].wave.pcm=malloc(sizeof(float));
+    assert(incoming2[0].wave.pcm);
+    incoming2[0].wave.frames=1;incoming2[0].wave.rate=8000;
+    strcpy(incoming2[0].wave.name,"New song");
+    tt_phrase_init(&incoming2[0].phrase,1);
+    e=(TtEditEvent){.type=TT_EDIT_DOCUMENT_REPLACE};
+    e.replacement=(TtEditDocumentReplace){&replacement2,incoming2,1};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    strcpy(song_path,"new.song");
+    assert(!strcmp(wave.name,"New song") && sample_count==1);
+    assert(tt_edit_undo(history,&doc) && sample_count==2);
+    assert(wave.pcm==original_pcm && song.bpm==140 && !strcmp(song_path,"old.song"));
+    assert(tt_edit_redo(history,&doc) && !strcmp(wave.name,"New song"));
+    assert(!strcmp(song_path,"new.song"));
+    for(int i=0;i<35;++i) {
+        e=(TtEditEvent){.type=TT_EDIT_BPM};e.bpm=100+i;
+        assert(tt_edit_apply_recorded(history,&doc,&e));
+    }
+    for(int i=0;i<32;++i)assert(tt_edit_undo(history,&doc));
+    assert(!tt_edit_can_undo(history));
+    for(int i=0;i<32;++i)assert(tt_edit_redo(history,&doc));
+    assert(song.bpm==134);
+    tt_edit_history_free(history);
+    puts("edit events, undo/redo, and sample renumbering passed");
     return 0;
 }

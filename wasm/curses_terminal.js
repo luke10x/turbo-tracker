@@ -73,6 +73,8 @@ function call(name, args) {
   Module.ccall(name, null, args.map(() => 'number'), args);
 }
 function keyCode(event) {
+  if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'z') return 26;
+  if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'y') return 25;
   if (event.key === 'ArrowLeft' && event.ctrlKey) return 1012;
   if (event.key === 'ArrowRight' && event.ctrlKey) return 1013;
   if (event.key === 'ArrowLeft' && event.shiftKey) return 1014;

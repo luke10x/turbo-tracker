@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "tt_edit.h"
 
@@ -255,7 +256,7 @@ static int apply_sample(TtEditDoc *doc,TtEditType type,const TtEditSample *e) {
     }
     if(*doc->sample_count<=1) { reject(doc,"Keep at least one sample");return 0; }
     store_active_sample(doc);
-    tt_free(&doc->samples[e->index].wave);
+    if(!doc->retain_waves)tt_free(&doc->samples[e->index].wave);
     for(int i=e->index;i<*doc->sample_count-1;++i)doc->samples[i]=doc->samples[i+1];
     memset(&doc->samples[--*doc->sample_count],0,sizeof(TtStored));
     int selected=*doc->sample_index;
@@ -335,8 +336,10 @@ static int apply_document_replace(TtEditDoc *doc,const TtEditDocumentReplace *e)
        !doc->active_loaded_path || !doc->active_csv_path) {
         reject(doc,"Invalid song document");return 0;
     }
-    tt_free(doc->active_wave);
-    for(int i=0;i<*doc->sample_count;++i)tt_free(&doc->samples[i].wave);
+    if(!doc->retain_waves) {
+        tt_free(doc->active_wave);
+        for(int i=0;i<*doc->sample_count;++i)tt_free(&doc->samples[i].wave);
+    }
     memset(doc->samples,0,TT_SONG_SAMPLES*sizeof(TtStored));
     *doc->song=*e->song;
     *doc->active_index=0;
@@ -404,4 +407,190 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         reject(doc,"Unknown edit");
         return 0;
     }
+}
+
+/* Snapshots copy the document metadata and pattern bank. Wave PCM and peaks are
+   kept once in an asset pool, so a one-cell edit does not copy audio buffers. */
+enum { TT_EDIT_HISTORY_LIMIT=32 };
+typedef struct {
+    TtSong song;
+    TtPattern active;
+    TtStored samples[TT_SONG_SAMPLES];
+    TtWave wave;
+    TtPhrase phrase;
+    int active_index,sample_count,sample_index,restore_song_path;
+    char loaded_path[512],csv_path[256],song_path[512];
+} TtEditSnapshot;
+struct TtEditHistory {
+    TtEditSnapshot *undo[TT_EDIT_HISTORY_LIMIT],*redo[TT_EDIT_HISTORY_LIMIT];
+    int undo_count,redo_count;
+    TtWave *assets;
+    size_t asset_count,asset_capacity;
+};
+static TtEditSnapshot *snapshot_new(const TtEditDoc *doc) {
+    if(!doc || !doc->song || !doc->active || !doc->active_index ||
+       !doc->samples || !doc->active_wave || !doc->active_phrase ||
+       !doc->sample_count || !doc->sample_index ||
+       !doc->active_loaded_path || !doc->active_csv_path)return NULL;
+    TtEditSnapshot *s=malloc(sizeof(*s));
+    if(!s)return NULL;
+    s->song=*doc->song;s->active=*doc->active;
+    memcpy(s->samples,doc->samples,sizeof(s->samples));
+    s->wave=*doc->active_wave;s->phrase=*doc->active_phrase;
+    s->active_index=*doc->active_index;
+    s->sample_count=*doc->sample_count;s->sample_index=*doc->sample_index;
+    s->restore_song_path=0;
+    snprintf(s->loaded_path,sizeof(s->loaded_path),"%s",doc->active_loaded_path);
+    snprintf(s->csv_path,sizeof(s->csv_path),"%s",doc->active_csv_path);
+    snprintf(s->song_path,sizeof(s->song_path),"%s",doc->song_path?doc->song_path:"");
+    return s;
+}
+static void snapshot_restore(TtEditDoc *doc,const TtEditSnapshot *s) {
+    *doc->song=s->song;*doc->active=s->active;
+    memcpy(doc->samples,s->samples,sizeof(s->samples));
+    *doc->active_wave=s->wave;*doc->active_phrase=s->phrase;
+    *doc->active_index=s->active_index;
+    *doc->sample_count=s->sample_count;*doc->sample_index=s->sample_index;
+    snprintf(doc->active_loaded_path,512,"%s",s->loaded_path);
+    snprintf(doc->active_csv_path,256,"%s",s->csv_path);
+    if(s->restore_song_path && doc->song_path)
+        snprintf(doc->song_path,512,"%s",s->song_path);
+}
+static void stack_clear(TtEditSnapshot **stack,int *count) {
+    for(int i=0;i<*count;++i)free(stack[i]);
+    *count=0;
+}
+static void stack_push(TtEditSnapshot **stack,int *count,TtEditSnapshot *s) {
+    if(*count==TT_EDIT_HISTORY_LIMIT) {
+        free(stack[0]);
+        memmove(stack,stack+1,(TT_EDIT_HISTORY_LIMIT-1)*sizeof(*stack));
+        --*count;
+    }
+    stack[(*count)++]=s;
+}
+static int assets_reserve(TtEditHistory *history,size_t additional) {
+    size_t needed=history->asset_count+additional;
+    if(needed<=history->asset_capacity)return 1;
+    size_t capacity=history->asset_capacity?history->asset_capacity*2:16;
+    while(capacity<needed)capacity*=2;
+    TtWave *assets=realloc(history->assets,capacity*sizeof(*assets));
+    if(!assets)return 0;
+    history->assets=assets;history->asset_capacity=capacity;
+    return 1;
+}
+static void asset_register(TtEditHistory *history,const TtWave *wave) {
+    if(!wave->pcm && !wave->peaks)return;
+    for(size_t i=0;i<history->asset_count;++i)
+        if(history->assets[i].pcm==wave->pcm &&
+           history->assets[i].peaks==wave->peaks)return;
+    history->assets[history->asset_count++]=*wave;
+}
+static void assets_register_document(TtEditHistory *history,const TtEditDoc *doc) {
+    asset_register(history,doc->active_wave);
+    for(int i=0;i<*doc->sample_count;++i)
+        if(i!=*doc->sample_index)asset_register(history,&doc->samples[i].wave);
+}
+static int same_asset(const TtWave *a,const TtWave *b) {
+    return a->pcm==b->pcm && a->peaks==b->peaks;
+}
+static int snapshot_uses_asset(const TtEditSnapshot *s,const TtWave *asset) {
+    if(same_asset(&s->wave,asset))return 1;
+    for(int i=0;i<s->sample_count;++i)
+        if(same_asset(&s->samples[i].wave,asset))return 1;
+    return 0;
+}
+static int document_uses_asset(const TtEditDoc *doc,const TtWave *asset) {
+    if(same_asset(doc->active_wave,asset))return 1;
+    for(int i=0;i<*doc->sample_count;++i)
+        if(same_asset(&doc->samples[i].wave,asset))return 1;
+    return 0;
+}
+static void assets_collect(TtEditHistory *history,const TtEditDoc *doc) {
+    for(size_t i=0;i<history->asset_count;) {
+        TtWave *asset=&history->assets[i];
+        int used=document_uses_asset(doc,asset);
+        for(int j=0;!used && j<history->undo_count;++j)
+            used=snapshot_uses_asset(history->undo[j],asset);
+        for(int j=0;!used && j<history->redo_count;++j)
+            used=snapshot_uses_asset(history->redo[j],asset);
+        if(used) { ++i;continue; }
+        tt_free(asset);
+        --history->asset_count;
+        memmove(asset,asset+1,(history->asset_count-i)*sizeof(*asset));
+    }
+}
+TtEditHistory *tt_edit_history_new(const TtEditDoc *doc) {
+    TtEditHistory *history=calloc(1,sizeof(*history));
+    if(!history)return NULL;
+    if(!doc || !doc->sample_count || !assets_reserve(history,TT_SONG_SAMPLES)) {
+        free(history->assets);free(history);return NULL;
+    }
+    assets_register_document(history,doc);
+    return history;
+}
+void tt_edit_history_free(TtEditHistory *history) {
+    if(!history)return;
+    stack_clear(history->undo,&history->undo_count);
+    stack_clear(history->redo,&history->redo_count);
+    for(size_t i=0;i<history->asset_count;++i)tt_free(&history->assets[i]);
+    free(history->assets);free(history);
+}
+static int recordable(TtEditType type) {
+    return type!=TT_EDIT_NONE && type!=TT_EDIT_PATTERN_SELECT &&
+           type!=TT_EDIT_PATTERN_SYNC && type!=TT_EDIT_SAMPLE_SELECT;
+}
+int tt_edit_apply_recorded(TtEditHistory *history,TtEditDoc *doc,
+                           const TtEditEvent *event) {
+    if(!history)return tt_edit_apply(doc,event);
+    if(!doc || !event)return 0;
+    TtEditSnapshot *before=NULL;
+    if(recordable(event->type)) {
+        before=snapshot_new(doc);
+        if(!before) { reject(doc,"Undo history unavailable");return 0; }
+        before->restore_song_path=event->type==TT_EDIT_DOCUMENT_REPLACE;
+    }
+    if(!assets_reserve(history,TT_SONG_SAMPLES)) {
+        free(before);reject(doc,"Undo history unavailable");return 0;
+    }
+    int old_retain=doc->retain_waves;
+    doc->retain_waves=1;
+    int applied=tt_edit_apply(doc,event);
+    doc->retain_waves=old_retain;
+    if(!applied) { free(before);return 0; }
+    assets_register_document(history,doc);
+    if(before) {
+        stack_push(history->undo,&history->undo_count,before);
+        stack_clear(history->redo,&history->redo_count);
+    }
+    assets_collect(history,doc);
+    return 1;
+}
+int tt_edit_can_undo(const TtEditHistory *history) {
+    return history && history->undo_count>0;
+}
+int tt_edit_can_redo(const TtEditHistory *history) {
+    return history && history->redo_count>0;
+}
+static int history_step(TtEditHistory *history,TtEditDoc *doc,int redo) {
+    if(!history || !(redo?history->redo_count:history->undo_count)) {
+        reject(doc,redo?"Nothing to redo":"Nothing to undo");return 0;
+    }
+    TtEditSnapshot *current=snapshot_new(doc);
+    if(!current) { reject(doc,"Undo history unavailable");return 0; }
+    TtEditSnapshot **source=redo?history->redo:history->undo;
+    int *source_count=redo?&history->redo_count:&history->undo_count;
+    TtEditSnapshot *prior=source[--*source_count];
+    current->restore_song_path=prior->restore_song_path;
+    stack_push(redo?history->undo:history->redo,
+               redo?&history->undo_count:&history->redo_count,current);
+    snapshot_restore(doc,prior);
+    free(prior);
+    assets_collect(history,doc);
+    return 1;
+}
+int tt_edit_undo(TtEditHistory *history,TtEditDoc *doc) {
+    return history_step(history,doc,0);
+}
+int tt_edit_redo(TtEditHistory *history,TtEditDoc *doc) {
+    return history_step(history,doc,1);
 }
