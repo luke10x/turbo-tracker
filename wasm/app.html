@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>F80 example</title>
+  <link rel="stylesheet" href="./vendor/xterm.css">
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #101010; }
+    body { position: absolute; top: 0; left: 0; height: 100dvh;
+      display: flex; flex-direction: column; }
+    #terminal { position: relative; width: 100%; flex: 1; min-height: 0;
+      touch-action: none; -webkit-touch-callout: none; }
+  </style>
+</head>
+<body>
+  <div id="sample-toolbar" hidden><span id="sample-file-status"></span>
+    <input id="sample-file" type="file" accept=".wav,audio/wav,audio/x-wav" hidden>
+    <input id="sample-song-file" type="file" accept=".song,.txt,.wav" multiple hidden></div>
+  <div id="terminal"></div>
+  <script src="./vendor/xterm.js"></script>
+  <script src="./vendor/xterm-addon-fit.js"></script>
+  <script src="./curses_terminal.js?v=mobile-touch-20"></script>
+  <script>
+    const applications = {
+      'examples/buttons': ['F80 buttons', './examples/buttons/buttons.js'],
+      'examples/menu': ['F80 menu', './examples/menu/menu.js'],
+      'examples/statusbar': ['F80 status bar', './examples/statusbar/statusbar.js'],
+      'examples/form': ['F80 form', './examples/form/form.js'],
+      'examples/components/grid': ['F80 scroll grid', './examples/components/grid/grid.js'],
+      'examples/components/auto': ['F80 auto scrollbars', './examples/components/auto/auto.js'],
+      'examples/components/wrap': ['F80 wrapped container', './examples/components/wrap/wrap.js'],
+      'examples/tables/basic': ['F80 basic table', './examples/tables/basic/basic.js'],
+      'examples/tables/countries': ['F80 countries table', './examples/tables/countries/countries.js'],
+      'examples/tables/orders': ['F80 orders table', './examples/tables/orders/orders.js'],
+      'examples/drawing/primitives': ['F80 drawing primitives', './examples/drawing/primitives/primitives.js'],
+      'examples/drawing/figures': ['F80 stick figures', './examples/drawing/figures/figures.js'],
+      'showcases/brokerage': ['F80 widget showcase', './showcases/brokerage/brokerage.js'],
+      'showcases/fm-tracker': ['F80 FM tracker showcase', './showcases/fm-tracker/fm-tracker.js'],
+      'showcases/tracker': ['F80 FM tracker showcase', './showcases/fm-tracker/fm-tracker.js'],
+      'showcases/sample-tracker': ['F80 sample tracker showcase', './showcases/sample-tracker/sample-tracker.js'],
+    };
+    const applicationId = new URLSearchParams(location.search).get('app');
+    window.f80ApplicationId = applicationId;
+    const application = applications[applicationId];
+    if (applicationId === 'showcases/sample-tracker') {
+      document.body.classList.add('sample-tracker');
+      const input = document.getElementById('sample-file');
+      const songInput = document.getElementById('sample-song-file');
+      const status = document.getElementById('sample-file-status');
+      window.f80ChooseWav = () => input.click();
+      window.f80ChooseSong = () => songInput.click();
+      window.f80DownloadSong = filename => {
+        const blob = new Blob([Module.FS.readFile('/sample-tracker-export.song')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        status.textContent = `Saved ${filename}`;
+      };
+      async function loadSampleFile(file) {
+        if (!file) return;
+        if (file.size > 64 * 1024 * 1024) { status.textContent = 'WAV exceeds 64 MB'; return; }
+        status.textContent = `Loading ${file.name}...`;
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          Module.FS.writeFile('/sample-tracker-upload.wav', bytes);
+          Module.FS.writeFile(`/${file.name}`, bytes);
+          const restored = Module.ccall('sample_tracker_recover_wav', 'number', ['string'], [file.name]);
+          const loaded = restored || Module.ccall('sample_tracker_load_wav', 'number', ['string'], [file.name]);
+          status.textContent = loaded ? `${file.name}${restored ? ' restored' : ''}` : `Could not decode ${file.name}`;
+        } catch (error) {
+          status.textContent = `Could not load WAV: ${error.message}`;
+        }
+      }
+      input.addEventListener('change', () => {
+        loadSampleFile(input.files[0]);
+        input.value = '';
+      });
+      songInput.addEventListener('change', async () => {
+        const files = [...songInput.files];
+        songInput.value = '';
+        const song = files.find(file => /\.(song|txt)$/i.test(file.name));
+        if (!song) { status.textContent = 'Choose a .song file and its WAVs'; return; }
+        try {
+          for (const file of files.filter(file => /\.wav$/i.test(file.name))) {
+            if (file.size > 64 * 1024 * 1024) throw new Error(`${file.name} exceeds 64 MB`);
+            Module.FS.writeFile(`/${file.name}`, new Uint8Array(await file.arrayBuffer()));
+            Module.ccall('sample_tracker_recover_wav', 'number', ['string'], [file.name]);
+          }
+          Module.FS.writeFile('/sample-tracker-import.song', new Uint8Array(await song.arrayBuffer()));
+          const loaded = Module.ccall('sample_tracker_load_song', 'number', [], []);
+          status.textContent = loaded ? `Loaded ${song.name}; missing WAVs are marked in red` :
+            `Could not parse ${song.name}`;
+        } catch (error) {
+          status.textContent = `Could not load song: ${error.message}`;
+        }
+      });
+      const terminal = document.getElementById('terminal');
+      terminal.addEventListener('dragover', event => event.preventDefault());
+      terminal.addEventListener('drop', event => {
+        event.preventDefault();
+        loadSampleFile(event.dataTransfer.files[0]);
+      });
+    }
+    if (!application) {
+      term.write('Choose an F80 example from the catalog.');
+    } else {
+      document.title = application[0];
+      const script = document.createElement('script');
+      if (applicationId === 'showcases/sample-tracker') {
+        // The local catalog is rebuilt often; load matching JS and WASM each visit.
+        const revision = Date.now();
+        Module.locateFile = (path, prefix) => `${prefix}${path}?v=${revision}`;
+        script.src = `${application[1]}?v=${revision}`;
+      } else script.src = application[1];
+      document.body.appendChild(script);
+    }
+  </script>
+</body>
+</html>

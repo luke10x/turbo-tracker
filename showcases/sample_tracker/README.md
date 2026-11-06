@@ -1,0 +1,176 @@
+# Sample Tracker showcase
+
+The startup song is [`default.song`](../../default.song), a snapshot of
+`sample-5.song`. It loads four `tgndshtn` WAVs, has 13 patterns and 28 play-order
+entries, and starts at BPM 157 with 16 rows per pattern, 8 rows per beat, and
+12 ticks per row. Its custom sample markers and slices are part of the song.
+
+The tracker has six sample channels, 16 to 256 rows per pattern in steps of 16,
+up to 32 named
+patterns, and up to 128 play-order entries. A pattern may appear repeatedly in
+the order or remain unused. **Song > Settings...** edits BPM (30–300), pattern
+rows (16–256), rows per beat (1–16), and initial ticks per row (1–48). Their
+model defaults are 120, 16, 4, and 12. **Song > Patterns and order...** shows the pattern
+bank and play order side by side on wide screens and stacked on narrow screens.
+Shortening a pattern clears notes beyond its new last row.
+New creates an empty pattern and selects it for editing, Rename changes its
+name, Edit selects an existing pattern in the
+grid, Add inserts it into the order, and Remove/Up/Down edit the order. BPM is a
+song property and can be changed there. Playback starts at the first order
+entry and advances to the next pattern after the configured row count; Loop restarts the
+order at its end. The grid follows the pattern being played while keeping the
+edit row and column separate from the playhead. A new pattern is empty and
+plays silence until it contains notes; the bank marks it `[empty]`.
+Song playback renders a short audio buffer ahead and places ticks at output
+sample frames, so the screen refresh rate does not determine note timing.
+
+To repeat just one pattern, select it for editing and choose **Play > Loop
+current pattern**, or choose PATTERN in the top mode control and press PLAY.
+That starts at row 00 and repeats the selected pattern without advancing
+through the song order. **Play > Start song** returns to the full order. The
+top line has PLAY/PAUSE, STOP, FOLLOW/HOLD, mode, progress, and BPM. FOLLOW
+moves the editor to each playing pattern; HOLD keeps the current edit pattern.
+These are standard F80 buttons, with blank rows above and below for spacing
+and their shadows.
+Space pauses and resumes the current playback mode. **Loop song order** only
+affects full-song playback.
+
+Each cell has a three-character note, two-digit hex instrument, three-letter
+effect alias, and two-digit hex value. `C-401SLC04` is command `S` and plays
+sample slot `01` from marker `0` to marker `4`. `MVL00`–`MVLFF` is command `M`
+and changes the channel volume, including for a slice already playing. A note
+with `RRR40` plays for about twice its normal duration while keeping its pitch;
+`RRR80` is normal and `RRRC0` is about half duration. The stretch setting
+persists on that channel and also works in a table effect slot. It uses short
+overlapping grains, so extreme settings can change the sample's texture. A note
+with `MVLxx` or no effect starts the full sample. Instrument `00` aliases the
+selected sample; `01`–`08` address fixed
+sample slots. Unloaded slots are silent. Older pattern and song files using
+`SLI` and `VOL` still load; saving writes `SLC` and `MVL`.
+Older `RTG` retriggers still load, but new retriggers should use a table note
+and a table jump. For example, put the note at tick `00` and `X00` at tick
+`03` to replay the note every four ticks.
+`SFA` plays backward from marker `F` to marker `A`.
+
+Sixteen ordered markers (`0`–`F`) define fifteen slices. Each slice may inherit
+the sample reference note or override it. **Sampler > Slices...** shows the
+frame range and duration of each interval and edits its base note. Changing
+the sample reference note transposes all slice overrides. **Sampler >
+Manage...** lists loaded samples and their original WAV names. It can rename,
+retune, reorder, and delete samples. Reordering remaps instrument numbers in
+all patterns; deleting clears cells that referenced the removed sample.
+The waveform frame title shows the sample slot and display name.
+
+## Editing
+
+The grid shows cells as `C-4 01 SLC04`. Up/Down selects a row and Left/Right
+moves through note, instrument, effect, and value fields and into adjacent
+channels. On narrow screens, the grid scrolls by field. `Z`–`M` and `Q`–`U`
+enter notes at the selected octave. `[` and `]` change that octave. Type `S` or
+`M` in the effect field to select `SLC` or `MVL`. The same field accepts
+`G I J K N O P R V W`; their current status and byte meanings are in
+[the effect status](../../docs/sample-tracker-effect-status.md). The value stays `..` until
+entered in the value field. F3/F4 change a selected value by 16, and F5/F6 by 1. Delete
+clears a field. Enter auditions the selected cell. Space controls playback.
+F9 opens the menu and F10 exits. Pattern F1/F2 select the previous/next
+pattern. F3–F8 depend on the selected field: note controls octave, semitone,
+order, and clear; instrument controls sample, markers, management, load, and
+clear; effect controls type, MVL, SLC, repeat, and clear; value
+controls steps of 16 or 1, repeat, and clear.
+
+## Tables
+
+**Song > Tables...** opens 16 tables, numbered `00`–`0F`. Each starts at 16
+ticks and can be resized to 256 ticks in steps of 16. Each table has an editable
+name above its unframed blue grid. Horizontal and vertical scrollbars appear
+only when their content overflows; a
+swipe scrolls it, while a one-second hold starts a rectangular selection.
+Shift+arrows extends the selection; F5 copies, F6 cuts, F7 pastes into an
+equally sized selection of the same fields, and F8 clears it.
+A table has one note, one instrument, and six three-character effect slots
+per tick, for example
+`C-4 01 M33 SAF ... ... U05 ...`. Left/Right selects a field; Up/Down selects
+a tick. Tab switches between the table name and grid. Use the note keyboard
+in the note field, hex digits for the instrument,
+and a command letter followed by hex digits in an effect slot. A new command
+shows `..` until its value is entered. Delete
+clears a field. The table buttons switch tables, change length, and close the
+editor; `[`/`]` and `-`/`+` do the same from the keyboard.
+
+Type `T` in a pattern effect field to make `TBLxx`; when that row plays,
+table `xx` starts on that channel. Table notes play on that channel and need
+an explicit instrument number. The default is 12 table ticks per pattern row.
+The six effect slots are processed left to right on each tick.
+Playback handles the per-channel effects listed in the effect status, plus
+`U` note delay, `T` schedule the next table, `X` jump to a table, and `Y`
+jump to a tick in the current table. Song files save timing and pattern length in
+format version 5. Versions 1–3 load with 16 rows, 4 rows per beat, and 12 ticks
+per row; version 1 loads empty 16-tick tables and version 2 gives tables default names.
+The built-in table `00` is available for editing and effect experiments, but
+the sparse default patterns do not invoke it. Tick `00` contains the example
+`C-4 01 M33 SAF ... ... U05 ...`; tick `01` has vibrato, tremolo, and
+auto-pan, and tick `08` has a reverse `SFA` note.
+
+The [grid component](../../include/f80_components.h)
+also powers the catalog's editable grid example. The same component provides
+keyboard navigation, touch selection, and automatic scrollbars. The catalog's
+auto-scrollbar example shows how either bar can make the other necessary. A scrollable
+wrapped container lays out the table editor's buttons and has a separate
+catalog example.
+
+The built-in demo starts with four sparse patterns in play order
+`00 -> 02 -> 01 -> 03` so song follow mode can be tested immediately.
+
+Shift+arrows selects whole channel cells across rows and channels. With a
+mouse or finger, hold still on a grid cell for one second until it turns
+yellow, then drag to extend the rectangle. A quick drag scrolls the grid
+vertically or horizontally. The yellow block selects cells, not individual fields.
+The line above the F-key bar shows selection and clipboard dimensions. In
+selection mode F3/F4 transpose by a semitone, F5 copies, F6 cuts, F7 pastes
+only into an identically sized selection, and F8 clears.
+
+The waveform uses F80's 2×2 drawing renderer. F1/F2 select the previous or
+next sample. F3/F4 or Ctrl+Left/Right select and center the previous or next
+marker. F5/F6 or Shift+Left/Right move the selected marker. F7/F8 or Down/Up
+zoom. Marker and zoom actions center the selected marker as far as the sample
+boundaries permit. Left/Right pans. Type `0`–`F` to select a marker.
+The narrow panel beside the waveform shows play order as `00->00`: order entry
+`00` plays pattern `00`. Select an entry to start song playback there; swipe the
+panel to reach later entries. The grid shows neighboring ordered patterns in
+gray. Tapping their rows cannot change the pattern being edited. Use the
+pattern keys, status bar, or order dialog to switch the editable pattern.
+In song follow mode, the playhead stays near the middle of the grid as the
+ordered patterns advance, reaching the top at the start and bottom at the end.
+A quick horizontal drag pans the waveform. Hold on it for one
+second to select the nearest marker, then drag to move that marker between its
+neighbors. Tab switches waveform and pattern focus. The active pane has a
+white border.
+
+## Song files
+
+**File > Open song...** and **Save song...** use one text `.song` file. The
+versioned file lists BPM, each sample's display and original WAV names, source
+path, frame count, sample reference note, marker frames and slice note offsets,
+then each named pattern's sixteen rows, then the play order. Pattern rows keep
+the compact six-channel format with `|` separators. WAV audio is referenced,
+not embedded. Native saves WAV paths relative to the song file's directory,
+including `../` for parent and sibling folders, and resolves paths from there.
+The built-in demo sample is identified as `builtin:demo` and recreated on load.
+A missing WAV does not block the song. Its cells stay intact but play silently;
+the waveform pane turns red, shows the saved path, and offers Retry. A WAV with
+the same original filename is restored automatically on upload when frame
+count and rate match. A mismatched WAV still blocks loading.
+
+In the browser, choose the `.song` and its referenced WAV files together in
+the Open Song picker. The browser places selected WAVs by filename into its
+virtual filesystem before the C song loader runs. The resulting `.song` uses
+WAV filenames as flat relative paths. Save Song downloads the complete text file.
+The browser cannot read arbitrary local paths without the user selecting the
+WAVs. This also works in the itch.io ZIP build.
+
+The older standalone slice CSV and single-pattern parsers remain in the source
+for compatibility tests; the File menu now loads and saves entire songs.
+
+Build with `make f80-sample-tracker` for the native executable at
+`build/macos/bin/showcase-sample-tracker`, or with
+`make f80-sample-tracker-wasm` for the browser catalog entry.
