@@ -1,4 +1,4 @@
-#include "pattern.h"
+#include "tt_pattern.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -20,18 +20,18 @@ static const char *effect_alias(int effect) {
     case 'W':return "WBL";default:return NULL;
     }
 }
-void sample_cell_text(const SampleCell *cell,char text[11]) {
+void tt_cell_text(const TtCell *cell,char text[11]) {
     static const char digits[]="0123456789ABCDEF";
     memcpy(text,"..........",11);
     if(cell->note>=0) {
-        char note[4];sample_note_name(cell->note,note);
+        char note[4];tt_note_name(cell->note,note);
         memcpy(text,note,3);
     }
     if(cell->instrument>=0 && cell->instrument<=255) {
         text[3]=digits[cell->instrument>>4];
         text[4]=digits[cell->instrument&15];
     }
-    if(cell->effect!=SAMPLE_EFFECT_NONE) {
+    if(cell->effect!=TT_EFFECT_NONE) {
         const char *alias=effect_alias(cell->effect);
         if(!alias)alias="...";
         memcpy(text+5,alias,3);
@@ -44,12 +44,12 @@ void sample_cell_text(const SampleCell *cell,char text[11]) {
 static int parse_note(const char *text) {
     if(!memcmp(text,"...",3))return -1;
     for(int note=0;note<=127;++note) {
-        char name[4];sample_note_name(note,name);
+        char name[4];tt_note_name(note,name);
         if(!memcmp(text,name,3))return note;
     }
     return -2;
 }
-static int parse_cell(const char *text,SampleCell *cell) {
+static int parse_cell(const char *text,TtCell *cell) {
     cell->note=parse_note(text);
     if(cell->note == -2)return 0;
     if(text[3]=='.' && text[4]=='.')cell->instrument=-1;
@@ -59,20 +59,20 @@ static int parse_cell(const char *text,SampleCell *cell) {
         cell->instrument=high*16+low;
     }
     if(!memcmp(text+5,".....",5)) {
-        cell->effect=SAMPLE_EFFECT_NONE;cell->value=-1;
+        cell->effect=TT_EFFECT_NONE;cell->value=-1;
     }
     else {
-        if(!memcmp(text+5,"SLI",3))cell->effect=SAMPLE_EFFECT_S;
-        else if(!memcmp(text+5,"VOL",3))cell->effect=SAMPLE_EFFECT_M;
-        else if(!memcmp(text+5,"RTG",3))cell->effect=SAMPLE_EFFECT_LEGACY_RETRIGGER;
-        else if(!memcmp(text+5,"~ST",3))cell->effect=SAMPLE_EFFECT_STRETCH;
+        if(!memcmp(text+5,"SLI",3))cell->effect=TT_EFFECT_S;
+        else if(!memcmp(text+5,"VOL",3))cell->effect=TT_EFFECT_M;
+        else if(!memcmp(text+5,"RTG",3))cell->effect=TT_EFFECT_LEGACY_RETRIGGER;
+        else if(!memcmp(text+5,"~ST",3))cell->effect=TT_EFFECT_STRETCH;
         else {
-            cell->effect=SAMPLE_EFFECT_NONE;
+            cell->effect=TT_EFFECT_NONE;
             for(const char *commands="GIJKMNOPRSTVW";*commands;++commands) {
                 const char *alias=effect_alias(*commands);
                 if(!memcmp(text+5,alias,3)) { cell->effect=*commands;break; }
             }
-            if(cell->effect==SAMPLE_EFFECT_NONE)return 0;
+            if(cell->effect==TT_EFFECT_NONE)return 0;
         }
         if(text[8]=='.' && text[9]=='.')cell->value=-1;
         else {
@@ -83,29 +83,29 @@ static int parse_cell(const char *text,SampleCell *cell) {
     }
     return 1;
 }
-void sample_pattern_row_text(const SamplePattern *pattern,int row,char text[67]) {
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
+void tt_pattern_row_text(const TtPattern *pattern,int row,char text[67]) {
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
         if(channel)text[channel*11-1]='|';
-        sample_cell_text(&pattern->cell[row][channel],text+channel*11);
+        tt_cell_text(&pattern->cell[row][channel],text+channel*11);
     }
     text[65]=0;
 }
-int sample_pattern_parse_row(const char *text,SamplePattern *pattern,int row) {
-    if(row<0 || row>=SAMPLE_MAX_STEPS || strlen(text)!=65)return 0;
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
+int tt_pattern_parse_row(const char *text,TtPattern *pattern,int row) {
+    if(row<0 || row>=TT_MAX_STEPS || strlen(text)!=65)return 0;
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
         int at=channel*11;
         if(channel && text[at-1]!='|')return 0;
         if(!parse_cell(text+at,&pattern->cell[row][channel]))return 0;
     }
     return 1;
 }
-int sample_pattern_save(const char *path,const SamplePattern *pattern,
+int tt_pattern_save(const char *path,const TtPattern *pattern,
                         char *error,size_t error_size) {
     FILE *file=fopen(path,"w");
     if(!file) { snprintf(error,error_size,"Cannot save pattern: %s",strerror(errno));return 0; }
-    for(int row=0;row<SAMPLE_STEPS;++row) {
-        for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
-            char text[11];sample_cell_text(&pattern->cell[row][channel],text);
+    for(int row=0;row<TT_STEPS;++row) {
+        for(int channel=0;channel<TT_CHANNELS;++channel) {
+            char text[11];tt_cell_text(&pattern->cell[row][channel],text);
             if(channel)fputc('|',file);
             fputs(text,file);
         }
@@ -116,18 +116,18 @@ int sample_pattern_save(const char *path,const SamplePattern *pattern,
     }
     return 1;
 }
-int sample_pattern_load(const char *path,SamplePattern *pattern,
+int tt_pattern_load(const char *path,TtPattern *pattern,
                         char *error,size_t error_size) {
     FILE *file=fopen(path,"r");
     if(!file) { snprintf(error,error_size,"Cannot open pattern: %s",strerror(errno));return 0; }
-    SamplePattern next;
-    sample_pattern_init(&next);
+    TtPattern next;
+    tt_pattern_init(&next);
     char line[128];int row=0,valid=1;
     while(fgets(line,sizeof(line),file)) {
-        if(row>=SAMPLE_STEPS) { valid=0;break; }
+        if(row>=TT_STEPS) { valid=0;break; }
         size_t length=strcspn(line,"\r\n");
-        if(length!=SAMPLE_CHANNELS*10+SAMPLE_CHANNELS-1) { valid=0;break; }
-        for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
+        if(length!=TT_CHANNELS*10+TT_CHANNELS-1) { valid=0;break; }
+        for(int channel=0;channel<TT_CHANNELS;++channel) {
             int at=channel*11;
             if(channel && line[at-1]!='|') { valid=0;break; }
             if(!parse_cell(line+at,&next.cell[row][channel])) { valid=0;break; }
@@ -137,7 +137,7 @@ int sample_pattern_load(const char *path,SamplePattern *pattern,
     }
     if(ferror(file))valid=0;
     fclose(file);
-    if(!valid || row!=SAMPLE_STEPS) {
+    if(!valid || row!=TT_STEPS) {
         snprintf(error,error_size,"Invalid pattern near row %02X",row);return 0;
     }
     *pattern=next;

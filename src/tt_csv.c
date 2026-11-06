@@ -1,4 +1,4 @@
-#include "csv.h"
+#include "tt_csv.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -13,8 +13,8 @@ static void csv_field(FILE *file,const char *value) {
     }
     fputc('"',file);
 }
-int sample_csv_save(const char *path,const SampleWave *wave,
-                    const SamplePhrase *phrase,char *error,size_t error_size) {
+int tt_csv_save(const char *path,const TtWave *wave,
+                    const TtPhrase *phrase,char *error,size_t error_size) {
     FILE *file=fopen(path,"w");
     if(!file) { snprintf(error,error_size,"Cannot save CSV: %s",strerror(errno));return 0; }
     fputs("record,index,value,start,end,base_note,note_offset\nsource_wav,,",file);
@@ -23,14 +23,14 @@ int sample_csv_save(const char *path,const SampleWave *wave,
     csv_field(file,wave->name);
     fprintf(file,",,,,\nsample_frames,,%d,,,,\nreference_note,,%d,,,,\nbpm,,%d,,,,\n",
             wave->frames,phrase->reference_note,phrase->bpm);
-    for(int i=0;i<SAMPLE_MARKERS;++i)
+    for(int i=0;i<TT_MARKERS;++i)
         fprintf(file,"marker,%X,%d,,,,\n",i,phrase->marker[i]);
-    for(int i=0;i<SAMPLE_SLICES;++i) {
+    for(int i=0;i<TT_SLICES;++i) {
         fprintf(file,"slice,%X,,%d,%d,",i,phrase->marker[i],phrase->marker[i+1]);
-        if(phrase->slice_note_offset[i]!=SAMPLE_SLICE_INHERIT)
-            fprintf(file,"%d",sample_slice_base_note(phrase,i));
+        if(phrase->slice_note_offset[i]!=TT_SLICE_INHERIT)
+            fprintf(file,"%d",tt_slice_base_note(phrase,i));
         fputc(',',file);
-        if(phrase->slice_note_offset[i]!=SAMPLE_SLICE_INHERIT)
+        if(phrase->slice_note_offset[i]!=TT_SLICE_INHERIT)
             fprintf(file,"%d",phrase->slice_note_offset[i]);
         fputc('\n',file);
     }
@@ -82,17 +82,17 @@ static int hex_index(const char *text,int *index) {
     else return 0;
     return 1;
 }
-int sample_csv_load(const char *path,SampleWave *wave,
-                    SamplePhrase *phrase,char *error,size_t error_size) {
+int tt_csv_load(const char *path,TtWave *wave,
+                    TtPhrase *phrase,char *error,size_t error_size) {
     FILE *file=fopen(path,"r");
     if(!file) { snprintf(error,error_size,"Cannot open CSV: %s",strerror(errno));return 0; }
-    SamplePhrase next=*phrase;
+    TtPhrase next=*phrase;
     unsigned markers=0,steps=0,slices=0,metadata=0;
     char source[256]={0},sample_name[256]={0},line[1024];
     int source_frames=-1,row=0,valid=1,version=0;
-    int slice_start[SAMPLE_SLICES],slice_end[SAMPLE_SLICES],slice_note[SAMPLE_SLICES];
-    int slice_offset[SAMPLE_SLICES];
-    for(int i=0;i<SAMPLE_SLICES;++i) { slice_note[i]=-1;slice_offset[i]=SAMPLE_SLICE_INHERIT; }
+    int slice_start[TT_SLICES],slice_end[TT_SLICES],slice_note[TT_SLICES];
+    int slice_offset[TT_SLICES];
+    for(int i=0;i<TT_SLICES;++i) { slice_note[i]=-1;slice_offset[i]=TT_SLICE_INHERIT; }
     while(fgets(line,sizeof(line),file)) {
         ++row;
         if(!strchr(line,'\n') && !feof(file)) { valid=0;break; }
@@ -129,7 +129,7 @@ int sample_csv_load(const char *path,SampleWave *wave,
             else if(markers&(1u<<index))valid=0;
             else { next.marker[index]=value;markers|=1u<<index; }
         } else if(version==2 && !strcmp(field[0],"slice")) {
-            if(!hex_index(field[1],&index) || index>=SAMPLE_SLICES ||
+            if(!hex_index(field[1],&index) || index>=TT_SLICES ||
                (slices&(1u<<index)) || !integer(field[3],&slice_start[index]) ||
                !integer(field[4],&slice_end[index]))valid=0;
             else {
@@ -158,12 +158,12 @@ int sample_csv_load(const char *path,SampleWave *wave,
         snprintf(error,error_size,"Load source WAV %s (%d frames) first",source,source_frames);
         return 0;
     }
-    for(int i=1;i<SAMPLE_MARKERS;++i)if(next.marker[i]<next.marker[i-1]) {
+    for(int i=1;i<TT_MARKERS;++i)if(next.marker[i]<next.marker[i-1]) {
         snprintf(error,error_size,"CSV markers must stay in order");return 0;
     }
-    if(version==1)for(int i=0;i<SAMPLE_SLICES;++i)
-        next.slice_note_offset[i]=SAMPLE_SLICE_INHERIT;
-    if(version==2)for(int i=0;i<SAMPLE_SLICES;++i) {
+    if(version==1)for(int i=0;i<TT_SLICES;++i)
+        next.slice_note_offset[i]=TT_SLICE_INHERIT;
+    if(version==2)for(int i=0;i<TT_SLICES;++i) {
         if(slice_start[i]!=next.marker[i] || slice_end[i]!=next.marker[i+1]) {
             snprintf(error,error_size,"Slice %X does not match its markers",i);return 0;
         }

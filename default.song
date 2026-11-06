@@ -4,7 +4,7 @@ ROWS	16
 BEAT_ROWS	8
 TICKS	12
 SAMPLES	4
-SAMPLE	0	tgndshtn-part1.wav	tgndshtn-part1.wav	tgndshtn-part1.wav	34413	44100	60
+SAMPLE	0	tgndshtn-part1.wav	tgndshtn-part1.wav	samples/tgndshtn-part1.wav	34413	44100	60
 MARKER	0	0	0
 MARKER	0	1	3816
 MARKER	0	2	4588
@@ -36,7 +36,7 @@ SLICE	0	11	-1000
 SLICE	0	12	-1000
 SLICE	0	13	-1000
 SLICE	0	14	-1000
-SAMPLE	1	tgndstn-part2.wav	tgndstn-part2.wav	tgndstn-part2.wav	34413	44100	60
+SAMPLE	1	tgndshtn-part2.wav	tgndshtn-part2.wav	samples/tgndshtn-part2.wav	34413	44100	60
 MARKER	1	0	0
 MARKER	1	1	2294
 MARKER	1	2	4588
@@ -68,7 +68,7 @@ SLICE	1	11	-1000
 SLICE	1	12	-1000
 SLICE	1	13	-1000
 SLICE	1	14	-1000
-SAMPLE	2	tgndstn-part3.wav	tgndstn-part3.wav	tgndstn-part3.wav	34413	44100	60
+SAMPLE	2	tgndshtn-part3.wav	tgndshtn-part3.wav	samples/tgndshtn-part3.wav	34413	44100	60
 MARKER	2	0	0
 MARKER	2	1	2294
 MARKER	2	2	4588
@@ -100,7 +100,7 @@ SLICE	2	11	-1000
 SLICE	2	12	-1000
 SLICE	2	13	-1000
 SLICE	2	14	-1000
-SAMPLE	3	tgndstn-part4.wav	tgndstn-part4.wav	tgndstn-part4.wav	34413	44100	60
+SAMPLE	3	tgndshtn-part4.wav	tgndshtn-part4.wav	samples/tgndshtn-part4.wav	34413	44100	60
 MARKER	3	0	0
 MARKER	3	1	2294
 MARKER	3	2	4588

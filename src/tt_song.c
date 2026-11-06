@@ -1,5 +1,5 @@
-#include "song.h"
-#include "pattern.h"
+#include "tt_song.h"
+#include "tt_pattern.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,32 +10,32 @@
 #define PATH_MAX 4096
 #endif
 
-void sample_song_init(SampleSong *song) {
+void tt_song_init(TtSong *song) {
     memset(song,0,sizeof(*song));
-    song->bpm=120;song->pattern_rows=SAMPLE_STEPS;
+    song->bpm=120;song->pattern_rows=TT_STEPS;
     song->rows_per_beat=4;
-    song->ticks_per_row=SAMPLE_TICKS_PER_ROW;
+    song->ticks_per_row=TT_TICKS_PER_ROW;
     song->pattern_count=1;song->order_count=1;
-    for(int pattern=0;pattern<SAMPLE_SONG_PATTERNS;++pattern)
-        for(int row=0;row<SAMPLE_MAX_STEPS;++row)
-            for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+    for(int pattern=0;pattern<TT_SONG_PATTERNS;++pattern)
+        for(int row=0;row<TT_MAX_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel)
                 song->pattern[pattern].cell[row][channel]=
-                    (SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
-    snprintf(song->name[0],SAMPLE_SONG_NAME,"Pattern 00");
-    sample_pattern_init(&song->pattern[0]);
-    for(int table=0;table<SAMPLE_SONG_TABLES;++table) {
-        snprintf(song->table[table].name,SAMPLE_SONG_NAME,"Table %02X",table);
-        song->table[table].length=SAMPLE_TABLE_MIN_TICKS;
-        for(int tick=0;tick<SAMPLE_TABLE_MAX_TICKS;++tick) {
+                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
+    snprintf(song->name[0],TT_SONG_NAME,"Pattern 00");
+    tt_pattern_init(&song->pattern[0]);
+    for(int table=0;table<TT_SONG_TABLES;++table) {
+        snprintf(song->table[table].name,TT_SONG_NAME,"Table %02X",table);
+        song->table[table].length=TT_TABLE_MIN_TICKS;
+        for(int tick=0;tick<TT_TABLE_MAX_TICKS;++tick) {
             song->table[table].tick[tick].note=-1;
             song->table[table].tick[tick].instrument=-1;
-            for(int effect=0;effect<SAMPLE_TABLE_EFFECTS;++effect)
+            for(int effect=0;effect<TT_TABLE_EFFECTS;++effect)
                 song->table[table].tick[tick].effect[effect].value=-1;
         }
     }
 }
-void sample_song_make_demo(SampleSong *song) {
-    sample_song_init(song);
+void tt_song_make_demo(TtSong *song) {
+    tt_song_init(song);
     song->bpm=112;
     song->pattern_count=4;
     song->order_count=4;
@@ -44,25 +44,25 @@ void sample_song_make_demo(SampleSong *song) {
     const char *names[]={"tgndshtn part 1","tgndshtn part 2",
                          "tgndshtn part 3","tgndshtn part 4"};
     for(int pattern=0;pattern<4;++pattern) {
-        snprintf(song->name[pattern],SAMPLE_SONG_NAME,"%s",names[pattern]);
-        for(int row=0;row<SAMPLE_STEPS;++row)
-            for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+        snprintf(song->name[pattern],TT_SONG_NAME,"%s",names[pattern]);
+        for(int row=0;row<TT_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel)
                 song->pattern[pattern].cell[row][channel]=
-                    (SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
         song->pattern[pattern].cell[0][0]=
-            (SampleCell){60,pattern+1,SAMPLE_EFFECT_NONE,-1};
+            (TtCell){60,pattern+1,TT_EFFECT_NONE,-1};
     }
-    SampleTableTick *demo=&song->table[0].tick[0];
+    TtTableTick *demo=&song->table[0].tick[0];
     demo->note=60;demo->instrument=1;
-    demo->effect[0]=(SampleTableEffect){'M',0x33};
-    demo->effect[1]=(SampleTableEffect){'S',0xaf};
-    demo->effect[4]=(SampleTableEffect){'U',0x05};
-    song->table[0].tick[1].effect[0]=(SampleTableEffect){'V',0x43};
-    song->table[0].tick[1].effect[1]=(SampleTableEffect){'W',0x34};
-    song->table[0].tick[1].effect[2]=(SampleTableEffect){'N',0x37};
+    demo->effect[0]=(TtTableEffect){'M',0x33};
+    demo->effect[1]=(TtTableEffect){'S',0xaf};
+    demo->effect[4]=(TtTableEffect){'U',0x05};
+    song->table[0].tick[1].effect[0]=(TtTableEffect){'V',0x43};
+    song->table[0].tick[1].effect[1]=(TtTableEffect){'W',0x34};
+    song->table[0].tick[1].effect[2]=(TtTableEffect){'N',0x37};
     demo=&song->table[0].tick[8];
     demo->note=64;demo->instrument=1;
-    demo->effect[0]=(SampleTableEffect){'S',0xfa};
+    demo->effect[0]=(TtTableEffect){'S',0xfa};
 }
 static int hex(int c) {
     if(c>='0' && c<='9')return c-'0';
@@ -113,7 +113,7 @@ static int fields(FILE *file,char *line,size_t cap,char **part,int count) {
     }
     return found==count;
 }
-static void saved_path(const char *song_path,const SampleSongSample *sample,
+static void saved_path(const char *song_path,const TtSongSample *sample,
                        char out[512]) {
     const char *source=sample->path;
     if(!strcmp(source,"builtin:demo") || source[0]!='/') {
@@ -160,7 +160,7 @@ static void saved_path(const char *song_path,const SampleSongSample *sample,
     else relative[0]=0;
     snprintf(out,512,"%s",relative[0]?relative:source);
 }
-int sample_song_resolve_path(const char *song_path,const char *saved,
+int tt_song_resolve_path(const char *song_path,const char *saved,
                              char *resolved,size_t size) {
     if(!strcmp(saved,"builtin:demo") || saved[0]=='/')
         return snprintf(resolved,size,"%s",saved)<(int)size;
@@ -175,17 +175,17 @@ int sample_song_resolve_path(const char *song_path,const char *saved,
     if(!slash)return snprintf(resolved,size,"%s",saved)<(int)size;
     return snprintf(resolved,size,"%.*s/%s",(int)(slash-song_path),song_path,saved)<(int)size;
 }
-int sample_song_save(const char *path,const SampleSong *song,
-                     const SampleSongSample *samples,int sample_count,
+int tt_song_save(const char *path,const TtSong *song,
+                     const TtSongSample *samples,int sample_count,
                      char *error,size_t error_size) {
-    if(sample_count<1 || sample_count>SAMPLE_SONG_SAMPLES ||
-       song->pattern_count<1 || song->pattern_count>SAMPLE_SONG_PATTERNS ||
-       song->order_count<1 || song->order_count>SAMPLE_SONG_ORDER ||
+    if(sample_count<1 || sample_count>TT_SONG_SAMPLES ||
+       song->pattern_count<1 || song->pattern_count>TT_SONG_PATTERNS ||
+       song->order_count<1 || song->order_count>TT_SONG_ORDER ||
        song->bpm<30 || song->bpm>300 ||
-       song->pattern_rows<16 || song->pattern_rows>SAMPLE_MAX_STEPS ||
+       song->pattern_rows<16 || song->pattern_rows>TT_MAX_STEPS ||
        song->pattern_rows%16 || song->rows_per_beat<1 ||
        song->rows_per_beat>16 || song->ticks_per_row<1 ||
-       song->ticks_per_row>SAMPLE_MAX_TICKS_PER_ROW) {
+       song->ticks_per_row>TT_MAX_TICKS_PER_ROW) {
         snprintf(error,error_size,"Invalid song counts or BPM");return 0;
     }
     FILE *file=fopen(path,"w");
@@ -203,10 +203,10 @@ int sample_song_save(const char *path,const SampleSong *song,
         fprintf(file,"SAMPLE\t%d\t%s\t%s\t%s\t%d\t%d\t%d\n",
                 i,name,source,path_text,samples[i].frames,samples[i].rate,
                 samples[i].phrase.reference_note);
-        for(int marker=0;marker<SAMPLE_MARKERS;++marker)
+        for(int marker=0;marker<TT_MARKERS;++marker)
             fprintf(file,"MARKER\t%d\t%d\t%d\n",i,marker,
                     samples[i].phrase.marker[marker]);
-        for(int slice=0;slice<SAMPLE_SLICES;++slice)
+        for(int slice=0;slice<TT_SLICES;++slice)
             fprintf(file,"SLICE\t%d\t%d\t%d\n",i,slice,
                     samples[i].phrase.slice_note_offset[slice]);
     }
@@ -215,7 +215,7 @@ int sample_song_save(const char *path,const SampleSong *song,
         char name[192];if(!encode(song->name[i],name,sizeof(name))) { valid=0;break; }
         fprintf(file,"PATTERN\t%d\t%s\n",i,name);
         for(int row=0;row<song->pattern_rows;++row) {
-            char text[67];sample_pattern_row_text(&song->pattern[i],row,text);
+            char text[67];tt_pattern_row_text(&song->pattern[i],row,text);
             fprintf(file,"ROW\t%d\t%s\n",row,text);
         }
     }
@@ -224,21 +224,21 @@ int sample_song_save(const char *path,const SampleSong *song,
         if(song->order[i]>=song->pattern_count)valid=0;
         fprintf(file,"AT\t%d\t%d\n",i,song->order[i]);
     }
-    fprintf(file,"TABLES\t%d\n",SAMPLE_SONG_TABLES);
-    for(int table=0;table<SAMPLE_SONG_TABLES;++table) {
-        const SampleTable *t=&song->table[table];
-        char name[3*SAMPLE_SONG_NAME];
+    fprintf(file,"TABLES\t%d\n",TT_SONG_TABLES);
+    for(int table=0;table<TT_SONG_TABLES;++table) {
+        const TtTable *t=&song->table[table];
+        char name[3*TT_SONG_NAME];
         if(!t->name[0] || !encode(t->name,name,sizeof(name)))valid=0;
-        if(t->length<SAMPLE_TABLE_MIN_TICKS || t->length>SAMPLE_TABLE_MAX_TICKS ||
-           t->length%SAMPLE_TABLE_MIN_TICKS)valid=0;
+        if(t->length<TT_TABLE_MIN_TICKS || t->length>TT_TABLE_MAX_TICKS ||
+           t->length%TT_TABLE_MIN_TICKS)valid=0;
         fprintf(file,"TABLE\t%d\t%d\t%s\n",table,t->length,valid?name:"");
-        for(int tick=0;tick<t->length && tick<SAMPLE_TABLE_MAX_TICKS;++tick) {
-            const SampleTableTick *entry=&song->table[table].tick[tick];
+        for(int tick=0;tick<t->length && tick<TT_TABLE_MAX_TICKS;++tick) {
+            const TtTableTick *entry=&song->table[table].tick[tick];
             if(entry->note < -1 || entry->note>127 ||
                entry->instrument < -1 || entry->instrument>255)valid=0;
             fprintf(file,"TICK\t%d\t%d\t%d",tick,entry->note,entry->instrument);
-            for(int effect=0;effect<SAMPLE_TABLE_EFFECTS;++effect) {
-                const SampleTableEffect *fx=&entry->effect[effect];
+            for(int effect=0;effect<TT_TABLE_EFFECTS;++effect) {
+                const TtTableEffect *fx=&entry->effect[effect];
                 if(!fx->command)fputs("\t...",file);
                 else {
                     if((fx->command<'G' || fx->command>'Z') && fx->command!='r')
@@ -258,13 +258,13 @@ int sample_song_save(const char *path,const SampleSong *song,
     }
     return 1;
 }
-int sample_song_load(const char *path,SampleSong *song,
-                     SampleSongSample *samples,int *sample_count,
+int tt_song_load(const char *path,TtSong *song,
+                     TtSongSample *samples,int *sample_count,
                      char *error,size_t error_size) {
     FILE *file=fopen(path,"r");
     if(!file) { snprintf(error,error_size,"Cannot open song: %s",strerror(errno));return 0; }
-    SampleSong *next=calloc(1,sizeof(*next));
-    SampleSongSample *source=calloc(SAMPLE_SONG_SAMPLES,sizeof(*source));
+    TtSong *next=calloc(1,sizeof(*next));
+    TtSongSample *source=calloc(TT_SONG_SAMPLES,sizeof(*source));
     if(!next || !source) {
         free(next);free(source);fclose(file);
         snprintf(error,error_size,"Out of memory loading song");return 0;
@@ -278,105 +278,105 @@ int sample_song_load(const char *path,SampleSong *song,
     else if(!strcmp(field[1],"4"))version=4;
     else if(!strcmp(field[1],"5"))version=5;
     else valid=0;
-    next->pattern_rows=SAMPLE_STEPS;
+    next->pattern_rows=TT_STEPS;
     next->rows_per_beat=4;
-    next->ticks_per_row=SAMPLE_TICKS_PER_ROW;
+    next->ticks_per_row=TT_TICKS_PER_ROW;
     if(valid && (!READ(2) || strcmp(field[0],"BPM") ||
                  !integer(field[1],30,300,&next->bpm)))valid=0;
     if(valid && version>=4 && (!READ(2) || strcmp(field[0],"ROWS") ||
-                 !integer(field[1],16,SAMPLE_MAX_STEPS,&next->pattern_rows) ||
+                 !integer(field[1],16,TT_MAX_STEPS,&next->pattern_rows) ||
                  next->pattern_rows%16))valid=0;
     if(valid && version>=4 && (!READ(2) || strcmp(field[0],"BEAT_ROWS") ||
                  !integer(field[1],1,16,&next->rows_per_beat)))valid=0;
     if(valid && version>=4 && (!READ(2) || strcmp(field[0],"TICKS") ||
-                 !integer(field[1],1,SAMPLE_MAX_TICKS_PER_ROW,&next->ticks_per_row)))valid=0;
+                 !integer(field[1],1,TT_MAX_TICKS_PER_ROW,&next->ticks_per_row)))valid=0;
     if(valid && (!READ(2) || strcmp(field[0],"SAMPLES") ||
-                 !integer(field[1],1,SAMPLE_SONG_SAMPLES,&count)))valid=0;
+                 !integer(field[1],1,TT_SONG_SAMPLES,&count)))valid=0;
     for(int i=0;i<count && valid;++i) {
-        SampleSongSample *s=&source[i];
+        TtSongSample *s=&source[i];
         if(!READ(8) || strcmp(field[0],"SAMPLE") ||
            !integer(field[1],i,i,&number) ||
            !decode(field[2],s->name,sizeof(s->name)) || !s->name[0] ||
            !decode(field[3],s->source_name,sizeof(s->source_name)) || !s->source_name[0] ||
            !decode(field[4],s->path,sizeof(s->path)) || !s->path[0] ||
-           !integer(field[5],1,SAMPLE_MAX_FRAMES,&s->frames) ||
+           !integer(field[5],1,TT_MAX_FRAMES,&s->frames) ||
            !integer(field[6],1,384000,&s->rate) ||
            !integer(field[7],0,127,&s->phrase.reference_note)) { valid=0;break; }
         s->phrase.bpm=next->bpm;
-        for(int marker=0;marker<SAMPLE_MARKERS && valid;++marker) {
+        for(int marker=0;marker<TT_MARKERS && valid;++marker) {
             if(!READ(4) || strcmp(field[0],"MARKER") ||
                !integer(field[1],i,i,&number) ||
                !integer(field[2],marker,marker,&number) ||
                !integer(field[3],0,s->frames,&s->phrase.marker[marker]))valid=0;
         }
-        for(int marker=1;marker<SAMPLE_MARKERS;++marker)
+        for(int marker=1;marker<TT_MARKERS;++marker)
             if(s->phrase.marker[marker]<s->phrase.marker[marker-1])valid=0;
-        for(int slice=0;slice<SAMPLE_SLICES && valid;++slice) {
+        for(int slice=0;slice<TT_SLICES && valid;++slice) {
             if(!READ(4) || strcmp(field[0],"SLICE") ||
                !integer(field[1],i,i,&number) ||
                !integer(field[2],slice,slice,&number)) { valid=0;break; }
             if(!strcmp(field[3],"-1000"))
-                s->phrase.slice_note_offset[slice]=SAMPLE_SLICE_INHERIT;
+                s->phrase.slice_note_offset[slice]=TT_SLICE_INHERIT;
             else if(!integer(field[3],-127,127,&s->phrase.slice_note_offset[slice]))valid=0;
         }
     }
     if(valid && (!READ(2) || strcmp(field[0],"PATTERNS") ||
-                 !integer(field[1],1,SAMPLE_SONG_PATTERNS,&next->pattern_count)))valid=0;
+                 !integer(field[1],1,TT_SONG_PATTERNS,&next->pattern_count)))valid=0;
     for(int i=0;i<next->pattern_count && valid;++i) {
-        for(int row=0;row<SAMPLE_MAX_STEPS;++row)
-            for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+        for(int row=0;row<TT_MAX_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel)
                 next->pattern[i].cell[row][channel]=
-                    (SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
         if(!READ(3) || strcmp(field[0],"PATTERN") ||
            !integer(field[1],i,i,&number) ||
-           !decode(field[2],next->name[i],SAMPLE_SONG_NAME) || !next->name[i][0])valid=0;
+           !decode(field[2],next->name[i],TT_SONG_NAME) || !next->name[i][0])valid=0;
         for(int row=0;row<next->pattern_rows && valid;++row) {
             if(!READ(3) || strcmp(field[0],"ROW") ||
                !integer(field[1],row,row,&number) ||
-               !sample_pattern_parse_row(field[2],&next->pattern[i],row))valid=0;
+               !tt_pattern_parse_row(field[2],&next->pattern[i],row))valid=0;
         }
     }
     if(valid && (!READ(2) || strcmp(field[0],"ORDER") ||
-                 !integer(field[1],1,SAMPLE_SONG_ORDER,&next->order_count)))valid=0;
+                 !integer(field[1],1,TT_SONG_ORDER,&next->order_count)))valid=0;
     for(int i=0;i<next->order_count && valid;++i) {
         if(!READ(3) || strcmp(field[0],"AT") ||
            !integer(field[1],i,i,&number) ||
            !integer(field[2],0,next->pattern_count-1,&number))valid=0;
         else next->order[i]=(unsigned char)number;
     }
-    for(int table=0;table<SAMPLE_SONG_TABLES;++table) {
-        snprintf(next->table[table].name,SAMPLE_SONG_NAME,"Table %02X",table);
-        next->table[table].length=SAMPLE_TABLE_MIN_TICKS;
-        for(int tick=0;tick<SAMPLE_TABLE_MAX_TICKS;++tick) {
+    for(int table=0;table<TT_SONG_TABLES;++table) {
+        snprintf(next->table[table].name,TT_SONG_NAME,"Table %02X",table);
+        next->table[table].length=TT_TABLE_MIN_TICKS;
+        for(int tick=0;tick<TT_TABLE_MAX_TICKS;++tick) {
             next->table[table].tick[tick].note=-1;
             next->table[table].tick[tick].instrument=-1;
-            for(int effect=0;effect<SAMPLE_TABLE_EFFECTS;++effect)
+            for(int effect=0;effect<TT_TABLE_EFFECTS;++effect)
                 next->table[table].tick[tick].effect[effect].value=-1;
         }
     }
     if(valid && version>=2) {
         if(!READ(2) || strcmp(field[0],"TABLES") ||
-           !integer(field[1],SAMPLE_SONG_TABLES,SAMPLE_SONG_TABLES,&number))valid=0;
-        for(int table=0;table<SAMPLE_SONG_TABLES && valid;++table) {
+           !integer(field[1],TT_SONG_TABLES,TT_SONG_TABLES,&number))valid=0;
+        for(int table=0;table<TT_SONG_TABLES && valid;++table) {
             int length=0;
             if(!READ(version>=3?4:3) || strcmp(field[0],"TABLE") ||
                !integer(field[1],table,table,&number) ||
-               !integer(field[2],SAMPLE_TABLE_MIN_TICKS,SAMPLE_TABLE_MAX_TICKS,&length) ||
-               length%SAMPLE_TABLE_MIN_TICKS) { valid=0;break; }
+               !integer(field[2],TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS,&length) ||
+               length%TT_TABLE_MIN_TICKS) { valid=0;break; }
             if(version>=3 && (!decode(field[3],next->table[table].name,
-                                      SAMPLE_SONG_NAME) || !next->table[table].name[0])) {
+                                      TT_SONG_NAME) || !next->table[table].name[0])) {
                 valid=0;break;
             }
             next->table[table].length=length;
             for(int tick=0;tick<length && valid;++tick) {
-                SampleTableTick *entry=&next->table[table].tick[tick];
+                TtTableTick *entry=&next->table[table].tick[tick];
                 if(!READ(10) || strcmp(field[0],"TICK") ||
                    !integer(field[1],tick,tick,&number) ||
                    !integer(field[2],-1,127,&entry->note) ||
                    !integer(field[3],-1,255,&entry->instrument)) { valid=0;break; }
-                for(int effect=0;effect<SAMPLE_TABLE_EFFECTS;++effect) {
+                for(int effect=0;effect<TT_TABLE_EFFECTS;++effect) {
                     const char *token=field[4+effect];
-                    SampleTableEffect *fx=&entry->effect[effect];
+                    TtTableEffect *fx=&entry->effect[effect];
                     if(!strcmp(token,"..."))continue;
                     if(strlen(token)!=3 ||
                        ((token[0]<'G' || token[0]>'Z') &&

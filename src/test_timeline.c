@@ -1,26 +1,26 @@
-#define main sample_tracker_application_main
-#include "showcase.c"
+#define main tt_tracker_application_main
+#include "turbo_tracker.c"
 #undef main
 #include <assert.h>
 
 int main(void) {
-    SampleSong demo;
-    sample_song_make_demo(&demo);
+    TtSong demo;
+    tt_song_make_demo(&demo);
     assert(demo.pattern_count==4 && demo.order_count==4);
     assert(demo.order[0]==0 && demo.order[1]==2 &&
            demo.order[2]==1 && demo.order[3]==3);
     for(int pattern=0;pattern<4;++pattern) {
         int filled=0;
-        for(int row=0;row<SAMPLE_STEPS;++row)
-            for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+        for(int row=0;row<TT_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel)
                 filled+=demo.pattern[pattern].cell[row][channel].note>=0;
         assert(filled==1);
-        const SampleCell *one=&demo.pattern[pattern].cell[0][0];
+        const TtCell *one=&demo.pattern[pattern].cell[0][0];
         assert(one->note==60 && one->instrument==pattern+1 &&
-               one->effect==SAMPLE_EFFECT_NONE);
+               one->effect==TT_EFFECT_NONE);
     }
-    assert(memcmp(&demo.pattern[0],&demo.pattern[1],sizeof(SamplePattern))!=0);
-    assert(memcmp(&demo.pattern[1],&demo.pattern[2],sizeof(SamplePattern))!=0);
+    assert(memcmp(&demo.pattern[0],&demo.pattern[1],sizeof(TtPattern))!=0);
+    assert(memcmp(&demo.pattern[1],&demo.pattern[2],sizeof(TtPattern))!=0);
     assert(demo.table[0].length==16);
     assert(demo.table[0].tick[0].effect[0].command=='M');
     assert(demo.table[0].tick[1].effect[0].command=='V' &&
@@ -34,23 +34,23 @@ int main(void) {
            tracker.song.rows_per_beat==8 && tracker.song.ticks_per_row==12);
     assert(tracker.song.order[27]==12 && tracker.phrase.marker[1]==3816);
     int first=-1,last=-1;
-    assert(sample_cell_range(&tracker.phrase,&tracker.song.pattern[0].cell[0][0],
+    assert(tt_cell_range(&tracker.phrase,&tracker.song.pattern[0].cell[0][0],
                              tracker.wave.frames,&first,&last));
     assert(first==0 && last==tracker.phrase.marker[8]);
     for(int i=0;i<4;++i) {
-        SampleWave *wave=i?&tracker.samples[i].wave:&tracker.wave;
+        TtWave *wave=i?&tracker.samples[i].wave:&tracker.wave;
         assert(wave->pcm && wave->frames==34413 && wave->rate==44100);
-        sample_free(wave);
+        tt_free(wave);
     }
 
     memset(&tracker,0,sizeof(tracker));
-    sample_song_init(&tracker.song);
+    tt_song_init(&tracker.song);
     tracker.tick_remainder=0;
     int minute_frames=0;
     const int tick_divisor=112*4*12;
     for(int tick=0;tick<tick_divisor;++tick)
         minute_frames+=next_tick_frames(tick_divisor);
-    assert(minute_frames==SAMPLE_AUDIO_OUTPUT_RATE*60 && tracker.tick_remainder==0);
+    assert(minute_frames==TT_AUDIO_OUTPUT_RATE*60 && tracker.tick_remainder==0);
     table_resize(NULL,(void *)(long)1);
     assert(tracker.song.table[0].length==32);
     for(int i=0;i<20;++i)table_resize(NULL,(void *)(long)1);
@@ -58,7 +58,7 @@ int main(void) {
     for(int i=0;i<20;++i)table_resize(NULL,(void *)(long)-1);
     assert(tracker.song.table[0].length==16);
     tracker.song.pattern_count=2;
-    sample_pattern_init(&tracker.song.pattern[1]);
+    tt_pattern_init(&tracker.song.pattern[1]);
     empty_pattern(&tracker.song.pattern[0]);
     empty_pattern(&tracker.song.pattern[1]);
     tracker.song.order_count=3;
@@ -70,21 +70,21 @@ int main(void) {
     tracker.focus=FOCUS_PHRASE;
     tracker.entry_octave=4;
     tracker.step=0;tracker.channel=1;tracker.field=0;
-    SampleCell *note_entry=&tracker.pattern.cell[0][1];
+    TtCell *note_entry=&tracker.pattern.cell[0][1];
     assert(note_entry->note<0 && note_entry->instrument<0 &&
-           note_entry->effect==SAMPLE_EFFECT_NONE);
+           note_entry->effect==TT_EFFECT_NONE);
     handle_key('c');
     assert(note_entry->note==64 && note_entry->instrument<0 &&
-           note_entry->effect==SAMPLE_EFFECT_NONE && note_entry->value<0);
+           note_entry->effect==TT_EFFECT_NONE && note_entry->value<0);
     note_entry->instrument=1;
-    note_entry->effect=SAMPLE_EFFECT_M;note_entry->value=0x40;
+    note_entry->effect=TT_EFFECT_M;note_entry->value=0x40;
     handle_key('x');
-    assert(note_entry->instrument==1 && note_entry->effect==SAMPLE_EFFECT_M &&
+    assert(note_entry->instrument==1 && note_entry->effect==TT_EFFECT_M &&
            note_entry->value==0x40);
     tracker.channel=2;tracker.field=2;
-    SampleCell *effect_entry=&tracker.pattern.cell[0][2];
+    TtCell *effect_entry=&tracker.pattern.cell[0][2];
     handle_key('s');
-    assert(effect_entry->effect==SAMPLE_EFFECT_S && effect_entry->value==-1);
+    assert(effect_entry->effect==TT_EFFECT_S && effect_entry->value==-1);
     tracker.field=3;handle_key('4');
     assert(effect_entry->value==4);
     tracker.follow=1;
@@ -98,9 +98,9 @@ int main(void) {
     F80Widget setting={0};
     snprintf(setting.input,sizeof(setting.input),"32");
     int value=0;
-    assert(setting_number(&setting,16,SAMPLE_MAX_STEPS,&value) && value==32);
+    assert(setting_number(&setting,16,TT_MAX_STEPS,&value) && value==32);
     snprintf(setting.input,sizeof(setting.input),"32x");
-    assert(!setting_number(&setting,16,SAMPLE_MAX_STEPS,&value));
+    assert(!setting_number(&setting,16,TT_MAX_STEPS,&value));
     tracker.song.pattern_rows=32;
     assert(grid_total_rows()==96);
     assert(grid_pattern_for_row(32)==1 && grid_pattern_for_row(64)==0);
@@ -148,13 +148,13 @@ int main(void) {
     select_edit_pattern(1);
     assert(tracker.pattern_index==1 && tracker.edit_order==1);
     assert(tracker.phrase_scroll==16);
-    tracker.pattern.cell[0][0]=(SampleCell){-1,-1,SAMPLE_EFFECT_T,0};
+    tracker.pattern.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0};
     tracker.play_mode=PLAY_PATTERN;tracker.loop_pattern_index=1;
     tracker.song.table[0].tick[0].note=60;
     tracker.song.table[0].tick[0].instrument=1;
-    tracker.song.table[0].tick[0].effect[0]=(SampleTableEffect){'M',0x33};
-    tracker.song.table[0].tick[0].effect[1]=(SampleTableEffect){'U',2};
-    tracker.song.table[0].tick[1].effect[0]=(SampleTableEffect){'X',1};
+    tracker.song.table[0].tick[0].effect[0]=(TtTableEffect){'M',0x33};
+    tracker.song.table[0].tick[0].effect[1]=(TtTableEffect){'U',2};
+    tracker.song.table[0].tick[1].effect[0]=(TtTableEffect){'X',1};
     play_row(0);
     assert(tracker.table_voice[0].active && tracker.table_voice[0].table==0);
     play_table_ticks();
@@ -192,23 +192,23 @@ int main(void) {
     assert(tracker.song.table[0].tick[3].effect[0].command=='X');
     tracker.play_mode=PLAY_PATTERN;
     tracker.loop_pattern_index=tracker.pattern_index;
-    tracker.pattern.cell[0][5]=(SampleCell){-1,-1,SAMPLE_EFFECT_P,0};
+    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0};
     play_row(0);
-    assert(sample_audio_pan(5)==0);
-    tracker.song.table[0].tick[6].effect[0]=(SampleTableEffect){'P',255};
+    assert(tt_audio_pan(5)==0);
+    tracker.song.table[0].tick[6].effect[0]=(TtTableEffect){'P',255};
     tracker.table_voice[5]=(TableVoice){.active=1,.table=0,.tick=6,.next_table=-1};
     play_table_ticks();
-    assert(sample_audio_pan(5)==1);
-    tracker.pattern.cell[0][5]=(SampleCell){-1,-1,SAMPLE_EFFECT_STRETCH,0x40};
+    assert(tt_audio_pan(5)==1);
+    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_STRETCH,0x40};
     play_row(0);
-    assert(fabs(sample_audio_stretch(5)-2)<1e-10);
-    tracker.song.table[0].tick[7].effect[0]=(SampleTableEffect){'R',0xc0};
+    assert(fabs(tt_audio_stretch(5)-2)<1e-10);
+    tracker.song.table[0].tick[7].effect[0]=(TtTableEffect){'R',0xc0};
     tracker.table_voice[5]=(TableVoice){.active=1,.table=0,.tick=7,.next_table=-1};
     play_table_ticks();
-    assert(fabs(sample_audio_stretch(5)-.5)<1e-10);
+    assert(fabs(tt_audio_stretch(5)-.5)<1e-10);
     float silent[1600]={0};
     tracker.wave.pcm=silent;tracker.wave.frames=1600;tracker.wave.rate=44100;
-    sample_phrase_init(&tracker.phrase,tracker.wave.frames);
+    tt_phrase_init(&tracker.phrase,tracker.wave.frames);
     wave.rect=f80_rect(0,1,80,8);
     tracker.marker=0;
     int marker_x=wave_x_from_frame(tracker.phrase.marker[5],wave.rect.w*2)/2;

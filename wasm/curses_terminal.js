@@ -25,10 +25,10 @@ if (touchKeyboard) {
 
 function inputAt(x, y) {
   const editableRects = [...(Module.f80InputRects || [])];
-  const grid = window.f80ApplicationId === 'showcases/sample-tracker' ?
+  const grid = window.f80ApplicationId === 'turbo-tracker' ?
     Module.f80EditableGridRect : Module.f80GridRect;
   if (grid) editableRects.push(grid);
-  if (window.f80ApplicationId === 'showcases/sample-tracker' && Module.f80TableRect)
+  if (window.f80ApplicationId === 'turbo-tracker' && Module.f80TableRect)
     editableRects.push(Module.f80TableRect);
   if (Module.f80ComponentGridRect) editableRects.push(Module.f80ComponentGridRect);
   return editableRects.some(rect =>
@@ -92,8 +92,8 @@ term.onKey(({ domEvent }) => {
   const code = keyCode(domEvent);
   if (code >= 0) {
     call('curses_push_key', [code]);
-    if (ready && window.f80ApplicationId === 'showcases/sample-tracker')
-      call('sample_tracker_flush_input', []);
+    if (ready && window.f80ApplicationId === 'turbo-tracker')
+      call('tt_tracker_flush_input', []);
   }
   domEvent.preventDefault();
 });
@@ -156,46 +156,46 @@ function moveTouch(start, x, y) {
         [start.lastX - x, start.lastY - y]);
   } else if (start.target === 'wrap') {
     if (y !== start.lastY)
-      Module.ccall(window.f80ApplicationId === 'showcases/sample-tracker' ?
-        'sample_tracker_scroll_table_actions' : 'example_wrap_scroll',
+      Module.ccall(window.f80ApplicationId === 'turbo-tracker' ?
+        'tt_tracker_scroll_table_actions' : 'example_wrap_scroll',
         null, ['number'], [start.lastY - y]);
   } else if (start.target === 'table') {
     if (start.holdStarted)
-      Module.ccall('sample_tracker_drag_table_selection', null,
+      Module.ccall('tt_tracker_drag_table_selection', null,
         ['number', 'number'], [x, y]);
     else {
       if (y !== start.lastY)
-        Module.ccall('sample_tracker_scroll_table', null,
+        Module.ccall('tt_tracker_scroll_table', null,
           ['number'], [start.lastY - y]);
       if (x !== start.lastX)
-        Module.ccall('sample_tracker_scroll_table_horizontal', null,
+        Module.ccall('tt_tracker_scroll_table_horizontal', null,
           ['number'], [start.lastX - x]);
     }
   } else if (start.target === 'order') {
     if (y !== start.lastY)
-      Module.ccall('sample_tracker_scroll_order', null,
+      Module.ccall('tt_tracker_scroll_order', null,
         ['number'], [start.lastY - y]);
   } else if (start.target === 'grid') {
     if (start.holdStarted) {
-      Module.ccall('sample_tracker_drag_selection', null,
+      Module.ccall('tt_tracker_drag_selection', null,
         ['number', 'number'], [x, y]);
     } else {
       if (y !== start.lastY)
-        Module.ccall('sample_tracker_touch_scroll', null,
+        Module.ccall('tt_tracker_touch_scroll', null,
           ['number'], [start.lastY - y]);
       if (x !== start.lastX)
-        Module.ccall('sample_tracker_touch_scroll_fields', null,
+        Module.ccall('tt_tracker_touch_scroll_fields', null,
           ['number'], [start.lastX - x]);
     }
   } else if (x !== start.lastX) {
-    Module.ccall(start.holdStarted ? 'sample_tracker_move_wave_marker' :
-      'sample_tracker_pan_wave_touch', null, ['number'], [x]);
+    Module.ccall(start.holdStarted ? 'tt_tracker_move_wave_marker' :
+      'tt_tracker_pan_wave_touch', null, ['number'], [x]);
   }
   start.lastX = x;
   start.lastY = y;
 }
 function beginContact(id, x, y) {
-  const sample = ready && window.f80ApplicationId === 'showcases/sample-tracker';
+  const sample = ready && window.f80ApplicationId === 'turbo-tracker';
   const gridDemo = ready && (window.f80ApplicationId === 'examples/components/grid' ||
     window.f80ApplicationId === 'examples/components/auto');
   const wrapDemo = ready && window.f80ApplicationId === 'examples/components/wrap';
@@ -209,7 +209,7 @@ function beginContact(id, x, y) {
     holdStarted: false, target };
   activeContacts.set(id, start);
   if (target === 'wave')
-    Module.ccall('sample_tracker_begin_wave_gesture', null, ['number'], [x]);
+    Module.ccall('tt_tracker_begin_wave_gesture', null, ['number'], [x]);
   const tableRect = Module.f80TableRect;
   const tableCell = target === 'table' && tableRect &&
     x < tableRect.x + tableRect.width - (tableRect.vertical ? 1 : 0) &&
@@ -226,15 +226,15 @@ function beginContact(id, x, y) {
         Module.ccall('example_grid_hold', null,
           ['number', 'number'], [start.currentX, start.currentY]);
       else if (target === 'table')
-        Module.ccall('sample_tracker_hold_table_selection', null,
+        Module.ccall('tt_tracker_hold_table_selection', null,
           ['number', 'number'], [start.currentX, start.currentY]);
       else if (target === 'grid')
-        Module.ccall('sample_tracker_begin_touch_selection', null,
+        Module.ccall('tt_tracker_begin_touch_selection', null,
           ['number', 'number'], [start.currentX, start.currentY]);
       else {
-        Module.ccall('sample_tracker_begin_wave_gesture', null,
+        Module.ccall('tt_tracker_begin_wave_gesture', null,
           ['number'], [start.currentX]);
-        Module.ccall('sample_tracker_hold_wave_marker', null,
+        Module.ccall('tt_tracker_hold_wave_marker', null,
           ['number'], [start.currentX]);
       }
       start.lastX = start.currentX;
@@ -280,8 +280,8 @@ function endContact(id, x, y, cancelled) {
   }
   if (!start.tapMoved && !start.holdStarted) {
     call('curses_push_mouse', [x, y, 0]);
-    if (ready && window.f80ApplicationId === 'showcases/sample-tracker')
-      call('sample_tracker_flush_input', []);
+    if (ready && window.f80ApplicationId === 'turbo-tracker')
+      call('tt_tracker_flush_input', []);
     focusInputAt(x, y);
     if (!touchKeyboard) term.focus();
   }
@@ -291,7 +291,7 @@ function endContact(id, x, y, cancelled) {
 const pointerGestures = 'PointerEvent' in window;
 term.element.addEventListener('pointerdown', event => {
   if (pointerGestures && (touchKeyboard ||
-      window.f80ApplicationId === 'showcases/sample-tracker' ||
+      window.f80ApplicationId === 'turbo-tracker' ||
       event.pointerType === 'touch')) {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const [x, y] = cell(event);
@@ -303,8 +303,8 @@ term.element.addEventListener('pointerdown', event => {
   if (event.pointerType === 'touch') return;
   const [x, y] = cell(event);
   call('curses_push_mouse', [x, y, 0]);
-  if (ready && window.f80ApplicationId === 'showcases/sample-tracker')
-    call('sample_tracker_flush_input', []);
+  if (ready && window.f80ApplicationId === 'turbo-tracker')
+    call('tt_tracker_flush_input', []);
   term.focus();
   event.preventDefault();
 });
@@ -315,12 +315,12 @@ term.element.addEventListener('pointermove', event => {
     event.preventDefault();
     return;
   }
-  if (pointerGestures && window.f80ApplicationId === 'showcases/sample-tracker') return;
+  if (pointerGestures && window.f80ApplicationId === 'turbo-tracker') return;
   if (event.pointerType === 'touch') return;
   if (!(event.buttons & 1) || !ready ||
-      window.f80ApplicationId !== 'showcases/sample-tracker') return;
+      window.f80ApplicationId !== 'turbo-tracker') return;
   const [x, y] = cell(event);
-  Module.ccall('sample_tracker_drag_selection', null, ['number', 'number'], [x, y]);
+  Module.ccall('tt_tracker_drag_selection', null, ['number', 'number'], [x, y]);
   event.preventDefault();
 });
 for (const type of ['pointerup', 'pointercancel']) {

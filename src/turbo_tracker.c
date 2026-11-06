@@ -12,11 +12,11 @@
 #ifndef __EMSCRIPTEN__
 #include "f80_file_dialog.h"
 #endif
-#include "audio.h"
-#include "csv.h"
-#include "pattern.h"
-#include "sample.h"
-#include "song.h"
+#include "tt_audio.h"
+#include "tt_csv.h"
+#include "tt_pattern.h"
+#include "tt_sample.h"
+#include "tt_song.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 EM_JS(void, choose_web_wav, (), {
@@ -28,25 +28,25 @@ EM_JS(void, choose_web_song, (), {
 EM_JS(void, download_web_song, (const char *name), {
     if(window.f80DownloadSong)window.f80DownloadSong(UTF8ToString(name));
 });
-EM_JS(void, sample_web_grid_rect, (int x,int y,int width,int height), {
+EM_JS(void, tt_web_grid_rect, (int x,int y,int width,int height), {
     Module.f80GridRect = {x,y,width,height};
 });
-EM_JS(void, sample_web_editable_grid_rect, (int x,int y,int width,int height), {
+EM_JS(void, tt_web_editable_grid_rect, (int x,int y,int width,int height), {
     Module.f80EditableGridRect = {x,y,width,height};
 });
-EM_JS(void, sample_web_wave_rect, (int x,int y,int width,int height), {
+EM_JS(void, tt_web_wave_rect, (int x,int y,int width,int height), {
     Module.f80WaveRect = {x,y,width,height};
 });
-EM_JS(void, sample_web_order_rect, (int x,int y,int width,int height), {
+EM_JS(void, tt_web_order_rect, (int x,int y,int width,int height), {
     Module.f80OrderRect = {x,y,width,height};
 });
-EM_JS(void, sample_web_table_rect, (int x,int y,int width,int height,int horizontal,int vertical), {
+EM_JS(void, tt_web_table_rect, (int x,int y,int width,int height,int horizontal,int vertical), {
     Module.f80TableRect = {x,y,width,height,horizontal,vertical};
 });
-EM_JS(void, sample_web_wrap_rect, (int x,int y,int width,int height), {
+EM_JS(void, tt_web_wrap_rect, (int x,int y,int width,int height), {
     Module.f80WrapRect = {x,y,width,height};
 });
-EM_JS(int, sample_web_compact_editing, (), {
+EM_JS(int, tt_web_compact_editing, (), {
     return !!window.f80CompactEditing;
 });
 #endif
@@ -54,17 +54,17 @@ EM_JS(int, sample_web_compact_editing, (), {
 enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_REFERENCE };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
-enum { SAMPLE_HISTORY_MAX=8 };
+enum { TT_HISTORY_MAX=8 };
 enum { SONG_LOOKAHEAD_FRAMES=4096, SONG_DISPLAY_ROWS=64 };
 typedef struct {
-    SampleWave wave;
-    SamplePhrase phrase;
+    TtWave wave;
+    TtPhrase phrase;
     char loaded_path[512],csv_path[256];
-} StoredSample;
+} TtStored;
 typedef struct {
     int active,table,tick,next_table,delay,pending;
     int delayed_glide;
-    SampleCell delayed_note;
+    TtCell delayed_note;
 } TableVoice;
 typedef struct {
     Uint64 frame;
@@ -72,17 +72,17 @@ typedef struct {
 } SongDisplayRow;
 typedef struct {
     F80App app;
-    SampleWave wave;
-    SamplePhrase phrase;
-    SamplePattern pattern;
-    SampleSong song;
+    TtWave wave;
+    TtPhrase phrase;
+    TtPattern pattern;
+    TtSong song;
     F80Widget *root,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
     F80Widget *progress,*bpm_label,*details,*status;
     int focus,marker,zoom,view_start,step,channel,field,entry_octave;
     int selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
-    SampleCell clipboard[SAMPLE_MAX_STEPS][SAMPLE_CHANNELS];
+    TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
     int compact_editing;
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
@@ -94,18 +94,18 @@ typedef struct {
     Uint64 song_written_frames;
     SongDisplayRow display_rows[SONG_DISPLAY_ROWS];
     int display_head,display_tail;
-    TableVoice table_voice[SAMPLE_CHANNELS];
+    TableVoice table_voice[TT_CHANNELS];
     F80Widget *table_dialog,*table_panel,*table_canvas,*table_name,*table_name_label;
     F80Widget *table_scrollbar,*table_buttons[5];
     F80Grid table_grid;
     F80Wrap table_actions;
     int table_index;
-    SampleTableTick table_clip[SAMPLE_TABLE_MAX_TICKS];
+    TtTableTick table_clip[TT_TABLE_MAX_TICKS];
     int table_clip_rows,table_clip_left,table_clip_right;
     char table_title[32];
     char header_text[256],bpm_text[16],details_text[256],wave_title[160],phrase_title[96];
     char message[192],loaded_path[512],csv_path[256],song_path[512];
-    StoredSample samples[SAMPLE_HISTORY_MAX];
+    TtStored samples[TT_HISTORY_MAX];
     int sample_count,sample_index;
     F80Widget *manage_dialog,*manage_list_bg,*manage_list,*manage_name,*manage_info;
     F80Widget *slices_dialog,*slices_list_bg,*slices_list,*slices_note,*slices_info;
@@ -113,17 +113,17 @@ typedef struct {
     F80Widget *order_seq_label,*order_seq_bg,*order_seq,*order_name;
     F80Widget *settings_dialog,*settings_label[4],*settings_input[4];
     F80Widget *settings_apply,*settings_close;
-    char bank_rows[SAMPLE_SONG_PATTERNS][100],order_rows[SAMPLE_SONG_ORDER][100];
-    char order_panel_rows[SAMPLE_SONG_ORDER][8];
+    char bank_rows[TT_SONG_PATTERNS][100],order_rows[TT_SONG_ORDER][100];
+    char order_panel_rows[TT_SONG_ORDER][8];
     char order_heading[64];
-    const char *bank_items[SAMPLE_SONG_PATTERNS],*order_items[SAMPLE_SONG_ORDER];
-    const char *order_panel_items[SAMPLE_SONG_ORDER];
-    char manage_rows[SAMPLE_HISTORY_MAX][290],slice_rows[SAMPLE_SLICES][96];
-    const char *manage_items[SAMPLE_HISTORY_MAX],*slice_items[SAMPLE_SLICES];
+    const char *bank_items[TT_SONG_PATTERNS],*order_items[TT_SONG_ORDER];
+    const char *order_panel_items[TT_SONG_ORDER];
+    char manage_rows[TT_HISTORY_MAX][290],slice_rows[TT_SLICES][96];
+    const char *manage_items[TT_HISTORY_MAX],*slice_items[TT_SLICES];
     char manage_details[320],slice_details[320];
     int delete_armed;
-} SampleTracker;
-static SampleTracker tracker;
+} TtTracker;
+static TtTracker tracker;
 #ifndef __EMSCRIPTEN__
 static F80FileDialog file_dialog;
 #endif
@@ -134,7 +134,7 @@ static int clamp(int value,int low,int high) {
 static void message(const char *text) {
     snprintf(tracker.message,sizeof(tracker.message),"%s",text);
 }
-static const SamplePattern *playing_pattern(void) {
+static const TtPattern *playing_pattern(void) {
     if(tracker.play_mode==PLAY_PATTERN)
         return tracker.loop_pattern_index==tracker.pattern_index?
                &tracker.pattern:&tracker.song.pattern[tracker.loop_pattern_index];
@@ -142,7 +142,7 @@ static const SamplePattern *playing_pattern(void) {
     return index==tracker.pattern_index?&tracker.pattern:&tracker.song.pattern[index];
 }
 static int order_for_pattern(int pattern,int near) {
-    int found=-1,best=SAMPLE_SONG_ORDER+1;
+    int found=-1,best=TT_SONG_ORDER+1;
     for(int i=0;i<tracker.song.order_count;++i)if(tracker.song.order[i]==pattern) {
         int distance=abs(i-near);
         if(distance<best) { found=i;best=distance; }
@@ -184,11 +184,11 @@ static int selected_cell(int row,int channel) {
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
     return row>=top && row<=bottom && channel>=left && channel<=right;
 }
-static int pattern_is_empty(const SamplePattern *pattern) {
+static int pattern_is_empty(const TtPattern *pattern) {
     for(int row=0;row<tracker.song.pattern_rows;++row)
-        for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
-            const SampleCell *cell=&pattern->cell[row][channel];
-            if(cell->note>=0 || cell->effect!=SAMPLE_EFFECT_NONE)return 0;
+        for(int channel=0;channel<TT_CHANNELS;++channel) {
+            const TtCell *cell=&pattern->cell[row][channel];
+            if(cell->note>=0 || cell->effect!=TT_EFFECT_NONE)return 0;
         }
     return 1;
 }
@@ -207,7 +207,7 @@ static void center_on_marker(void) {
     clamp_view();
 }
 static void focus_marker(int marker) {
-    tracker.marker=clamp(marker,0,SAMPLE_MARKERS-1);
+    tracker.marker=clamp(marker,0,TT_MARKERS-1);
     center_on_marker();
 }
 static void zoom_wave(int direction) {
@@ -229,7 +229,7 @@ static void stop_playback(F80Widget *button,void *user) {
     tracker.active_pattern_index=tracker.active_order_index=-1;
     tracker.song_finished=tracker.frames_to_tick=0;
     tracker.display_head=tracker.display_tail=0;
-    sample_audio_stop();
+    tt_audio_stop();
     memset(tracker.table_voice,0,sizeof(tracker.table_voice));
     message("Stopped");
 }
@@ -256,43 +256,43 @@ static void order_panel_scroll(int rows) {
     }
 }
 #endif
-static const SampleWave *instrument_wave(const SampleCell *cell, const SamplePhrase **phrase) {
+static const TtWave *instrument_wave(const TtCell *cell, const TtPhrase **phrase) {
     int index=cell->instrument==0?tracker.sample_index:cell->instrument-1;
     if(index<0 || index>=tracker.sample_count)return NULL;
     if(index==tracker.sample_index) { *phrase=&tracker.phrase;return tracker.wave.pcm?&tracker.wave:NULL; }
     *phrase=&tracker.samples[index].phrase;
     return tracker.samples[index].wave.pcm?&tracker.samples[index].wave:NULL;
 }
-static int cell_reference_note(const SamplePhrase *phrase,const SampleCell *cell) {
-    if(cell->effect!=SAMPLE_EFFECT_S || cell->value<0)return phrase->reference_note;
+static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
+    if(cell->effect!=TT_EFFECT_S || cell->value<0)return phrase->reference_note;
     int slice=cell->value>>4;
-    return slice<15?sample_slice_base_note(phrase,slice):phrase->reference_note;
+    return slice<15?tt_slice_base_note(phrase,slice):phrase->reference_note;
 }
 static void audition_cell(int step,int channel) {
     int first,last;
-    SampleCell *cell=&tracker.pattern.cell[step][channel];
-    const SamplePhrase *phrase=NULL;
-    const SampleWave *wave=instrument_wave(cell,&phrase);
-    if(!wave || !sample_cell_range(phrase,cell,wave->frames,&first,&last)) {
-        sample_audio_stop();
+    TtCell *cell=&tracker.pattern.cell[step][channel];
+    const TtPhrase *phrase=NULL;
+    const TtWave *wave=instrument_wave(cell,&phrase);
+    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last)) {
+        tt_audio_stop();
         message("Set a loaded instrument, note, and playable effect value first");
         return;
     }
     int base=cell_reference_note(phrase,cell);
-    int glided=cell->effect==SAMPLE_EFFECT_G && cell->value>0 &&
-               sample_audio_glide_to(0,cell->note,base,cell->value);
-    if(!glided && !sample_audio_play(wave,first,last,cell->note,base)) {
+    int glided=cell->effect==TT_EFFECT_G && cell->value>0 &&
+               tt_audio_glide_to(0,cell->note,base,cell->value);
+    if(!glided && !tt_audio_play(wave,first,last,cell->note,base)) {
         message("Audio unavailable: check the output device or browser permission");
         return;
     }
     tracker.audition_effect_active=0;
-    if(cell->effect==SAMPLE_EFFECT_M && cell->value>=0)
-        sample_audio_set_volume(0,cell->value);
-    else if(cell->effect==SAMPLE_EFFECT_STRETCH && cell->value>=0)
-        sample_audio_set_stretch(0,cell->value);
+    if(cell->effect==TT_EFFECT_M && cell->value>=0)
+        tt_audio_set_volume(0,cell->value);
+    else if(cell->effect==TT_EFFECT_STRETCH && cell->value>=0)
+        tt_audio_set_stretch(0,cell->value);
     else if(cell->effect && cell->value>=0 &&
             strchr("GIJKNOPRVWr",cell->effect)) {
-        sample_audio_command(0,(char)cell->effect,cell->value);
+        tt_audio_command(0,(char)cell->effect,cell->value);
         tracker.audition_effect_active=1;
         tracker.next_audition_tick_at=SDL_GetTicks();
     }
@@ -303,7 +303,7 @@ static void play_row(int row) {
     if(!tracker.rendering_song && tracker.play_mode==PLAY_SONG &&
        tracker.follow && tracker.order_list)
         tracker.order_list->cursor=tracker.play_order;
-    const SamplePattern *pattern=playing_pattern();
+    const TtPattern *pattern=playing_pattern();
     int pattern_index=tracker.play_mode==PLAY_PATTERN?tracker.loop_pattern_index:
                       tracker.song.order[tracker.play_order];
     if(row==0) {
@@ -319,26 +319,26 @@ static void play_row(int row) {
                      pattern_is_empty(pattern)?" [empty]":"");
         message(info);
     }
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
-        const SampleCell *cell=&pattern->cell[row][channel];
-        if(cell->effect==SAMPLE_EFFECT_T && cell->value>=0 &&
-           cell->value<SAMPLE_SONG_TABLES) {
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
+        const TtCell *cell=&pattern->cell[row][channel];
+        if(cell->effect==TT_EFFECT_T && cell->value>=0 &&
+           cell->value<TT_SONG_TABLES) {
             TableVoice *voice=&tracker.table_voice[channel];
             voice->active=1;voice->table=cell->value;voice->tick=0;
             voice->next_table=-1;voice->pending=0;
         }
-        if(cell->effect==SAMPLE_EFFECT_M && cell->value>=0)
-            sample_audio_set_volume(channel,cell->value);
+        if(cell->effect==TT_EFFECT_M && cell->value>=0)
+            tt_audio_set_volume(channel,cell->value);
         else if(cell->effect && cell->value>=0 && strchr("GIJKNOPRVWr",cell->effect))
-            sample_audio_command(channel,(char)cell->effect,cell->value);
+            tt_audio_command(channel,(char)cell->effect,cell->value);
         int first,last;
-        const SamplePhrase *phrase=NULL;
-        const SampleWave *wave=instrument_wave(cell,&phrase);
-        if(!wave || !sample_cell_range(phrase,cell,wave->frames,&first,&last))continue;
+        const TtPhrase *phrase=NULL;
+        const TtWave *wave=instrument_wave(cell,&phrase);
+        if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))continue;
         int base=cell_reference_note(phrase,cell);
-        if(cell->effect==SAMPLE_EFFECT_G && cell->value>0 &&
-           sample_audio_glide_to(channel,cell->note,base,cell->value))continue;
-        if(!sample_audio_play_channel(channel,wave,first,last,cell->note,base))
+        if(cell->effect==TT_EFFECT_G && cell->value>0 &&
+           tt_audio_glide_to(channel,cell->note,base,cell->value))continue;
+        if(!tt_audio_play_channel(channel,wave,first,last,cell->note,base))
             message("Audio unavailable: check the output device or browser permission");
     }
     if(tracker.rendering_song) {
@@ -355,51 +355,51 @@ static void play_row(int row) {
         tracker.active_order_index=tracker.play_mode==PLAY_SONG?tracker.play_order:-1;
     }
 }
-static void table_play_note(int channel,const SampleCell *cell,int glide_rate) {
-    const SamplePhrase *phrase=NULL;
-    const SampleWave *wave=instrument_wave(cell,&phrase);
+static void table_play_note(int channel,const TtCell *cell,int glide_rate) {
+    const TtPhrase *phrase=NULL;
+    const TtWave *wave=instrument_wave(cell,&phrase);
     int first,last;
-    if(!wave || !sample_cell_range(phrase,cell,wave->frames,&first,&last))return;
+    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))return;
     int base=cell_reference_note(phrase,cell);
-    if(glide_rate>0 && sample_audio_glide_to(channel,cell->note,base,glide_rate))return;
-    sample_audio_play_channel(channel,wave,first,last,cell->note,base);
+    if(glide_rate>0 && tt_audio_glide_to(channel,cell->note,base,glide_rate))return;
+    tt_audio_play_channel(channel,wave,first,last,cell->note,base);
 }
 static void play_table_ticks(void) {
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
         TableVoice *voice=&tracker.table_voice[channel];
         if(voice->pending && --voice->delay<=0) {
             table_play_note(channel,&voice->delayed_note,voice->delayed_glide);
             voice->pending=0;
         }
         if(!voice->active)continue;
-        const SampleTable *table=&tracker.song.table[voice->table];
+        const TtTable *table=&tracker.song.table[voice->table];
         if(voice->tick>=table->length) {
             if(voice->next_table>=0) {
                 voice->table=voice->next_table;voice->next_table=-1;
                 voice->tick=0;table=&tracker.song.table[voice->table];
             } else { voice->active=0;continue; }
         }
-        const SampleTableTick *entry=&table->tick[voice->tick++];
-        SampleCell note={entry->note,entry->instrument,SAMPLE_EFFECT_NONE,-1};
+        const TtTableTick *entry=&table->tick[voice->tick++];
+        TtCell note={entry->note,entry->instrument,TT_EFFECT_NONE,-1};
         int delay=0,glide_rate=0,jump_table=-1,jump_tick=-1;
-        for(int fx=0;fx<SAMPLE_TABLE_EFFECTS;++fx) {
-            const SampleTableEffect *effect=&entry->effect[fx];
+        for(int fx=0;fx<TT_TABLE_EFFECTS;++fx) {
+            const TtTableEffect *effect=&entry->effect[fx];
             if(!effect->command || effect->value<0)continue;
             switch(effect->command) {
-            case 'M':sample_audio_set_volume(channel,effect->value);break;
-            case 'S':note.effect=SAMPLE_EFFECT_S;note.value=effect->value;break;
+            case 'M':tt_audio_set_volume(channel,effect->value);break;
+            case 'S':note.effect=TT_EFFECT_S;note.value=effect->value;break;
             case 'U':delay=effect->value;break;
             case 'G':glide_rate=effect->value;
-                sample_audio_command(channel,'G',effect->value);break;
+                tt_audio_command(channel,'G',effect->value);break;
             case 'I':case 'J':case 'K':case 'N':case 'O':
             case 'P':case 'R':case 'V':case 'W':case 'r':
-                sample_audio_command(channel,effect->command,effect->value);break;
+                tt_audio_command(channel,effect->command,effect->value);break;
             case 'T':
-                if(effect->value<SAMPLE_SONG_TABLES)
+                if(effect->value<TT_SONG_TABLES)
                     voice->next_table=effect->value;
                 break;
             case 'X':
-                if(effect->value<SAMPLE_SONG_TABLES)jump_table=effect->value;
+                if(effect->value<TT_SONG_TABLES)jump_table=effect->value;
                 break;
             case 'Y':jump_tick=effect->value;break;
             default:break;
@@ -424,23 +424,23 @@ static void audition(F80Widget *button,void *user) {
         int first=tracker.phrase.marker[marker];
         int last=marker<15?tracker.phrase.marker[marker+1]:tracker.wave.frames;
         if(last<=first) { message("Move the next marker to make a slice");return; }
-        sample_audio_set_volume(0,255);
-        int base=sample_slice_base_note(&tracker.phrase,marker<15?marker:14);
-        if(!sample_audio_play(&tracker.wave,first,last,base,base))
+        tt_audio_set_volume(0,255);
+        int base=tt_slice_base_note(&tracker.phrase,marker<15?marker:14);
+        if(!tt_audio_play(&tracker.wave,first,last,base,base))
             message("Audio unavailable");
         else message("Audition marker slice");
     } else audition_cell(tracker.step,tracker.channel);
 }
 static void start_playback(F80Widget *button,void *user) {
     (void)button;(void)user;
-    sample_audio_stop();
+    tt_audio_stop();
     tracker.playing=tracker.started=0;
-    if(!sample_audio_begin_song()) {
+    if(!tt_audio_begin_song()) {
         message("Audio unavailable: check the output device or browser permission");
         return;
     }
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
-        sample_audio_set_volume(channel,255);
+    for(int channel=0;channel<TT_CHANNELS;++channel)
+        tt_audio_set_volume(channel,255);
     tracker.playing=tracker.started=1;
     tracker.audition_effect_active=0;
     memset(tracker.table_voice,0,sizeof(tracker.table_voice));
@@ -463,10 +463,10 @@ static void start_pattern_loop(F80Widget *button,void *user) {
 static void toggle_play(F80Widget *button,void *user) {
     if(!tracker.started) { start_playback(button,user);return; }
     if(tracker.playing) {
-        tracker.playing=0;sample_audio_stop();message("Paused");
+        tracker.playing=0;tt_audio_stop();message("Paused");
     } else {
         if(tracker.song_finished) { start_playback(button,user);return; }
-        if(!sample_audio_begin_song()) {
+        if(!tt_audio_begin_song()) {
             message("Audio unavailable: check the output device or browser permission");
             return;
         }
@@ -478,7 +478,7 @@ static void toggle_play(F80Widget *button,void *user) {
     }
 }
 static int next_tick_frames(int divisor) {
-    tracker.tick_remainder+=SAMPLE_AUDIO_OUTPUT_RATE*60;
+    tracker.tick_remainder+=TT_AUDIO_OUTPUT_RATE*60;
     int frames=tracker.tick_remainder/divisor;
     tracker.tick_remainder%=divisor;
     return frames;
@@ -486,7 +486,7 @@ static int next_tick_frames(int divisor) {
 static void advance_playback(void) {
     if(!tracker.playing)return;
     int divisor=tracker.song.bpm*tracker.song.rows_per_beat*tracker.song.ticks_per_row;
-    int buffered=sample_audio_song_buffered_frames();
+    int buffered=tt_audio_song_buffered_frames();
     int needed=SONG_LOOKAHEAD_FRAMES-buffered;
     if(needed<0)needed=0;
     tracker.rendering_song=1;
@@ -494,7 +494,7 @@ static void advance_playback(void) {
         if(!tracker.frames_to_tick) {
             if(tracker.tick_phase==0)play_row(tracker.play_step);
             play_table_ticks();
-            sample_audio_tick();
+            tt_audio_tick();
             if(++tracker.tick_phase>=tracker.song.ticks_per_row) {
                 tracker.tick_phase=0;
                 if(++tracker.play_step>=tracker.song.pattern_rows) {
@@ -509,13 +509,13 @@ static void advance_playback(void) {
             tracker.frames_to_tick=next_tick_frames(divisor);
         }
         int frames=needed<tracker.frames_to_tick?needed:tracker.frames_to_tick;
-        sample_audio_render_song(frames);
+        tt_audio_render_song(frames);
         tracker.song_written_frames+=(Uint64)frames;
         tracker.frames_to_tick-=frames;
         needed-=frames;
     }
     tracker.rendering_song=0;
-    buffered=sample_audio_song_buffered_frames();
+    buffered=tt_audio_song_buffered_frames();
     Uint64 played=tracker.song_written_frames>
         (Uint64)buffered?tracker.song_written_frames-(Uint64)buffered:0;
     while(tracker.display_head!=tracker.display_tail &&
@@ -529,34 +529,34 @@ static void advance_playback(void) {
         tracker.display_head=(tracker.display_head+1)%SONG_DISPLAY_ROWS;
     }
     if(tracker.song_finished && buffered<512) {
-        sample_audio_end_song();
+        tt_audio_end_song();
         tracker.playing=tracker.started=0;
     }
 }
 static void advance_audition(void) {
     if(tracker.playing || !tracker.audition_effect_active)return;
-    if(!sample_audio_active()) { tracker.audition_effect_active=0;return; }
+    if(!tt_audio_active()) { tracker.audition_effect_active=0;return; }
     Uint64 now=SDL_GetTicks();
     int interval=60000/(tracker.song.bpm*tracker.song.rows_per_beat*
                         tracker.song.ticks_per_row);
     if(interval<1)interval=1;
     for(int tick=0;tick<64 && now>=tracker.next_audition_tick_at;++tick) {
-        sample_audio_tick();
+        tt_audio_tick();
         tracker.next_audition_tick_at+=interval;
     }
 }
 static int load_path(const char *path,const char *original_name) {
-    if(tracker.sample_count>=SAMPLE_HISTORY_MAX) {
+    if(tracker.sample_count>=TT_HISTORY_MAX) {
         message("Sample slots full; restart to load a different set of WAVs");
         return 0;
     }
-    SampleWave next={0};
+    TtWave next={0};
     char error[160];
-    if(!sample_load_wav(path,&next,error,sizeof(error))) {
+    if(!tt_load_wav(path,&next,error,sizeof(error))) {
         message(error);return 0;
     }
     stop_playback(NULL,NULL);
-    StoredSample *previous=&tracker.samples[tracker.sample_index];
+    TtStored *previous=&tracker.samples[tracker.sample_index];
     previous->wave=tracker.wave;
     previous->phrase=tracker.phrase;
     snprintf(previous->loaded_path,sizeof(previous->loaded_path),"%s",tracker.loaded_path);
@@ -566,7 +566,7 @@ static int load_path(const char *path,const char *original_name) {
         snprintf(tracker.wave.name,sizeof(tracker.wave.name),"%s",original_name);
         snprintf(tracker.wave.source_name,sizeof(tracker.wave.source_name),"%s",original_name);
     }
-    sample_phrase_init(&tracker.phrase,tracker.wave.frames);
+    tt_phrase_init(&tracker.phrase,tracker.wave.frames);
     tracker.zoom=tracker.view_start=tracker.marker=0;
     tracker.sample_index=tracker.sample_count++;
     snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",path);
@@ -582,12 +582,12 @@ static void select_sample(int direction) {
     }
     int target=(tracker.sample_index+direction+tracker.sample_count)%tracker.sample_count;
     stop_playback(NULL,NULL);
-    StoredSample *current=&tracker.samples[tracker.sample_index];
+    TtStored *current=&tracker.samples[tracker.sample_index];
     current->wave=tracker.wave;
     current->phrase=tracker.phrase;
     snprintf(current->loaded_path,sizeof(current->loaded_path),"%s",tracker.loaded_path);
     snprintf(current->csv_path,sizeof(current->csv_path),"%s",tracker.csv_path);
-    StoredSample *next=&tracker.samples[target];
+    TtStored *next=&tracker.samples[target];
     tracker.wave=next->wave;
     tracker.phrase=next->phrase;
     snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",next->loaded_path);
@@ -605,13 +605,13 @@ static void next_sample(F80Widget *button,void *user) {
     (void)button;(void)user;select_sample(1);
 }
 static int save_song_at(const char *path) {
-    SampleSongSample meta[SAMPLE_HISTORY_MAX]={0};
+    TtSongSample meta[TT_HISTORY_MAX]={0};
     tracker.song.pattern[tracker.pattern_index]=tracker.pattern;
     for(int i=0;i<tracker.sample_count;++i) {
-        const SampleWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
-        const SamplePhrase *phrase=i==tracker.sample_index?&tracker.phrase:&tracker.samples[i].phrase;
+        const TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
+        const TtPhrase *phrase=i==tracker.sample_index?&tracker.phrase:&tracker.samples[i].phrase;
         const char *loaded=i==tracker.sample_index?tracker.loaded_path:tracker.samples[i].loaded_path;
-        SampleSongSample *entry=&meta[i];
+        TtSongSample *entry=&meta[i];
         snprintf(entry->name,sizeof(entry->name),"%s",wave->name);
         snprintf(entry->source_name,sizeof(entry->source_name),"%s",wave->source_name);
         entry->frames=wave->frames;entry->rate=wave->rate;entry->phrase=*phrase;
@@ -627,7 +627,7 @@ static int save_song_at(const char *path) {
         }
     }
     char error[192];
-    if(!sample_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error))) {
+    if(!tt_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error))) {
         message(error);return 0;
     }
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
@@ -635,30 +635,30 @@ static int save_song_at(const char *path) {
     return 1;
 }
 static int load_song_at(const char *path) {
-    SampleSong *next=malloc(sizeof(*next));
+    TtSong *next=malloc(sizeof(*next));
     if(!next) { message("Out of memory loading song");return 0; }
-    SampleSongSample meta[SAMPLE_HISTORY_MAX];
-    StoredSample loaded[SAMPLE_HISTORY_MAX]={0};
+    TtSongSample meta[TT_HISTORY_MAX];
+    TtStored loaded[TT_HISTORY_MAX]={0};
     int count=0,missing=0;char error[192];
-    if(!sample_song_load(path,next,meta,&count,error,sizeof(error))) {
+    if(!tt_song_load(path,next,meta,&count,error,sizeof(error))) {
         free(next);message(error);return 0;
     }
     for(int i=0;i<count;++i) {
         char resolved[512];
-        if(!sample_song_resolve_path(path,meta[i].path,resolved,sizeof(resolved))) {
+        if(!tt_song_resolve_path(path,meta[i].path,resolved,sizeof(resolved))) {
             snprintf(error,sizeof(error),"Sample path too long");goto failed;
         }
         if(!strcmp(resolved,"builtin:demo")) {
-            if(!sample_make_demo(&loaded[i].wave)) {
+            if(!tt_make_demo(&loaded[i].wave)) {
                 snprintf(error,sizeof(error),"Could not recreate demo sample");goto failed;
             }
         } else {
-            if(!sample_load_wav(resolved,&loaded[i].wave,error,sizeof(error))) {
+            if(!tt_load_wav(resolved,&loaded[i].wave,error,sizeof(error))) {
 #ifdef __EMSCRIPTEN__
                 const char *basename=strrchr(resolved,'/');
                 if(basename && basename[1]) {
                     char fallback[512];snprintf(fallback,sizeof(fallback),"/%s",basename+1);
-                    if(sample_load_wav(fallback,&loaded[i].wave,error,sizeof(error)))
+                    if(tt_load_wav(fallback,&loaded[i].wave,error,sizeof(error)))
                         snprintf(resolved,sizeof(resolved),"%s",fallback);
                 }
 #endif
@@ -679,8 +679,8 @@ static int load_song_at(const char *path) {
         loaded[i].phrase=meta[i].phrase;
     }
     stop_playback(NULL,NULL);
-    sample_free(&tracker.wave);
-    for(int i=0;i<tracker.sample_count;++i)sample_free(&tracker.samples[i].wave);
+    tt_free(&tracker.wave);
+    for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
     memset(tracker.samples,0,sizeof(tracker.samples));
     tracker.song=*next;tracker.pattern_index=0;tracker.pattern=next->pattern[0];
     tracker.edit_order=order_for_pattern(0,0);
@@ -703,26 +703,26 @@ static int load_song_at(const char *path) {
     } else message("Song loaded");
     return 1;
 failed:
-    for(int i=0;i<count;++i)sample_free(&loaded[i].wave);
+    for(int i=0;i<count;++i)tt_free(&loaded[i].wave);
     free(next);message(error);return 0;
 }
 static int recover_missing(const char *name) {
     int recovered=0;
     for(int i=0;i<tracker.sample_count;++i) {
-        SampleWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
+        TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
         const char *path=i==tracker.sample_index?tracker.loaded_path:tracker.samples[i].loaded_path;
         if(wave->pcm || (name && strcmp(wave->source_name,name)))continue;
         char candidate[512];
         snprintf(candidate,sizeof(candidate),"%s",path);
-        SampleWave next={0};char error[160];
-        if(!sample_load_wav(candidate,&next,error,sizeof(error))) {
+        TtWave next={0};char error[160];
+        if(!tt_load_wav(candidate,&next,error,sizeof(error))) {
             const char *base=strrchr(candidate,'/');
             if(!base || !base[1])continue;
             snprintf(candidate,sizeof(candidate),"/%s",base+1);
-            if(!sample_load_wav(candidate,&next,error,sizeof(error)))continue;
+            if(!tt_load_wav(candidate,&next,error,sizeof(error)))continue;
         }
         if(next.frames!=wave->frames || next.rate!=wave->rate) {
-            sample_free(&next);continue;
+            tt_free(&next);continue;
         }
         snprintf(next.name,sizeof(next.name),"%s",wave->name);
         snprintf(next.source_name,sizeof(next.source_name),"%s",wave->source_name);
@@ -737,16 +737,16 @@ static int recover_missing(const char *name) {
     return recovered;
 }
 #ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE int sample_tracker_recover_wav(const char *name) {
+EMSCRIPTEN_KEEPALIVE int tt_tracker_recover_wav(const char *name) {
     return recover_missing(name);
 }
-EMSCRIPTEN_KEEPALIVE int sample_tracker_load_wav(const char *original_name) {
+EMSCRIPTEN_KEEPALIVE int tt_tracker_load_wav(const char *original_name) {
     return load_path("/sample-tracker-upload.wav",original_name);
 }
-EMSCRIPTEN_KEEPALIVE int sample_tracker_load_song(void) {
+EMSCRIPTEN_KEEPALIVE int tt_tracker_load_song(void) {
     return load_song_at("/sample-tracker-import.song");
 }
-EMSCRIPTEN_KEEPALIVE int sample_tracker_save_song(void) {
+EMSCRIPTEN_KEEPALIVE int tt_tracker_save_song(void) {
     if(!save_song_at("/sample-tracker-export.song"))return 0;
     download_web_song("sample.song");return 1;
 }
@@ -763,7 +763,7 @@ static void open_path_dialog(int action) {
 #ifdef __EMSCRIPTEN__
     if(action==PATH_WAV)choose_web_wav();
     else if(action==PATH_SONG_LOAD)choose_web_song();
-    else sample_tracker_save_song();
+    else tt_tracker_save_song();
 #else
     tracker.path_action=action;
     int save=action==PATH_SONG_SAVE;
@@ -805,8 +805,8 @@ static void next_marker(F80Widget *button,void *user) {
     focus_marker(tracker.marker+1);
     message("Next marker selected");
 }
-static void set_effect(SampleCell *cell,int effect) {
-    if(effect==SAMPLE_EFFECT_NONE) {
+static void set_effect(TtCell *cell,int effect) {
+    if(effect==TT_EFFECT_NONE) {
         cell->effect=effect;cell->value=-1;
     } else if(cell->effect!=effect) {
         cell->effect=effect;
@@ -819,16 +819,16 @@ static void adjust_value(int delta) {
         if(cells<1)cells=1;
         int distance=visible_frames()/cells;
         if(distance<1)distance=1;
-        sample_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,
+        tt_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,
                            tracker.phrase.marker[tracker.marker]+delta*distance);
         center_on_marker();
         message("Marker moved; hold on the waveform to select and drag one");
     } else if(tracker.focus==FOCUS_REFERENCE) {
-        sample_phrase_set_reference_note(&tracker.phrase,
+        tt_phrase_set_reference_note(&tracker.phrase,
             clamp(tracker.phrase.reference_note+delta,12,127));
         message("Reference note sets the sample's original pitch");
     } else {
-        SampleCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+        TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
         if(tracker.field==0)
             cell->note=clamp((cell->note<0?tracker.phrase.reference_note:cell->note)+delta,
                              12,127);
@@ -838,9 +838,9 @@ static void adjust_value(int delta) {
             const char *current=cell->effect?strchr(effects,cell->effect):NULL;
             int index=current?(int)(current-effects):-1;
             int next=clamp(index+(delta>0?1:-1),-1,(int)strlen(effects)-1);
-            set_effect(cell,next<0?SAMPLE_EFFECT_NONE:effects[next]);
+            set_effect(cell,next<0?TT_EFFECT_NONE:effects[next]);
         } else {
-            if(cell->effect==SAMPLE_EFFECT_NONE)set_effect(cell,SAMPLE_EFFECT_S);
+            if(cell->effect==TT_EFFECT_NONE)set_effect(cell,TT_EFFECT_S);
             cell->value=clamp(cell->value+delta,0,255);
         }
         message("Pattern cell changed");
@@ -878,7 +878,7 @@ static void toggle_mode(F80Widget *button,void *user) {
     tracker.play_mode=tracker.play_mode==PLAY_SONG?PLAY_PATTERN:PLAY_SONG;
     start_playback(NULL,NULL);
 }
-static void sample_extrema(int first,int last,float *low,float *high) {
+static void tt_extrema(int first,int last,float *low,float *high) {
     *low=1;*high=-1;
     if(!tracker.wave.pcm)return;
     if(first<0)first=0;
@@ -887,7 +887,7 @@ static void sample_extrema(int first,int last,float *low,float *high) {
     if(last-first>=128 && tracker.wave.peaks) {
         int begin=first/64,finish=(last-1)/64;
         for(int block=begin;block<=finish && block<tracker.wave.peak_count;++block) {
-            SamplePeak peak=tracker.wave.peaks[block];
+            TtPeak peak=tracker.wave.peaks[block];
             if(peak.low<*low)*low=peak.low;
             if(peak.high>*high)*high=peak.high;
         }
@@ -907,7 +907,7 @@ static int wave_x_from_frame(int frame,int width) {
 static int wave_marker_at(int x) {
     F80Rect r=tracker.wave_canvas->rect;
     int nearest=-1,best=2;
-    for(int marker=0;marker<SAMPLE_MARKERS;++marker) {
+    for(int marker=0;marker<TT_MARKERS;++marker) {
         int dot=wave_x_from_frame(tracker.phrase.marker[marker],r.w*2);
         if(dot<0)continue;
         int distance=abs(x-(r.x+dot/2));
@@ -948,13 +948,13 @@ static void paint_wave(F80Widget *canvas,void *user) {
         int last=tracker.view_start+(int)((long long)(x+1)*visible/pixels);
         if(last<=first)last=first+1;
         float low,high;
-        sample_extrema(first,last,&low,&high);
+        tt_extrema(first,last,&low,&high);
         if(low<-1)low=-1;if(high>1)high=1;
         int top=(int)((1-high)*(vertical-1)/2);
         int bottom=(int)((1-low)*(vertical-1)/2);
         f80_raster_line(&raster,x,top,x,bottom,10,2);
     }
-    for(int marker=0;marker<SAMPLE_MARKERS;++marker) {
+    for(int marker=0;marker<TT_MARKERS;++marker) {
         int x=wave_x_from_frame(tracker.phrase.marker[marker],pixels);
         if(x<0)continue;
         f80_raster_line(&raster,x,0,x,vertical-1,
@@ -962,7 +962,7 @@ static void paint_wave(F80Widget *canvas,void *user) {
     }
     f80_raster_draw_quadrants(&raster);
     f80_raster_free(&raster);
-    if(!compact)for(int marker=0;marker<SAMPLE_MARKERS;++marker) {
+    if(!compact)for(int marker=0;marker<TT_MARKERS;++marker) {
         int x=wave_x_from_frame(tracker.phrase.marker[marker],graph_w);
         if(x<0)continue;
         char digit[2]={"0123456789ABCDEF"[marker],0};
@@ -994,8 +994,8 @@ static int pattern_field_span(int first,int last) {
     return width;
 }
 static int pattern_max_field_scroll(int available) {
-    int first=SAMPLE_CHANNELS*4-1;
-    while(first>0 && pattern_field_span(first-1,SAMPLE_CHANNELS*4-1)<=available)
+    int first=TT_CHANNELS*4-1;
+    while(first>0 && pattern_field_span(first-1,TT_CHANNELS*4-1)<=available)
         --first;
     return first;
 }
@@ -1038,10 +1038,10 @@ static void paint_phrase(F80Widget *canvas,void *user) {
     ensure_pattern_visible(r);
     f80_fill(r,1);
     int right=r.x+r.w-1,x=r.x+5;
-    int start[SAMPLE_CHANNELS],end[SAMPLE_CHANNELS];
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+    int start[TT_CHANNELS],end[TT_CHANNELS];
+    for(int channel=0;channel<TT_CHANNELS;++channel)
         start[channel]=end[channel]=-1;
-    for(int index=tracker.field_scroll;index<SAMPLE_CHANNELS*4 && x<right;++index) {
+    for(int index=tracker.field_scroll;index<TT_CHANNELS*4 && x<right;++index) {
         int channel=index/4,field=index%4;
         if(index>tracker.field_scroll && field==0) {
             for(int y=r.y;y<r.y+r.h;++y)f80_put(y,x,"│",1,10,0);
@@ -1051,7 +1051,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
         if(visible>right-x)visible=right-x;
         if(start[channel]<0)start[channel]=x;
         end[channel]=x+visible;
-        float level=sample_audio_level(channel);
+        float level=tt_audio_level(channel);
         if(level>1)level=1;
         int pixels=(int)(level*24+.5f);
         for(int column=0;column<visible;++column) {
@@ -1065,17 +1065,17 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             int order=grid_order_for_row(global),row=global%tracker.song.pattern_rows;
             int pattern_index=grid_pattern_for_row(global);
             int editable=order<0 || order==tracker.edit_order;
-            const SamplePattern *pattern=pattern_index==tracker.pattern_index?
+            const TtPattern *pattern=pattern_index==tracker.pattern_index?
                 &tracker.pattern:&tracker.song.pattern[pattern_index];
-            const SampleCell *cell=&pattern->cell[row][channel];
+            const TtCell *cell=&pattern->cell[row][channel];
             char compact[11],shown[13];
-            sample_cell_text(cell,compact);
+            tt_cell_text(cell,compact);
             snprintf(shown,sizeof(shown),"%.3s %.2s %.5s",compact,compact+3,compact+5);
             int editrow=editable && tracker.focus==FOCUS_PHRASE && row==tracker.step;
             int editcol=tracker.focus==FOCUS_PHRASE && channel==tracker.channel;
             int selected=editrow && editcol && field==tracker.field;
             int empty=field==0?cell->note<0:field==1?cell->instrument<0:
-                      cell->effect==SAMPLE_EFFECT_NONE;
+                      cell->effect==TT_EFFECT_NONE;
             int playhead=row==tracker.active_step &&
                 (order>=0?order==tracker.active_order_index:
                  pattern_index==tracker.active_pattern_index);
@@ -1094,7 +1094,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
         }
         x+=width;
     }
-    for(int channel=0;channel<SAMPLE_CHANNELS;++channel)if(start[channel]>=0) {
+    for(int channel=0;channel<TT_CHANNELS;++channel)if(start[channel]>=0) {
         int width=end[channel]-start[channel];
         char label[8];int length=snprintf(label,sizeof(label),"CH%d",channel+1);
         if(length>width)length=width;
@@ -1131,7 +1131,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
     }
     for(int y=r.y;y<r.y+r.h;++y)f80_put(y,r.x+4,"│",1,10,0);
     if(tracker.field_scroll>0)f80_put(r.y+2,r.x+4,"◄",1,8,1);
-    if(pattern_field_span(tracker.field_scroll,SAMPLE_CHANNELS*4-1)>r.w-6)
+    if(pattern_field_span(tracker.field_scroll,TT_CHANNELS*4-1)>r.w-6)
         f80_put(r.y+2,right-1,"►",1,8,1);
     int total=grid_total_rows();
     int track=r.h-2,body=r.h-3,maximum=total-body;
@@ -1148,14 +1148,14 @@ static void close_help(F80Widget *button,void *user) {
     (void)button;(void)user;f80_hide_modal(&tracker.app);
 }
 static void store_sample(void) {
-    StoredSample *slot=&tracker.samples[tracker.sample_index];
+    TtStored *slot=&tracker.samples[tracker.sample_index];
     slot->wave=tracker.wave;slot->phrase=tracker.phrase;
     snprintf(slot->loaded_path,sizeof(slot->loaded_path),"%s",tracker.loaded_path);
     snprintf(slot->csv_path,sizeof(slot->csv_path),"%s",tracker.csv_path);
     memset(&tracker.wave,0,sizeof(tracker.wave));
 }
 static void restore_sample(int index) {
-    StoredSample *slot=&tracker.samples[index];
+    TtStored *slot=&tracker.samples[index];
     tracker.wave=slot->wave;tracker.phrase=slot->phrase;
     snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",slot->loaded_path);
     snprintf(tracker.csv_path,sizeof(tracker.csv_path),"%s",slot->csv_path);
@@ -1166,21 +1166,21 @@ static void restore_sample(int index) {
 static void manage_refresh(void) {
     if(!tracker.manage_dialog)return;
     for(int i=0;i<tracker.sample_count;++i) {
-        const SampleWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
-        char note[4];const SamplePhrase *phrase=i==tracker.sample_index?
+        const TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
+        char note[4];const TtPhrase *phrase=i==tracker.sample_index?
             &tracker.phrase:&tracker.samples[i].phrase;
-        sample_note_name(phrase->reference_note,note);
+        tt_note_name(phrase->reference_note,note);
         snprintf(tracker.manage_rows[i],sizeof(tracker.manage_rows[i]),
                  "%02X  %-36.36s  Ref %s",i+1,wave->name,note);
         tracker.manage_items[i]=tracker.manage_rows[i];
     }
     tracker.manage_list->item_count=tracker.sample_count;
     int selected=clamp(tracker.manage_list->cursor,0,tracker.sample_count-1);
-    const SampleWave *wave=selected==tracker.sample_index?&tracker.wave:
+    const TtWave *wave=selected==tracker.sample_index?&tracker.wave:
         &tracker.samples[selected].wave;
-    const SamplePhrase *phrase=selected==tracker.sample_index?&tracker.phrase:
+    const TtPhrase *phrase=selected==tracker.sample_index?&tracker.phrase:
         &tracker.samples[selected].phrase;
-    char note[4];sample_note_name(phrase->reference_note,note);
+    char note[4];tt_note_name(phrase->reference_note,note);
     snprintf(tracker.manage_details,sizeof(tracker.manage_details),
              "Source: %.50s | %d frames | %d Hz | Base %s",
              wave->source_name,wave->frames,wave->rate,note);
@@ -1188,7 +1188,7 @@ static void manage_refresh(void) {
 static void manage_selected(F80Widget *list,void *user) {
     (void)user;
     int index=clamp(list->cursor,0,tracker.sample_count-1);
-    const SampleWave *wave=index==tracker.sample_index?&tracker.wave:
+    const TtWave *wave=index==tracker.sample_index?&tracker.wave:
         &tracker.samples[index].wave;
     snprintf(tracker.manage_name->input,sizeof(tracker.manage_name->input),"%s",wave->name);
     tracker.manage_name->input_pos=(int)strlen(tracker.manage_name->input);
@@ -1200,15 +1200,15 @@ static void manage_move(F80Widget *button,void *user) {
     if(b<0 || b>=tracker.sample_count)return;
     stop_playback(NULL,NULL);
     store_sample();
-    StoredSample temp=tracker.samples[a];tracker.samples[a]=tracker.samples[b];
+    TtStored temp=tracker.samples[a];tracker.samples[a]=tracker.samples[b];
     tracker.samples[b]=temp;
     int selected=tracker.sample_index==a?b:tracker.sample_index==b?a:tracker.sample_index;
     restore_sample(selected);
     for(int pattern=0;pattern<tracker.song.pattern_count;++pattern)
-    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
-        SamplePattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
+    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<TT_CHANNELS;++channel) {
+        TtPattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
                             &tracker.song.pattern[pattern];
-        SampleCell *cell=&bank->cell[row][channel];
+        TtCell *cell=&bank->cell[row][channel];
         if(cell->instrument==a+1)cell->instrument=b+1;
         else if(cell->instrument==b+1)cell->instrument=a+1;
     }
@@ -1221,19 +1221,19 @@ static void manage_delete(F80Widget *button,void *user) {
     if(!tracker.delete_armed) { tracker.delete_armed=1;message("Press Delete again to remove this sample");return; }
     int removed=tracker.manage_list->cursor;
     stop_playback(NULL,NULL);store_sample();
-    sample_free(&tracker.samples[removed].wave);
+    tt_free(&tracker.samples[removed].wave);
     for(int i=removed;i<tracker.sample_count-1;++i)tracker.samples[i]=tracker.samples[i+1];
-    memset(&tracker.samples[--tracker.sample_count],0,sizeof(StoredSample));
+    memset(&tracker.samples[--tracker.sample_count],0,sizeof(TtStored));
     int next=tracker.sample_index;
     if(next==removed)next=clamp(removed,0,tracker.sample_count-1);
     else if(next>removed)--next;
     restore_sample(next);
     for(int pattern=0;pattern<tracker.song.pattern_count;++pattern)
-    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<SAMPLE_CHANNELS;++channel) {
-        SamplePattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
+    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<TT_CHANNELS;++channel) {
+        TtPattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
                             &tracker.song.pattern[pattern];
-        SampleCell *cell=&bank->cell[row][channel];
-        if(cell->instrument==removed+1)*cell=(SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+        TtCell *cell=&bank->cell[row][channel];
+        if(cell->instrument==removed+1)*cell=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
         else if(cell->instrument>removed+1)--cell->instrument;
     }
     tracker.manage_list->cursor=clamp(removed,0,tracker.sample_count-1);
@@ -1245,16 +1245,16 @@ static void manage_rename(F80Widget *button,void *user) {
     tracker.delete_armed=0;
     if(!tracker.manage_name->input[0]) { message("Enter a sample name");return; }
     int index=tracker.manage_list->cursor;
-    SampleWave *wave=index==tracker.sample_index?&tracker.wave:&tracker.samples[index].wave;
+    TtWave *wave=index==tracker.sample_index?&tracker.wave:&tracker.samples[index].wave;
     snprintf(wave->name,sizeof(wave->name),"%s",tracker.manage_name->input);
     manage_refresh();message("Sample renamed; original WAV name retained for CSV");
 }
 static void manage_ref(F80Widget *button,void *user) {
     (void)button;int delta=(int)(long)user,index=tracker.manage_list->cursor;
     tracker.delete_armed=0;
-    SamplePhrase *phrase=index==tracker.sample_index?&tracker.phrase:
+    TtPhrase *phrase=index==tracker.sample_index?&tracker.phrase:
         &tracker.samples[index].phrase;
-    sample_phrase_set_reference_note(phrase,clamp(phrase->reference_note+delta,0,127));
+    tt_phrase_set_reference_note(phrase,clamp(phrase->reference_note+delta,0,127));
     manage_refresh();message("Sample base changed; slice bases transposed");
 }
 static void close_manage(F80Widget *button,void *user) {
@@ -1288,23 +1288,23 @@ static void show_manage(F80Widget *button,void *user) {
 static int parse_note(const char *text) {
     char candidate[4];
     for(int note=0;note<128;++note) {
-        sample_note_name(note,candidate);
+        tt_note_name(note,candidate);
         if(!strcmp(candidate,text))return note;
     }
     return -1;
 }
 static void slices_refresh(void) {
     if(!tracker.slices_dialog)return;
-    for(int i=0;i<SAMPLE_SLICES;++i) {
-        char note[4];sample_note_name(sample_slice_base_note(&tracker.phrase,i),note);
+    for(int i=0;i<TT_SLICES;++i) {
+        char note[4];tt_note_name(tt_slice_base_note(&tracker.phrase,i),note);
         snprintf(tracker.slice_rows[i],sizeof(tracker.slice_rows[i]),
                  "%X-%X  %8.3f - %8.3fs  %s%s",i,i+1,
                  (double)tracker.phrase.marker[i]/tracker.wave.rate,
                  (double)tracker.phrase.marker[i+1]/tracker.wave.rate,note,
-                 tracker.phrase.slice_note_offset[i]==SAMPLE_SLICE_INHERIT?" (sample)":" (override)");
+                 tracker.phrase.slice_note_offset[i]==TT_SLICE_INHERIT?" (sample)":" (override)");
         tracker.slice_items[i]=tracker.slice_rows[i];
     }
-    int i=clamp(tracker.slices_list->cursor,0,SAMPLE_SLICES-1);
+    int i=clamp(tracker.slices_list->cursor,0,TT_SLICES-1);
     snprintf(tracker.slice_details,sizeof(tracker.slice_details),
              "Slice %X: frames %d-%d, duration %.3fs; source %.55s",i,
              tracker.phrase.marker[i],tracker.phrase.marker[i+1],
@@ -1313,7 +1313,7 @@ static void slices_refresh(void) {
 }
 static void slices_selected(F80Widget *list,void *user) {
     (void)user;char note[4];
-    sample_note_name(sample_slice_base_note(&tracker.phrase,list->cursor),note);
+    tt_note_name(tt_slice_base_note(&tracker.phrase,list->cursor),note);
     snprintf(tracker.slices_note->input,sizeof(tracker.slices_note->input),"%s",note);
     tracker.slices_note->input_pos=(int)strlen(tracker.slices_note->input);
     slices_refresh();
@@ -1322,19 +1322,19 @@ static void slices_apply(F80Widget *button,void *user) {
     (void)button;(void)user;
     int note=parse_note(tracker.slices_note->input);
     if(note<0) { message("Enter a note like C-4 or F#3");return; }
-    sample_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,note);
+    tt_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,note);
     slices_refresh();message("Slice base note set");
 }
 static void slices_inherit(F80Widget *button,void *user) {
     (void)button;(void)user;
-    sample_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,-1);
+    tt_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,-1);
     slices_selected(tracker.slices_list,NULL);message("Slice inherits sample base note");
 }
 static void slices_step(F80Widget *button,void *user) {
     (void)button;
     int index=tracker.slices_list->cursor;
-    sample_slice_set_note(&tracker.phrase,index,
-        clamp(sample_slice_base_note(&tracker.phrase,index)+(int)(long)user,0,127));
+    tt_slice_set_note(&tracker.phrase,index,
+        clamp(tt_slice_base_note(&tracker.phrase,index)+(int)(long)user,0,127));
     slices_selected(tracker.slices_list,NULL);message("Slice base note changed");
 }
 static void close_slices(F80Widget *button,void *user) {
@@ -1347,10 +1347,10 @@ static void show_slices(F80Widget *button,void *user) {
     F80Widget *dialog=f80_dialog("Slices",NULL,NULL,0,0);
     tracker.slices_dialog=dialog;
     tracker.slices_list_bg=f80_add(dialog,f80_window(F80_WINDOW_CYAN,F80_COL));
-    tracker.slices_list=f80_add(dialog,f80_listbox(tracker.slice_items,SAMPLE_SLICES,
+    tracker.slices_list=f80_add(dialog,f80_listbox(tracker.slice_items,TT_SLICES,
                                                    slices_selected,NULL));
     tracker.slices_list->window_role=F80_WINDOW_CYAN;
-    tracker.slices_list->cursor=clamp(tracker.marker,0,SAMPLE_SLICES-1);
+    tracker.slices_list->cursor=clamp(tracker.marker,0,TT_SLICES-1);
     tracker.slices_note=f80_add(dialog,f80_input());
     tracker.slices_info=f80_add(dialog,f80_label(tracker.slice_details));
     tracker.slices_info->style=F80_COLOR_TEXT;
@@ -1367,7 +1367,7 @@ static void order_refresh(void) {
     snprintf(tracker.order_heading,sizeof(tracker.order_heading),
              "PLAY ORDER  |  BPM %d",tracker.song.bpm);
     for(int i=0;i<tracker.song.pattern_count;++i) {
-        const SamplePattern *pattern=i==tracker.pattern_index?&tracker.pattern:
+        const TtPattern *pattern=i==tracker.pattern_index?&tracker.pattern:
             &tracker.song.pattern[i];
         snprintf(tracker.bank_rows[i],sizeof(tracker.bank_rows[i]),
                  "%02X  %.64s%s%s",i,tracker.song.name[i],
@@ -1392,18 +1392,18 @@ static void order_bank_selected(F80Widget *list,void *user) {
              tracker.song.name[list->cursor]);
     tracker.order_name->input_pos=(int)strlen(tracker.order_name->input);
 }
-static void empty_pattern(SamplePattern *pattern) {
-    for(int row=0;row<SAMPLE_MAX_STEPS;++row)for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
-        pattern->cell[row][channel]=(SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+static void empty_pattern(TtPattern *pattern) {
+    for(int row=0;row<TT_MAX_STEPS;++row)for(int channel=0;channel<TT_CHANNELS;++channel)
+        pattern->cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
 }
 static void order_new_pattern(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.song.pattern_count>=SAMPLE_SONG_PATTERNS) {
+    if(tracker.song.pattern_count>=TT_SONG_PATTERNS) {
         message("Pattern bank is full");return;
     }
     int index=tracker.song.pattern_count++;
     empty_pattern(&tracker.song.pattern[index]);
-    snprintf(tracker.song.name[index],SAMPLE_SONG_NAME,"Pattern %02X",index);
+    snprintf(tracker.song.name[index],TT_SONG_NAME,"Pattern %02X",index);
     select_edit_pattern(index);
     tracker.order_bank->cursor=index;
     order_refresh();order_bank_selected(tracker.order_bank,NULL);
@@ -1413,7 +1413,7 @@ static void order_rename(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(!tracker.order_name->input[0]) { message("Enter a pattern name");return; }
     int index=tracker.order_bank->cursor;
-    snprintf(tracker.song.name[index],SAMPLE_SONG_NAME,"%.63s",tracker.order_name->input);
+    snprintf(tracker.song.name[index],TT_SONG_NAME,"%.63s",tracker.order_name->input);
     order_refresh();message("Pattern renamed");
 }
 static void order_edit(F80Widget *button,void *user) {
@@ -1426,7 +1426,7 @@ static void order_edit(F80Widget *button,void *user) {
 }
 static void order_add(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.song.order_count>=SAMPLE_SONG_ORDER) { message("Order is full");return; }
+    if(tracker.song.order_count>=TT_SONG_ORDER) { message("Order is full");return; }
     stop_playback(NULL,NULL);
     int at=tracker.order_seq->cursor+1;
     if(at<0 || at>tracker.song.order_count)at=tracker.song.order_count;
@@ -1474,21 +1474,21 @@ static void apply_settings(F80Widget *button,void *user) {
     (void)button;(void)user;
     int bpm,rows,beat_rows,ticks;
     if(!setting_number(tracker.settings_input[0],30,300,&bpm) ||
-       !setting_number(tracker.settings_input[1],16,SAMPLE_MAX_STEPS,&rows) ||
+       !setting_number(tracker.settings_input[1],16,TT_MAX_STEPS,&rows) ||
        rows%16 || !setting_number(tracker.settings_input[2],1,16,&beat_rows) ||
-       !setting_number(tracker.settings_input[3],1,SAMPLE_MAX_TICKS_PER_ROW,&ticks)) {
+       !setting_number(tracker.settings_input[3],1,TT_MAX_TICKS_PER_ROW,&ticks)) {
         message("Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48");
         return;
     }
     stop_playback(NULL,NULL);
     if(rows<tracker.song.pattern_rows)
         for(int pattern=0;pattern<tracker.song.pattern_count;++pattern) {
-            SamplePattern *current=pattern==tracker.pattern_index?
+            TtPattern *current=pattern==tracker.pattern_index?
                 &tracker.pattern:&tracker.song.pattern[pattern];
-            for(int row=rows;row<SAMPLE_MAX_STEPS;++row)
-                for(int channel=0;channel<SAMPLE_CHANNELS;++channel)
+            for(int row=rows;row<TT_MAX_STEPS;++row)
+                for(int channel=0;channel<TT_CHANNELS;++channel)
                     current->cell[row][channel]=
-                        (SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+                        (TtCell){-1,-1,TT_EFFECT_NONE,-1};
         }
     tracker.song.bpm=bpm;
     tracker.song.pattern_rows=rows;
@@ -1566,15 +1566,15 @@ static void table_title(void) {
 }
 static void table_cell_text(void *user,int tick,int field,char *out,size_t size) {
     (void)user;
-    const SampleTableTick *entry=&tracker.song.table[tracker.table_index].tick[tick];
+    const TtTableTick *entry=&tracker.song.table[tracker.table_index].tick[tick];
     if(field==0) {
         if(entry->note<0)snprintf(out,size,"...");
-        else { char note[4];sample_note_name(entry->note,note);snprintf(out,size,"%s",note); }
+        else { char note[4];tt_note_name(entry->note,note);snprintf(out,size,"%s",note); }
     } else if(field==1) {
         if(entry->instrument<0)snprintf(out,size,"..");
         else snprintf(out,size,"%02X",entry->instrument);
     } else {
-        const SampleTableEffect *fx=&entry->effect[field-2];
+        const TtTableEffect *fx=&entry->effect[field-2];
         if(!fx->command)snprintf(out,size,"...");
         else if(fx->value<0)snprintf(out,size,"%c..",fx->command);
         else snprintf(out,size,"%c%02X",fx->command,fx->value);
@@ -1592,7 +1592,7 @@ static void paint_table_scrollbar(F80Widget *canvas,void *user) {
 static void table_select(F80Widget *button,void *user) {
     (void)button;
     tracker.table_index=clamp(tracker.table_index+(int)(long)user,
-                              0,SAMPLE_SONG_TABLES-1);
+                              0,TT_SONG_TABLES-1);
     tracker.table_grid.row=tracker.table_grid.scroll_y=0;
     tracker.table_grid.selecting=0;
     f80_grid_resize(&tracker.table_grid,tracker.song.table[tracker.table_index].length);
@@ -1605,9 +1605,9 @@ static void table_select(F80Widget *button,void *user) {
 }
 static void table_resize(F80Widget *button,void *user) {
     (void)button;
-    SampleTable *table=&tracker.song.table[tracker.table_index];
-    table->length=clamp(table->length+(int)(long)user*SAMPLE_TABLE_MIN_TICKS,
-                        SAMPLE_TABLE_MIN_TICKS,SAMPLE_TABLE_MAX_TICKS);
+    TtTable *table=&tracker.song.table[tracker.table_index];
+    table->length=clamp(table->length+(int)(long)user*TT_TABLE_MIN_TICKS,
+                        TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS);
     f80_grid_resize(&tracker.table_grid,table->length);
     table_title();
 }
@@ -1737,44 +1737,44 @@ static void next_pattern(F80Widget *button,void *user) {
 }
 static void clear_field(F80Widget *button,void *user) {
     (void)button;(void)user;
-    SampleCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
     if(tracker.field==0)cell->note=-1;
     else if(tracker.field==1)cell->instrument=-1;
-    else if(tracker.field==2)set_effect(cell,SAMPLE_EFFECT_NONE);
-    else if(cell->effect!=SAMPLE_EFFECT_NONE)cell->value=0;
+    else if(tracker.field==2)set_effect(cell,TT_EFFECT_NONE);
+    else if(cell->effect!=TT_EFFECT_NONE)cell->value=0;
 }
-static void sample_down(F80Widget *button,void *user) {
+static void tt_down(F80Widget *button,void *user) {
     (void)button;(void)user;
-    SampleCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
     cell->instrument=clamp((cell->instrument<1?tracker.sample_index+1:cell->instrument)-1,
                            1,tracker.sample_count);
 }
-static void sample_up(F80Widget *button,void *user) {
+static void tt_up(F80Widget *button,void *user) {
     (void)button;(void)user;
-    SampleCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
     cell->instrument=clamp((cell->instrument<1?tracker.sample_index+1:cell->instrument)+1,
                            1,tracker.sample_count);
 }
 static void use_m(F80Widget *button,void *user) {
     (void)button;(void)user;
-    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],SAMPLE_EFFECT_M);
+    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],TT_EFFECT_M);
 }
 static void use_s(F80Widget *button,void *user) {
     (void)button;(void)user;
-    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],SAMPLE_EFFECT_S);
+    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],TT_EFFECT_S);
 }
 static void repeat_above(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(tracker.step==0)return;
-    SampleCell *dst=&tracker.pattern.cell[tracker.step][tracker.channel];
-    const SampleCell *src=&tracker.pattern.cell[tracker.step-1][tracker.channel];
+    TtCell *dst=&tracker.pattern.cell[tracker.step][tracker.channel];
+    const TtCell *src=&tracker.pattern.cell[tracker.step-1][tracker.channel];
     if(tracker.field==2) { dst->effect=src->effect;dst->value=src->value; }
     else dst->value=src->value;
 }
 static void select_transpose(int delta) {
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
     for(int row=top;row<=bottom;++row)for(int channel=left;channel<=right;++channel) {
-        SampleCell *cell=&tracker.pattern.cell[row][channel];
+        TtCell *cell=&tracker.pattern.cell[row][channel];
         if(cell->note>=0)cell->note=clamp(cell->note+delta,12,127);
     }
 }
@@ -1800,7 +1800,7 @@ static void clear_selection(F80Widget *button,void *user) {
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
     for(int row=top;row<=bottom;++row)
         for(int channel=left;channel<=right;++channel)
-            tracker.pattern.cell[row][channel]=(SampleCell){-1,-1,SAMPLE_EFFECT_NONE,-1};
+            tracker.pattern.cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
     message("Selection cleared");
 }
 static void cut_selection(F80Widget *button,void *user) {
@@ -1831,7 +1831,7 @@ static const F80StatusItem note_status[]={
 };
 static const F80StatusItem instrument_status[]={
     {"1","Pt-",prev_pattern},{"2","Pt+",next_pattern},
-    {"3","Sm-",sample_down},{"4","Sm+",sample_up},
+    {"3","Sm-",tt_down},{"4","Sm+",tt_up},
     {"5","Mrk",show_slices},{"6","Mgr",show_manage},
     {"7","New",open_load},{"8","Clr",clear_field},
     {"9","Men",pull_menu},{"10","Xit",quit}
@@ -1905,7 +1905,7 @@ static int piano_offset(int key) {
     at=strchr(high,key);
     return at?high_note[at-high]:-1;
 }
-static void table_assign_field(SampleTableTick *dst,const SampleTableTick *src,int field) {
+static void table_assign_field(TtTableTick *dst,const TtTableTick *src,int field) {
     if(field==0)dst->note=src->note;
     else if(field==1)dst->instrument=src->instrument;
     else dst->effect[field-2]=src->effect[field-2];
@@ -1913,19 +1913,19 @@ static void table_assign_field(SampleTableTick *dst,const SampleTableTick *src,i
 static void table_clear_area(void) {
     int top,left,bottom,right;
     f80_grid_bounds(&tracker.table_grid,&top,&left,&bottom,&right);
-    SampleTable *table=&tracker.song.table[tracker.table_index];
+    TtTable *table=&tracker.song.table[tracker.table_index];
     for(int row=top;row<=bottom;++row)
         for(int field=left;field<=right;++field) {
-            SampleTableTick *entry=&table->tick[row];
+            TtTableTick *entry=&table->tick[row];
             if(field==0)entry->note=-1;
             else if(field==1)entry->instrument=-1;
-            else entry->effect[field-2]=(SampleTableEffect){0,-1};
+            else entry->effect[field-2]=(TtTableEffect){0,-1};
         }
 }
 static void table_copy_area(void) {
     int top,left,bottom,right;
     f80_grid_bounds(&tracker.table_grid,&top,&left,&bottom,&right);
-    SampleTable *table=&tracker.song.table[tracker.table_index];
+    TtTable *table=&tracker.song.table[tracker.table_index];
     tracker.table_clip_rows=bottom-top+1;
     tracker.table_clip_left=left;tracker.table_clip_right=right;
     for(int row=0;row<tracker.table_clip_rows;++row)
@@ -1939,7 +1939,7 @@ static void table_paste_area(void) {
        right!=tracker.table_clip_right || bottom-top+1!=tracker.table_clip_rows) {
         message("Select matching table fields and ticks to paste");return;
     }
-    SampleTable *table=&tracker.song.table[tracker.table_index];
+    TtTable *table=&tracker.song.table[tracker.table_index];
     for(int row=0;row<tracker.table_clip_rows;++row)
         for(int field=left;field<=right;++field)
             table_assign_field(&table->tick[top+row],&tracker.table_clip[row],field);
@@ -1953,13 +1953,13 @@ static void handle_table_key(int key) {
     }
     if(tracker.app.focus==tracker.table_name) {
         f80_key(&tracker.app,key);
-        if(strlen(tracker.table_name->input)>=SAMPLE_SONG_NAME) {
-            tracker.table_name->input[SAMPLE_SONG_NAME-1]=0;
+        if(strlen(tracker.table_name->input)>=TT_SONG_NAME) {
+            tracker.table_name->input[TT_SONG_NAME-1]=0;
             tracker.table_name->input_pos=clamp(tracker.table_name->input_pos,0,
-                                                SAMPLE_SONG_NAME-1);
+                                                TT_SONG_NAME-1);
         }
         if(tracker.table_name->input[0])
-            snprintf(tracker.song.table[tracker.table_index].name,SAMPLE_SONG_NAME,
+            snprintf(tracker.song.table[tracker.table_index].name,TT_SONG_NAME,
                      "%s",tracker.table_name->input);
         return;
     }
@@ -1968,8 +1968,8 @@ static void handle_table_key(int key) {
     if(key==2007) { table_paste_area();return; }
     if(key==2008) { table_clear_area();message("Table selection cleared");return; }
     if(f80_grid_key(&tracker.table_grid,key))return;
-    SampleTable *table=&tracker.song.table[tracker.table_index];
-    SampleTableTick *entry=&table->tick[tracker.table_grid.row];
+    TtTable *table=&tracker.song.table[tracker.table_index];
+    TtTableTick *entry=&table->tick[tracker.table_grid.row];
     if(key=='[')table_select(NULL,(void *)(long)-1);
     else if(key==']')table_select(NULL,(void *)(long)1);
     else if(key=='-')table_resize(NULL,(void *)(long)-1);
@@ -1985,7 +1985,7 @@ static void handle_table_key(int key) {
         int digit=hex_digit(key);
         if(digit>=0)entry->instrument=((entry->instrument<0?0:entry->instrument)<<4 & 0xf0)|digit;
     } else {
-        SampleTableEffect *fx=&entry->effect[tracker.table_grid.field-2];
+        TtTableEffect *fx=&entry->effect[tracker.table_grid.field-2];
         int digit=hex_digit(key);
         if(key>='g' && key<='z')key-=32;
         if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXY",key)) {
@@ -2009,7 +2009,7 @@ static void update_labels(void) {
             tracker.order_panel_items[i]=tracker.order_panel_rows[i];
         }
     }
-    char reference[4];sample_note_name(tracker.phrase.reference_note,reference);
+    char reference[4];tt_note_name(tracker.phrase.reference_note,reference);
     int rows,cols;getmaxyx(stdscr,rows,cols);(void)rows;
     snprintf(tracker.header_text,sizeof(tracker.header_text),
              "%s",cols<70?"Tracker":"Sample Tracker");
@@ -2040,7 +2040,7 @@ static void update_labels(void) {
     else
         snprintf(tracker.phrase_title,sizeof(tracker.phrase_title),
                  "%02X. %.50s / %d channels / %s",tracker.pattern_index,
-                 tracker.song.name[tracker.pattern_index],SAMPLE_CHANNELS,
+                 tracker.song.name[tracker.pattern_index],TT_CHANNELS,
                  tracker.loop?"loop":"once");
     tracker.phrase_frame->title=tracker.phrase_title;
     if(tracker.focus==FOCUS_WAVE)
@@ -2060,7 +2060,7 @@ static void update_labels(void) {
                  paste_available()?" PASTE READY":"",tracker.message);
     } else {
         char compact[11],shown[13];
-        sample_cell_text(&tracker.pattern.cell[tracker.step][tracker.channel],compact);
+        tt_cell_text(&tracker.pattern.cell[tracker.step][tracker.channel],compact);
         snprintf(shown,sizeof(shown),"%.3s %.2s %.5s",compact,compact+3,compact+5);
         snprintf(tracker.details_text,sizeof(tracker.details_text),
                  "ROW %02X CH%d  %s  %s  Oct %d  |  %s",tracker.step,tracker.channel+1,
@@ -2098,8 +2098,8 @@ static void handle_key(int key) {
                   tracker.app.focus==tracker.slices_list &&
                   (key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_HOME || key==F80_KEY_END)) {
             tracker.slices_list->cursor=key==F80_KEY_HOME?0:key==F80_KEY_END?
-                SAMPLE_SLICES-1:clamp(tracker.slices_list->cursor+
-                (key==F80_KEY_UP?-1:1),0,SAMPLE_SLICES-1);
+                TT_SLICES-1:clamp(tracker.slices_list->cursor+
+                (key==F80_KEY_UP?-1:1),0,TT_SLICES-1);
             slices_selected(tracker.slices_list,NULL);
         } else if(tracker.app.modal==tracker.order_dialog &&
                   (tracker.app.focus==tracker.order_bank ||
@@ -2158,8 +2158,8 @@ static void handle_key(int key) {
             }
             if(key==F80_KEY_SHIFT_UP)tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);
             else if(key==F80_KEY_SHIFT_DOWN)tracker.step=clamp(tracker.step+1,0,tracker.song.pattern_rows-1);
-            else if(key==F80_KEY_SHIFT_LEFT)tracker.channel=clamp(tracker.channel-1,0,SAMPLE_CHANNELS-1);
-            else tracker.channel=clamp(tracker.channel+1,0,SAMPLE_CHANNELS-1);
+            else if(key==F80_KEY_SHIFT_LEFT)tracker.channel=clamp(tracker.channel-1,0,TT_CHANNELS-1);
+            else tracker.channel=clamp(tracker.channel+1,0,TT_CHANNELS-1);
             if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN)
                 tracker.reveal_cursor=1;
             return;
@@ -2167,7 +2167,7 @@ static void handle_key(int key) {
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
         if(tracker.selecting)return;
-        SampleCell *entry=&tracker.pattern.cell[tracker.step][tracker.channel];
+        TtCell *entry=&tracker.pattern.cell[tracker.step][tracker.channel];
         int digit=hex_digit(key);
         if(key==F80_KEY_UP) {
             tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);tracker.reveal_cursor=1;
@@ -2179,21 +2179,21 @@ static void handle_key(int key) {
             else if(tracker.channel) { tracker.channel--;tracker.field=3; }
         } else if(key==F80_KEY_RIGHT) {
             if(tracker.field<3)tracker.field++;
-            else if(tracker.channel<SAMPLE_CHANNELS-1) {
+            else if(tracker.channel<TT_CHANNELS-1) {
                 tracker.channel++;tracker.field=0;
             }
         } else if(key==F80_KEY_DELETE || key==F80_KEY_BACKSPACE || key=='.') {
             if(tracker.field==0)entry->note=-1;
             else if(tracker.field==1)entry->instrument=-1;
-            else if(tracker.field==2)set_effect(entry,SAMPLE_EFFECT_NONE);
-            else if(entry->effect!=SAMPLE_EFFECT_NONE)entry->value=0;
+            else if(tracker.field==2)set_effect(entry,TT_EFFECT_NONE);
+            else if(entry->effect!=TT_EFFECT_NONE)entry->value=0;
         } else if(tracker.field==1 && digit>=0) {
             entry->instrument=digit;
         } else if(tracker.field==2 &&
                   strchr("GIJKMNOPRSTVW",key>='a' && key<='z'?key-32:key))
             set_effect(entry,key>='a' && key<='z'?key-32:key);
         else if(tracker.field==3 && digit>=0) {
-            if(entry->effect==SAMPLE_EFFECT_NONE)set_effect(entry,SAMPLE_EFFECT_S);
+            if(entry->effect==TT_EFFECT_NONE)set_effect(entry,TT_EFFECT_S);
             entry->value=(((entry->value<0?0:entry->value)<<4)&0xf0)|digit;
         }
         else if(tracker.field==0) {
@@ -2307,7 +2307,7 @@ static void handle_mouse(int x,int y,int wheel) {
             int old_step=tracker.step,old_channel=tracker.channel;
             tracker.step=global%tracker.song.pattern_rows;
             int position=r.x+5;
-            for(int index=tracker.field_scroll;index<SAMPLE_CHANNELS*4 &&
+            for(int index=tracker.field_scroll;index<TT_CHANNELS*4 &&
                 position<r.x+r.w-1;++index) {
                 int field=index%4;
                 if(index>tracker.field_scroll && field==0)++position;
@@ -2392,7 +2392,7 @@ static void hold_wave_marker(int x) {
     int frame=tracker.view_start+(int)((long long)(x-r.x)*visible_frames()/r.w);
     int nearest=0;
     long long best=(long long)tracker.wave.frames+1;
-    for(int marker=0;marker<SAMPLE_MARKERS;++marker) {
+    for(int marker=0;marker<TT_MARKERS;++marker) {
         long long distance=llabs((long long)tracker.phrase.marker[marker]-frame);
         if(distance<best) { best=distance;nearest=marker; }
     }
@@ -2409,60 +2409,60 @@ static void move_wave_marker_touch(int x) {
     x=clamp(x,r.x,r.x+r.w-1);
     int frame=wave_touch.marker_frame+
         (int)((long long)(x-wave_touch.x)*wave_touch.visible/r.w);
-    sample_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,frame);
+    tt_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,frame);
 }
 #ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE void sample_tracker_begin_touch_selection(int x,int y) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_begin_touch_selection(int x,int y) {
     begin_touch_selection(x,y);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_touch_scroll(int rows) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_touch_scroll(int rows) {
     touch_scroll_rows(rows);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_touch_scroll_fields(int fields) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_touch_scroll_fields(int fields) {
     touch_scroll_fields(fields);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_scroll_order(int rows) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_order(int rows) {
     order_panel_scroll(rows);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_scroll_table(int ticks) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_table(int ticks) {
     if(tracker.app.modal!=tracker.table_dialog || !tracker.table_canvas)return;
     f80_grid_scroll(&tracker.table_grid,0,ticks);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_scroll_table_horizontal(int cells) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_table_horizontal(int cells) {
     if(tracker.app.modal!=tracker.table_dialog || !tracker.table_canvas)return;
     f80_grid_scroll(&tracker.table_grid,cells,0);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_scroll_table_actions(int rows) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_table_actions(int rows) {
     if(tracker.app.modal!=tracker.table_dialog)return;
     f80_wrap_scroll(&tracker.table_actions,rows,tracker.table_buttons,5);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_hold_table_selection(int x,int y) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_hold_table_selection(int x,int y) {
     if(tracker.app.modal!=tracker.table_dialog || !tracker.table_canvas)return;
     f80_grid_mouse(&tracker.table_grid,x,y,0);
     f80_grid_hold(&tracker.table_grid);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_drag_table_selection(int x,int y) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_drag_table_selection(int x,int y) {
     if(tracker.app.modal!=tracker.table_dialog || !tracker.table_canvas)return;
     f80_grid_drag(&tracker.table_grid,x,y);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_begin_wave_gesture(int x) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_begin_wave_gesture(int x) {
     begin_wave_gesture(x);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_pan_wave_touch(int x) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_pan_wave_touch(int x) {
     pan_wave_touch(x);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_hold_wave_marker(int x) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_hold_wave_marker(int x) {
     hold_wave_marker(x);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_move_wave_marker(int x) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_move_wave_marker(int x) {
     move_wave_marker_touch(x);
 }
-EMSCRIPTEN_KEEPALIVE void sample_tracker_drag_selection(int x,int y) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_drag_selection(int x,int y) {
     handle_mouse(x,y,2);
 }
 /* Process browser key and pointer events inside their user-activation event.
    The File menu can then open the native browser picker synchronously. */
-EMSCRIPTEN_KEEPALIVE void sample_tracker_flush_input(void) {
+EMSCRIPTEN_KEEPALIVE void tt_tracker_flush_input(void) {
     for(int pending=0;pending<256;++pending) {
         int key=getch();
         if(key==ERR)break;
@@ -2646,9 +2646,9 @@ static int frame(void *user) {
     (void)user;
     if(!tracker.app.running) {
         while(tracker.app.modal)f80_hide_modal(&tracker.app);
-        sample_audio_close();sample_free(&tracker.wave);
+        tt_audio_close();tt_free(&tracker.wave);
         for(int index=0;index<tracker.sample_count;++index)
-            sample_free(&tracker.samples[index].wave);
+            tt_free(&tracker.samples[index].wave);
         f80_free(tracker.root);tracker.root=NULL;
         return 0;
     }
@@ -2664,7 +2664,7 @@ static int frame(void *user) {
     int rows,cols;getmaxyx(stdscr,rows,cols);
     int editing=0;
 #ifdef __EMSCRIPTEN__
-    editing=sample_web_compact_editing();
+    editing=tt_web_compact_editing();
 #endif
     if(editing && !tracker.compact_editing)tracker.reveal_cursor=1;
     tracker.compact_editing=editing;
@@ -2779,37 +2779,37 @@ static int frame(void *user) {
 #ifdef __EMSCRIPTEN__
     if(tracker.app.modal==tracker.table_dialog && tracker.table_canvas) {
         F80Rect table=tracker.table_canvas->rect;
-        sample_web_table_rect(table.x,table.y,table.w,table.h,
+        tt_web_table_rect(table.x,table.y,table.w,table.h,
                               tracker.table_grid.show_h,tracker.table_grid.show_v);
         F80Rect actions=tracker.table_actions.rect;
-        sample_web_wrap_rect(actions.x,actions.y,actions.w,actions.h);
+        tt_web_wrap_rect(actions.x,actions.y,actions.w,actions.h);
     } else {
-        sample_web_table_rect(0,0,0,0,0,0);
-        sample_web_wrap_rect(0,0,0,0);
+        tt_web_table_rect(0,0,0,0,0,0);
+        tt_web_wrap_rect(0,0,0,0);
     }
     if(!tracker.app.modal) {
         F80Rect grid=tracker.phrase_canvas->rect;
         if(grid.w>6 && grid.h>3) {
-            sample_web_grid_rect(grid.x+5,grid.y+3,grid.w-6,grid.h-3);
+            tt_web_grid_rect(grid.x+5,grid.y+3,grid.w-6,grid.h-3);
             int body=grid.h-3,first=tracker.edit_order>=0?
                 tracker.edit_order*tracker.song.pattern_rows-tracker.phrase_scroll:0;
             int top=first>0?first:0;
             int bottom=first+tracker.song.pattern_rows<body?first+tracker.song.pattern_rows:body;
             if(bottom>top)
-                sample_web_editable_grid_rect(grid.x+5,grid.y+3+top,
+                tt_web_editable_grid_rect(grid.x+5,grid.y+3+top,
                                               grid.w-6,bottom-top);
         }
         F80Rect wave=tracker.wave_canvas->rect;
         if(tracker.wave.pcm && wave.w>0 && wave.h>1)
-            sample_web_wave_rect(wave.x,wave.y,wave.w,wave.h-1);
+            tt_web_wave_rect(wave.x,wave.y,wave.w,wave.h-1);
         F80Rect order=tracker.order_list->rect;
         if(order.w>0 && order.h>0)
-            sample_web_order_rect(order.x,order.y,order.w,order.h);
+            tt_web_order_rect(order.x,order.y,order.w,order.h);
     } else {
-        sample_web_grid_rect(0,0,0,0);
-        sample_web_editable_grid_rect(0,0,0,0);
-        sample_web_wave_rect(0,0,0,0);
-        sample_web_order_rect(0,0,0,0);
+        tt_web_grid_rect(0,0,0,0);
+        tt_web_editable_grid_rect(0,0,0,0);
+        tt_web_wave_rect(0,0,0,0);
+        tt_web_order_rect(0,0,0,0);
     }
 #endif
     int key=getch();
@@ -2852,7 +2852,7 @@ static int load_default_song(const char *executable) {
 loaded:
 #endif
     for(int i=0;i<tracker.sample_count;++i) {
-        SampleWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
+        TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
         if(!wave->pcm) { message("Default song has a missing WAV");return 0; }
     }
     return 1;
@@ -2865,8 +2865,8 @@ int main(int argc,char **argv) {
     tracker.active_pattern_index=tracker.active_order_index=-1;
     if(!load_default_song(argv[0])) {
         fprintf(stderr,"Could not load default.song: %s\n",tracker.message);
-        sample_free(&tracker.wave);
-        for(int i=0;i<tracker.sample_count;++i)sample_free(&tracker.samples[i].wave);
+        tt_free(&tracker.wave);
+        for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
         return 1;
     }
     message("Default song ready");
