@@ -60,6 +60,42 @@ EM_JS(int, tt_web_compact_editing, (), {
 
 TtTracker tracker;
 static TtEditHistory *edit_history;
+enum { TT_EVENT_LOG_CAPACITY=512, TT_EVENT_LOG_WIDTH=192 };
+static char event_log[TT_EVENT_LOG_CAPACITY][TT_EVENT_LOG_WIDTH];
+static int event_log_head,event_log_count;
+static char event_console_menu_label[32]="~S~how event console";
+
+void tt_tracker_log_event(const char *category,const char *description) {
+    Uint64 ticks=SDL_GetTicks();
+    snprintf(event_log[event_log_head],TT_EVENT_LOG_WIDTH,
+             "[%02llu:%02llu.%03llu] %-6.6s %s",
+             (unsigned long long)(ticks/60000),
+             (unsigned long long)((ticks/1000)%60),
+             (unsigned long long)(ticks%1000),category,description);
+    event_log_head=(event_log_head+1)%TT_EVENT_LOG_CAPACITY;
+    if(event_log_count<TT_EVENT_LOG_CAPACITY)++event_log_count;
+    if(tracker.console_scroll>0)++tracker.console_scroll;
+}
+static const char *edit_event_name(TtEditType type) {
+    static const char *const names[TT_EDIT_COUNT]={
+        [TT_EDIT_CELL_SET]="cell set",[TT_EDIT_CELLS_BULK]="cells bulk",
+        [TT_EDIT_PATTERN_NEW]="pattern new",[TT_EDIT_PATTERN_RENAME]="pattern rename",
+        [TT_EDIT_PATTERN_SELECT]="pattern select",[TT_EDIT_PATTERN_SYNC]="pattern sync",
+        [TT_EDIT_ORDER_INSERT]="order insert",[TT_EDIT_ORDER_REMOVE]="order remove",
+        [TT_EDIT_ORDER_SWAP]="order swap",[TT_EDIT_BPM]="BPM",
+        [TT_EDIT_SETTINGS]="settings",[TT_EDIT_TABLE_TICK_SET]="table tick",
+        [TT_EDIT_TABLE_TICKS_BULK]="table ticks bulk",
+        [TT_EDIT_TABLE_LENGTH]="table length",[TT_EDIT_TABLE_NAME]="table name",
+        [TT_EDIT_SAMPLE_RENAME]="sample rename",
+        [TT_EDIT_SAMPLE_REFERENCE]="sample reference",
+        [TT_EDIT_SAMPLE_SWAP]="sample swap",[TT_EDIT_SAMPLE_DELETE]="sample delete",
+        [TT_EDIT_SAMPLE_SELECT]="sample select",[TT_EDIT_SAMPLE_APPEND]="sample append",
+        [TT_EDIT_SAMPLE_RECOVER]="sample recover",
+        [TT_EDIT_MARKER_MOVE]="marker move",[TT_EDIT_SLICE_NOTE]="slice note",
+        [TT_EDIT_DOCUMENT_REPLACE]="document replace"
+    };
+    return type>TT_EDIT_NONE && type<TT_EDIT_COUNT && names[type]?names[type]:"unknown";
+}
 
 #ifndef __EMSCRIPTEN__
 static F80FileDialog file_dialog;
@@ -83,7 +119,19 @@ static TtEditDoc edit_doc(void) {
 static int emit_edit(const TtEditEvent *event) {
     TtEditDoc doc=edit_doc();
     edit_message[0]=0;
-    return tt_edit_apply_recorded(edit_history,&doc,event);
+    int applied=tt_edit_apply_recorded(edit_history,&doc,event);
+    if(applied) {
+        char detail[128];
+        if(event->type==TT_EDIT_CELL_SET)
+            snprintf(detail,sizeof(detail),"%s row %02X ch %d",edit_event_name(event->type),
+                     event->cell_set.row,event->cell_set.channel+1);
+        else if(event->type==TT_EDIT_TABLE_TICK_SET)
+            snprintf(detail,sizeof(detail),"%s table %02X tick %02X",
+                     edit_event_name(event->type),event->table_tick.table,event->table_tick.tick);
+        else snprintf(detail,sizeof(detail),"%s",edit_event_name(event->type));
+        tt_tracker_log_event("EDIT",detail);
+    }
+    return applied;
 }
 static void edit_cell(int row,int channel,TtCell cell) {
     TtEditEvent event={.type=TT_EDIT_CELL_SET};
@@ -108,9 +156,13 @@ static void edit_slice(int slice,int note) {
 }
 void tt_tracker_message(const char *text) {
     snprintf(tracker.message,sizeof(tracker.message),"%s",text);
+    tt_tracker_log_event("STATUS",text);
 }
 static void send_play(TtPlayType type,int a,int b) {
     if(tt_play_emit((TtPlayEvent){type,a,b,0}))tt_play_flush();
+}
+static void leave_follow(void) {
+    if(tracker.follow)send_play(TT_PLAY_TOGGLE_FOLLOW,0,0);
 }
 static void stop_playback(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_STOP,0,0);
@@ -210,12 +262,14 @@ static void pan_wave(int direction) {
 
 static void order_panel_selected(F80Widget *list,void *user) {
     (void)user;
+    leave_follow();
     int at=clamp(list->cursor,0,tracker.song.order_count-1);
     send_play(TT_PLAY_SELECT_ORDER,at,0);
 }
 #ifdef __EMSCRIPTEN__
 static void order_panel_scroll(int rows) {
     if(!tracker.order_list || tracker.app.modal || !rows)return;
+    leave_follow();
     int next=clamp(tracker.order_list->cursor+rows,0,tracker.song.order_count-1);
     if(next!=tracker.order_list->cursor) {
         tracker.order_list->cursor=next;
@@ -1281,7 +1335,7 @@ static void show_help(F80Widget *button,void *user) {
         "FX: G I J K M N O P R S T V W; values 00-FF.",
         "Note: Z-M and Q-U play two keyboard octaves; [/] change octave.",
         "Delete clears a field. Enter auditions. Ctrl+Z/Y undo/redo.",
-        "F9 opens the menu; F10 exits.",
+        "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "Sampler > Manage reorders, renames, deletes and retunes samples.",
         "Sampler > Slices sets a base note for each marker-to-marker slice.",
@@ -1295,6 +1349,67 @@ static void show_help(F80Widget *button,void *user) {
     dialog->dialog_align=1;
     f80_add(dialog,f80_button("~C~lose",close_help,NULL));
     f80_show_modal(&tracker.app,dialog);
+}
+static int console_max_scroll(int body_rows) {
+    int maximum=event_log_count-body_rows;
+    return maximum>0?maximum:0;
+}
+static void paint_event_console(F80Widget *canvas,void *user) {
+    (void)user;
+    F80Rect r=canvas->rect;
+    if(r.w<=0 || r.h<=0)return;
+    f80_fill(r,F80_COLOR_PANEL);
+    f80_put(r.y,r.x," EVENT CONSOLE  |  Ctrl+O panels  |  PgUp/PgDn scroll",
+            r.w,F80_COLOR_HIGHLIGHT,1);
+    if(r.h<2)return;
+    int body=r.h-2;
+    tracker.console_scroll=clamp(tracker.console_scroll,0,console_max_scroll(body));
+    int shown=event_log_count-tracker.console_scroll;
+    if(shown>body)shown=body;
+    int first=event_log_count-tracker.console_scroll-shown;
+    int start_y=r.y+1+body-shown;
+    for(int i=0;i<shown;++i) {
+        int slot=(event_log_head-event_log_count+first+i+
+                  TT_EVENT_LOG_CAPACITY*2)%TT_EVENT_LOG_CAPACITY;
+        f80_put(start_y+i,r.x,event_log[slot],r.w,F80_COLOR_TEXT,0);
+    }
+    char footer[96];
+    snprintf(footer,sizeof(footer)," %d events  |  %s  |  F9 menu  F10 exit",
+             event_log_count,tracker.console_scroll?"scrolling":"live");
+    f80_put(r.y+r.h-1,r.x,footer,r.w,F80_COLOR_ACCENT,0);
+}
+static void toggle_console(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.app.menu && tracker.app.menu->menu_active)
+        f80_menu_close(tracker.app.menu);
+    if(tracker.app.modal) {
+#ifndef __EMSCRIPTEN__
+        if(f80_file_dialog_active(&file_dialog))f80_file_dialog_close(&file_dialog);
+        else
+#endif
+            if(tracker.app.modal==tracker.manage_dialog)close_manage(NULL,NULL);
+            else if(tracker.app.modal==tracker.slices_dialog)close_slices(NULL,NULL);
+            else if(tracker.app.modal==tracker.order_dialog)close_order(NULL,NULL);
+            else if(tracker.app.modal==tracker.table_dialog)close_table(NULL,NULL);
+            else if(tracker.app.modal==tracker.settings_dialog)close_settings(NULL,NULL);
+            else f80_hide_modal(&tracker.app);
+    }
+    tracker.console_visible=!tracker.console_visible;
+    int panels_visible=!tracker.console_visible;
+    tracker.root->window_role=tracker.console_visible?
+        F80_WINDOW_CONSOLE:F80_WINDOW_BLUE;
+    tracker.header_gap->visible=panels_visible;
+    tracker.header->visible=panels_visible;
+    tracker.wave_row->visible=panels_visible;
+    tracker.phrase_frame->visible=panels_visible;
+    tracker.details->visible=panels_visible;
+    tracker.status->visible=panels_visible;
+    tracker.console->visible=tracker.console_visible;
+    snprintf(event_console_menu_label,sizeof(event_console_menu_label),"%s",
+             tracker.console_visible?"~H~ide event console":"~S~how event console");
+    if(tracker.console_visible)tracker.console_scroll=0;
+    else tracker.reveal_cursor=1;
+    tt_tracker_message(tracker.console_visible?"Event console shown":"Panels shown");
 }
 static void pull_menu(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -1378,7 +1493,8 @@ static const F80MenuItem song_items[]={
 };
 static const F80MenuItem view_items[]={
     {"Zoom ~o~ut",NULL,zoom_out,1},{"Zoom ~i~n",NULL,zoom_in,1},
-    {"~W~aveform",NULL,focus_wave,1},{"P~a~ttern",NULL,focus_phrase,1}
+    {"~W~aveform",NULL,focus_wave,1},{"P~a~ttern",NULL,focus_phrase,1},
+    {event_console_menu_label,"Ctrl+O",toggle_console,1}
 };
 static const F80MenuItem help_items[]={ {"~K~eys and format",NULL,show_help,1} };
 static const F80Menu menus[]={
@@ -1749,6 +1865,7 @@ static void update_labels(void) {
     }
 }
 static void handle_key(int key) {
+    if(key==15) { toggle_console(NULL,NULL);return; } /* Ctrl-O */
     if(key==26) { undo_edit(NULL,NULL);return; }
     if(key==25) { redo_edit(NULL,NULL);return; }
     if(key==2010) { quit(NULL,NULL);return; }
@@ -1798,6 +1915,22 @@ static void handle_key(int key) {
     if(tracker.app.menu && tracker.app.menu->menu_active) {
         f80_key(&tracker.app,key);return;
     }
+    if(tracker.console_visible) {
+        int body=tracker.console->rect.h-2;
+        if(body<1)body=1;
+        int maximum=console_max_scroll(body);
+        if(key==F80_KEY_UP)tracker.console_scroll=clamp(tracker.console_scroll+1,0,maximum);
+        else if(key==F80_KEY_DOWN)tracker.console_scroll=clamp(tracker.console_scroll-1,0,maximum);
+        else if(key==F80_KEY_PPAGE)tracker.console_scroll=
+            clamp(tracker.console_scroll+body,0,maximum);
+        else if(key==F80_KEY_NPAGE)tracker.console_scroll=
+            clamp(tracker.console_scroll-body,0,maximum);
+        else if(key==F80_KEY_HOME)tracker.console_scroll=maximum;
+        else if(key==F80_KEY_END)tracker.console_scroll=0;
+        else if(key==27)toggle_console(NULL,NULL);
+        else if(key==' ')toggle_play(NULL,NULL);
+        return;
+    }
     switch(key) {
     case 10:case 13:audition(NULL,NULL);return;
     case ' ':toggle_play(NULL,NULL);return;
@@ -1832,6 +1965,7 @@ static void handle_key(int key) {
     } else if(tracker.focus==FOCUS_PHRASE) {
         if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
            key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
+            leave_follow();
             if(!tracker.selecting) {
                 tracker.anchor_step=tracker.step;
                 tracker.anchor_channel=tracker.channel;
@@ -1847,6 +1981,8 @@ static void handle_key(int key) {
         }
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
+        if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
+           key==F80_KEY_RIGHT)leave_follow();
         if(tracker.selecting)return;
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
         int digit=hex_digit(key);
@@ -1921,12 +2057,21 @@ static void handle_mouse(int x,int y,int wheel) {
        (tracker.app.menu->menu_active || y==tracker.app.menu->rect.y)) {
         f80_mouse(&tracker.app,x,y,wheel);return;
     }
+    if(tracker.console_visible) {
+        if(wheel==1 || wheel==-1) {
+            int body=tracker.console->rect.h-2;
+            tracker.console_scroll=clamp(tracker.console_scroll-wheel*3,0,
+                                         console_max_scroll(body>0?body:1));
+        }
+        return;
+    }
     F80Rect r=tracker.wave_canvas->rect;
     if(f80_contains(tracker.header->rect,x,y)) {
         f80_mouse(&tracker.app,x,y,wheel);
         return;
     }
     if(tracker.order_list && f80_contains(tracker.order_list->rect,x,y)) {
+        leave_follow();
         f80_mouse(&tracker.app,x,y,wheel);
         return;
     }
@@ -1965,10 +2110,12 @@ static void handle_mouse(int x,int y,int wheel) {
         int body=r.h-3,maximum=grid_total_rows()-body;
         if(maximum<0)maximum=0;
         if(wheel && wheel!=2) {
+            leave_follow();
             tracker.phrase_scroll=clamp(tracker.phrase_scroll+wheel*3,0,maximum);
             return;
         }
         if(x==r.x+r.w-1) {
+            leave_follow();
             if(y==r.y)tracker.phrase_scroll=clamp(tracker.phrase_scroll-1,0,maximum);
             else if(y==r.y+r.h-1)
                 tracker.phrase_scroll=clamp(tracker.phrase_scroll+1,0,maximum);
@@ -1978,6 +2125,7 @@ static void handle_mouse(int x,int y,int wheel) {
         if(y==r.y+2) {
             int direction=x==r.x+4?-1:x==r.x+r.w-2?1:0;
             if(direction) {
+                leave_follow();
                 int maximum_field=pattern_max_field_scroll(r.w-6);
                 tracker.field_scroll=clamp(tracker.field_scroll+direction,0,maximum_field);
                 tracker.channel=tracker.field_scroll/4;
@@ -1990,6 +2138,7 @@ static void handle_mouse(int x,int y,int wheel) {
             if(global>=grid_total_rows() ||
                (tracker.edit_order>=0 && global/tracker.song.pattern_rows!=tracker.edit_order))
                 return;
+            leave_follow();
             int old_step=tracker.step,old_channel=tracker.channel;
             tracker.step=global%tracker.song.pattern_rows;
             int position=r.x+5;
@@ -2034,14 +2183,16 @@ static int begin_touch_selection(int x,int y) {
 static void touch_scroll_rows(int rows) {
     F80Rect r=tracker.phrase_canvas->rect;
     int body=r.h-3;
-    if(tracker.app.modal || body<1)return;
+    if(tracker.app.modal || body<1 || !rows)return;
+    leave_follow();
     int maximum=grid_total_rows()-body;
     if(maximum<0)maximum=0;
     tracker.phrase_scroll=clamp(tracker.phrase_scroll+rows,0,maximum);
 }
 static void touch_scroll_fields(int fields) {
     F80Rect r=tracker.phrase_canvas->rect;
-    if(tracker.app.modal || r.w<7)return;
+    if(tracker.app.modal || r.w<7 || !fields)return;
+    leave_follow();
     int maximum=pattern_max_field_scroll(r.w-6);
     tracker.field_scroll=clamp(tracker.field_scroll+fields,0,maximum);
     /* Keep the cursor in the visible field so painting does not snap back. */
@@ -2168,6 +2319,7 @@ static struct {
 } native_touch;
 static int native_other_button_down;
 static void native_poll_hold(void) {
+    if(tracker.console_visible) { native_touch.down=0;return; }
     if(!native_touch.down || native_touch.moved || native_touch.selecting ||
        SDL_GetTicks()-native_touch.started_at<1000)return;
     if(native_touch.kind==NATIVE_TOUCH_WRAP)return;
@@ -2218,6 +2370,14 @@ static void native_mouse_event(void) {
     MEVENT event;
     if(getmouse(&event)!=OK)return;
     int x=event.x,y=event.y;
+    if(tracker.console_visible) {
+        if(event.bstate&BUTTON4_PRESSED)handle_mouse(x,y,-1);
+#ifdef BUTTON5_PRESSED
+        else if(event.bstate&BUTTON5_PRESSED)handle_mouse(x,y,1);
+#endif
+        else if(event.bstate&(BUTTON1_CLICKED|BUTTON1_PRESSED))handle_mouse(x,y,0);
+        return;
+    }
     if(event.bstate&BUTTON4_PRESSED) { handle_mouse(x,y,-1);return; }
 #ifdef BUTTON5_PRESSED
     if(event.bstate&BUTTON5_PRESSED) { handle_mouse(x,y,1);return; }
@@ -2362,7 +2522,7 @@ static int frame(void *user) {
     tracker.header->height=f80_fixed(wide_header?2:4);
     tracker.wave_row->height=f80_fixed(editing?3:rows>=32?14:rows>=23?10:6);
     f80_layout(tracker.root,f80_rect(0,0,cols,rows));
-    layout_header(cols,wide_header);
+    if(!tracker.console_visible)layout_header(cols,wide_header);
     if(tracker.app.modal) {
 #ifndef __EMSCRIPTEN__
         if(f80_file_dialog_active(&file_dialog))
@@ -2463,8 +2623,8 @@ static int frame(void *user) {
 #ifndef __EMSCRIPTEN__
         }
 #endif
-    } else tracker.app.focus=tracker.focus==FOCUS_PHRASE?
-               tracker.phrase_canvas:tracker.wave_canvas;
+    } else tracker.app.focus=tracker.console_visible?tracker.console:
+               tracker.focus==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
     if(tracker.app.modal==tracker.table_dialog && tracker.table_canvas) {
@@ -2477,7 +2637,7 @@ static int frame(void *user) {
         tt_web_table_rect(0,0,0,0,0,0);
         tt_web_wrap_rect(0,0,0,0);
     }
-    if(!tracker.app.modal) {
+    if(!tracker.app.modal && !tracker.console_visible) {
         F80Rect grid=tracker.phrase_canvas->rect;
         if(grid.w>6 && grid.h>3) {
             tt_web_grid_rect(grid.x+5,grid.y+3,grid.w-6,grid.h-3);
@@ -2581,6 +2741,9 @@ int main(int argc,char **argv) {
 #ifdef VDSUSP
         shortcut_terminal.c_cc[VDSUSP]=_POSIX_VDISABLE;
 #endif
+#ifdef VDISCARD
+        shortcut_terminal.c_cc[VDISCARD]=_POSIX_VDISABLE;
+#endif
         tcsetattr(STDIN_FILENO,TCSANOW,&shortcut_terminal);
     }
     define_key("\033[1;5D",KEY_F(60));
@@ -2604,9 +2767,9 @@ int main(int argc,char **argv) {
 #endif
     tracker.root=f80_window(F80_WINDOW_BLUE,F80_COL);
     tracker.app.menu=f80_add(tracker.root,f80_menubar(menus,sizeof(menus)/sizeof(*menus)));
-    F80Widget *header_gap=f80_add(tracker.root,f80_box(F80_ROW));
-    header_gap->fill=1;
-    f80_sized(header_gap,f80_grow(),f80_fixed(1));
+    tracker.header_gap=f80_add(tracker.root,f80_box(F80_ROW));
+    tracker.header_gap->fill=1;
+    f80_sized(tracker.header_gap,f80_grow(),f80_fixed(1));
     tracker.header=f80_add(tracker.root,f80_box(F80_ROW));
     f80_sized(tracker.header,f80_grow(),f80_fixed(2));
     tracker.header_title=f80_add(tracker.header,f80_label(tracker.header_text));
@@ -2634,8 +2797,13 @@ int main(int argc,char **argv) {
     tracker.phrase_frame->frame=1;
     tracker.phrase_canvas=f80_add(tracker.phrase_frame,f80_canvas(paint_phrase,NULL));
     tracker.details=f80_add(tracker.root,f80_label(tracker.details_text));
+    tracker.details->window_role=F80_WINDOW_CONSOLE;
+    tracker.details->style=F80_COLOR_TEXT;
     f80_sized(tracker.details,f80_grow(),f80_fixed(1));
     tracker.status=f80_add(tracker.root,f80_statusbar(wave_status,10));
+    tracker.console=f80_add(tracker.root,f80_canvas(paint_event_console,NULL));
+    tracker.console->window_role=F80_WINDOW_CONSOLE;
+    tracker.console->visible=0;
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__

@@ -25,7 +25,7 @@ typedef struct {
     TtPhrase phrase;
     TtPattern pattern;
     TtSong song;
-    F80Widget *root,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
+    F80Widget *root,*header_gap,*console,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
     F80Widget *progress,*bpm_label,*details,*status;
@@ -54,6 +54,7 @@ typedef struct {
     char table_title[32];
     char header_text[256],bpm_text[16],details_text[256],wave_title[160],phrase_title[96];
     char message[192],loaded_path[512],csv_path[256],song_path[512];
+    int console_visible,console_scroll;
     TtStored samples[TT_HISTORY_MAX];
     int sample_count,sample_index;
     F80Widget *manage_dialog,*manage_list_bg,*manage_list,*manage_name,*manage_info;
@@ -74,4 +75,5 @@ typedef struct {
 } TtTracker;
 extern TtTracker tracker;
 void tt_tracker_message(const char *text);
+void tt_tracker_log_event(const char *category,const char *description);
 #endif

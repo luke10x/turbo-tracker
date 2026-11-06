@@ -100,6 +100,13 @@ The tracker keeps up to 32 document edits in memory. Undo restores pattern,
 table, order, settings, sample, marker, and slice changes; playback controls
 are not part of edit history.
 
+**View > Event console** or **Ctrl+O** hides the tracker panels and shows a
+black, scrolling log of edit, playback, and status events. Playback logs
+pattern starts instead of every played row. The menu remains available.
+Page Up/Down, Home/End, or the mouse wheel scroll the log; Ctrl+O
+returns to the panels. The context and message line above the shortcut bar
+uses the same black console palette.
+
 The startup song is [`default.song`](default.song). It loads four `tgndshtn`
 WAVs, has 13 patterns and 28 play-order entries, and starts at BPM 157 with 16
 rows per pattern, 8 rows per beat, and 12 ticks per row. Its custom sample

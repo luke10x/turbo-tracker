@@ -104,6 +104,9 @@ int main(void) {
     F80Widget order_choice={0};order_choice.cursor=1;
     order_panel_selected(&order_choice,NULL);
     assert(tracker.play_order==1 && tracker.play_mode==PLAY_SONG);
+    assert(tracker.follow==0);
+    toggle_follow(NULL,NULL);
+    assert(tracker.follow==1);
     tracker.play_order=0;
     tracker.active_order_index=-1;
     tracker.active_step=-1;
@@ -122,6 +125,7 @@ int main(void) {
     assert(grid_pattern_for_row(32)==1 && grid_pattern_for_row(64)==0);
     tracker.step=31;handle_key(F80_KEY_DOWN);
     assert(tracker.step==31);
+    assert(tracker.follow==0);
     tracker.song.pattern_rows=16;
     tracker.step=0;
 
@@ -131,14 +135,29 @@ int main(void) {
     tracker.phrase_canvas=&grid;
     grid.rect=f80_rect(0,0,80,30);
     tracker.step=4;
+    tracker.follow=1;
     handle_mouse(10,19,0); /* order 2 is visible, but not editable */
     assert(tracker.pattern_index==0 && tracker.step==4);
+    assert(tracker.follow==1);
     assert(!begin_touch_selection(10,19));
     tracker.phrase_scroll=32;
     handle_mouse(10,7,0); /* repeated pattern in order 3 is also gray */
     assert(tracker.pattern_index==0 && tracker.step==4);
+    tracker.phrase_scroll=0;
+    handle_mouse(10,5,0); /* an editable cell is manual navigation */
+    assert(tracker.follow==0 && tracker.step==2);
+    tracker.follow=1;
+    handle_mouse(10,5,1);
+    assert(tracker.follow==0 && tracker.phrase_scroll==3);
+    tracker.follow=1;
+    touch_scroll_rows(1);
+    assert(tracker.follow==0 && tracker.phrase_scroll==4);
+    tracker.follow=1;
+    handle_mouse(79,10,0); /* grid scrollbar */
+    assert(tracker.follow==0);
 
     tracker.phrase_scroll=0;
+    tracker.follow=1;
     tracker.play_order=1;
     tt_play_play_row(0);
     assert(tracker.active_order_index==1);
@@ -250,6 +269,41 @@ int main(void) {
     edit_items[1].action(NULL,NULL);
     assert(tracker.pattern.cell[0][4].note==72);
     tt_edit_history_free(edit_history);edit_history=NULL;
+    F80Widget root={.visible=1,.window_role=F80_WINDOW_BLUE};
+    F80Widget gap={.visible=1},wave_row={.visible=1},phrase_frame={.visible=1};
+    F80Widget details={.visible=1},status={.visible=1};
+    F80Widget console={.rect={0,1,80,10}};
+    header.visible=1;
+    tracker.root=&root;tracker.header_gap=&gap;tracker.header=&header;
+    tracker.wave_row=&wave_row;tracker.phrase_frame=&phrase_frame;
+    tracker.details=&details;tracker.status=&status;tracker.console=&console;
+    int logged=event_log_count;
+    view_items[4].action(NULL,NULL);
+    assert(tracker.console_visible && root.window_role==F80_WINDOW_CONSOLE);
+    assert(!strcmp(view_items[4].label,"~H~ide event console"));
+    assert(console.visible && !header.visible && !details.visible && !status.visible);
+    assert(event_log_count>logged);
+    int log_head_before=event_log_head;
+    assert(tt_play_emit((TtPlayEvent){TT_PLAY_ROW_PLAYED,1,0,0}));
+    tt_play_flush();
+    assert(event_log_head==log_head_before);
+    assert(tt_play_emit((TtPlayEvent){TT_PLAY_ROW_PLAYED,0,0,0}));
+    tt_play_flush();
+    assert(event_log_head==(log_head_before+1)%TT_EVENT_LOG_CAPACITY);
+    for(int i=0;i<20;++i)tt_tracker_log_event("TEST","stream entry");
+    handle_key(F80_KEY_PPAGE);
+    assert(tracker.console_scroll>0);
+    handle_key(F80_KEY_END);
+    assert(tracker.console_scroll==0);
+    for(int i=0;i<TT_EVENT_LOG_CAPACITY+5;++i)
+        tt_tracker_log_event("TEST","bounded stream");
+    assert(event_log_count==TT_EVENT_LOG_CAPACITY);
+    assert(strstr(event_log[(event_log_head+TT_EVENT_LOG_CAPACITY-1)%TT_EVENT_LOG_CAPACITY],
+                  "bounded stream"));
+    handle_key(15); /* Ctrl-O */
+    assert(!tracker.console_visible && root.window_role==F80_WINDOW_BLUE);
+    assert(!strcmp(view_items[4].label,"~S~how event console"));
+    assert(!console.visible && header.visible && details.visible && status.visible);
     puts("default song, ordered grid, and playback follow passed");
     return 0;
 }

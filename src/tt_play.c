@@ -336,6 +336,34 @@ static int play_queue_count;
 int tt_play_emit(TtPlayEvent event) {
     if(play_queue_count>=TT_PLAY_QUEUE_CAPACITY)return 0;
     play_queue[play_queue_count++]=event;
+    const char *name="playback";
+    switch(event.type) {
+    case TT_PLAY_START:name="start";break;
+    case TT_PLAY_STOP:name="stop";break;
+    case TT_PLAY_TOGGLE:name="pause/resume";break;
+    case TT_PLAY_SET_MODE:name="set mode";break;
+    case TT_PLAY_TOGGLE_MODE:name="toggle mode";break;
+    case TT_PLAY_TOGGLE_LOOP:name="toggle loop";break;
+    case TT_PLAY_TOGGLE_FOLLOW:name="toggle follow";break;
+    case TT_PLAY_SELECT_ORDER:name="select order";break;
+    case TT_PLAY_AUDITION:name="audition";break;
+    case TT_PLAY_AUDITION_CELL:name="audition cell";break;
+    case TT_PLAY_ROW_PLAYED:name="row played";break;
+    case TT_PLAY_FINISHED:name="finished";break;
+    case TT_PLAY_DOCUMENT_RESET:name="document reset";break;
+    }
+    char detail[96];
+    if(event.type==TT_PLAY_ROW_PLAYED && event.c>=0)
+        snprintf(detail,sizeof(detail),"order %02X pattern %02X started",event.c,event.b);
+    else if(event.type==TT_PLAY_ROW_PLAYED)
+        snprintf(detail,sizeof(detail),"pattern %02X loop started",event.b);
+    else if(event.type==TT_PLAY_AUDITION_CELL)
+        snprintf(detail,sizeof(detail),"%s row %02X ch %d",name,event.a,event.b+1);
+    else if(event.type==TT_PLAY_SELECT_ORDER)
+        snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else snprintf(detail,sizeof(detail),"%s",name);
+    if(event.type!=TT_PLAY_ROW_PLAYED || event.a==0)
+        tt_tracker_log_event("PLAY",detail);
     return 1;
 }
 void tt_play_flush(void) {
