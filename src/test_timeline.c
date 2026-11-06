@@ -102,9 +102,26 @@ int main(void) {
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
     F80Widget order_choice={0};order_choice.cursor=1;
+    tracker.play_order=0;
+    tracker.active_order_index=0;
     order_panel_selected(&order_choice,NULL);
-    assert(tracker.play_order==1 && tracker.play_mode==PLAY_SONG);
+    assert(tracker.play_order==1 && tracker.play_step==0 &&
+           tracker.active_order_index==1 && tracker.active_step==0 &&
+           tracker.play_mode==PLAY_SONG);
+    assert(tracker.pattern_index==1 && tracker.edit_order==1 && tracker.phrase_scroll==16);
     assert(tracker.follow==0);
+    assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_ROW_PLAYED,.a=0,.b=0,.c=2}));
+    tt_play_flush();
+    assert(order_choice.cursor==1 && tracker.edit_order==1 &&
+           tracker.active_order_index==2);
+    order_choice.cursor=2; /* the same pattern also appears at order 0 */
+    order_panel_selected(&order_choice,NULL);
+    assert(tracker.pattern_index==0 && tracker.edit_order==2 && tracker.phrase_scroll==32);
+    assert(tracker.play_order==2 && tracker.active_order_index==2);
+    order_choice.cursor=0;
+    order_panel_selected(&order_choice,NULL);
+    assert(tracker.pattern_index==0 && tracker.edit_order==0 && tracker.phrase_scroll==0);
+    assert(tracker.play_order==0 && tracker.active_order_index==0);
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
     tracker.play_order=0;

@@ -1,5 +1,9 @@
 # Task: event-based song edits and playback
 
+This is the historical plan for the first event refactor. For current work,
+follow the repository-wide event architecture in `AGENTS.md`, which also
+requires UI state changes to use events.
+
 ## Goal
 
 Route every change to the song through an event layer. This is a prerequisite for

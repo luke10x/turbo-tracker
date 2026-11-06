@@ -345,7 +345,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_TOGGLE_MODE:name="toggle mode";break;
     case TT_PLAY_TOGGLE_LOOP:name="toggle loop";break;
     case TT_PLAY_TOGGLE_FOLLOW:name="toggle follow";break;
-    case TT_PLAY_SELECT_ORDER:name="select order";break;
+    case TT_PLAY_SELECT_ORDER:name="seek order";break;
     case TT_PLAY_AUDITION:name="audition";break;
     case TT_PLAY_AUDITION_CELL:name="audition cell";break;
     case TT_PLAY_ROW_PLAYED:name="row played";break;
@@ -389,8 +389,12 @@ void tt_play_flush(void) {
         case TT_PLAY_SELECT_ORDER: {
             int at=event.a;
             if(at<0 || at>=tracker.song.order_count)break;
-            tracker.play_mode=PLAY_SONG;tracker.play_order=at;tracker.play_step=0;
+            tracker.play_mode=PLAY_SONG;
             if(tracker.playing)play_start_now(NULL,NULL);
+            tracker.play_order=at;tracker.play_step=0;
+            tracker.active_order_index=at;
+            tracker.active_pattern_index=tracker.song.order[at];
+            tracker.active_step=0;
             char status[64];
             snprintf(status,sizeof(status),"Order %02X plays pattern %02X",
                      at,tracker.song.order[at]);

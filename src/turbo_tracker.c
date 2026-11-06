@@ -198,16 +198,29 @@ static int grid_pattern_for_row(int global) {
     int order=grid_order_for_row(global);
     return order>=0?tracker.song.order[order]:tracker.pattern_index;
 }
-static void select_edit_pattern(int index) {
-    if(index==tracker.pattern_index)return;
-    TtEditEvent event={.type=TT_EDIT_PATTERN_SELECT};
-    event.pattern.index=index;
-    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
-    tracker.edit_order=order_for_pattern(index,tracker.edit_order);
+typedef enum { TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER } TtUiType;
+typedef struct { TtUiType type; int index; } TtUiEvent;
+static int handle_ui_event(TtUiEvent event) {
+    int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
+    int index=order>=0 && order<tracker.song.order_count?
+        tracker.song.order[order]:event.index;
+    if(index<0 || index>=tracker.song.pattern_count ||
+       (event.type==TT_UI_SELECT_ORDER &&
+        (order<0 || order>=tracker.song.order_count)))return 0;
+    if(index!=tracker.pattern_index) {
+        TtEditEvent edit={.type=TT_EDIT_PATTERN_SELECT};
+        edit.pattern.index=index;
+        if(!emit_edit(&edit)) { tt_tracker_message(edit_message);return 0; }
+    } else if(event.type==TT_UI_SELECT_PATTERN)return 1;
+    tracker.edit_order=order>=0?order:order_for_pattern(index,tracker.edit_order);
     tracker.phrase_scroll=tracker.edit_order>=0?
         tracker.edit_order*tracker.song.pattern_rows:0;
     tracker.reveal_cursor=1;
     tracker.selecting=0;
+    return 1;
+}
+static void select_edit_pattern(int index) {
+    handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN,index});
 }
 static void selection_bounds(int *top,int *left,int *bottom,int *right) {
     *top=tracker.anchor_step<tracker.step?tracker.anchor_step:tracker.step;
@@ -264,6 +277,7 @@ static void order_panel_selected(F80Widget *list,void *user) {
     (void)user;
     leave_follow();
     int at=clamp(list->cursor,0,tracker.song.order_count-1);
+    if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return;
     send_play(TT_PLAY_SELECT_ORDER,at,0);
 }
 #ifdef __EMSCRIPTEN__
@@ -1798,8 +1812,7 @@ static void update_labels(void) {
                                         tracker.song.order_count-1);
         for(int i=0;i<tracker.song.order_count;++i) {
             snprintf(tracker.order_panel_rows[i],sizeof(tracker.order_panel_rows[i]),
-                     "%c%02X->%02X",tracker.playing &&
-                     tracker.active_order_index==i?'>':' ',
+                     "%c%02X->%02X",tracker.active_order_index==i?'>':' ',
                      i,tracker.song.order[i]);
             tracker.order_panel_items[i]=tracker.order_panel_rows[i];
         }

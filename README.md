@@ -122,10 +122,14 @@ and stacked on narrow screens. Shortening a pattern clears notes beyond its new
 last row. New creates an empty pattern and selects it for editing, Rename
 changes its name, Edit selects an existing pattern in the grid, Add inserts it
 into the order, and Remove/Up/Down edit the order. BPM is a song property and
-can be changed there. Playback starts at the first order entry and advances to
-the next pattern after the configured row count; Loop restarts the order at its
-end. The grid follows the pattern being played while keeping the edit row and
-column separate from the playhead. A new pattern is empty and plays silence
+can be changed there. Selecting an ORD entry opens that pattern in the grid
+and moves the playhead to its first row. As playback advances with Follow off,
+the selected entry can differ from the `>` playhead marker.
+Starting song playback uses the selected ORD entry and advances to the next
+pattern after the configured row count; Loop restarts the order at its end.
+With Follow on, the grid follows the pattern being played while keeping the
+edit row and column separate from the playhead. A new pattern is empty and
+plays silence
 until it contains notes; the bank marks it `[empty]`. Song playback renders a
 short audio buffer ahead and places ticks at output sample frames, so the screen
 refresh rate does not determine note timing.
