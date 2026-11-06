@@ -187,6 +187,12 @@ F80Widget *f80_progress(float value, int indeterminate) {
     if (w) { w->value = value; w->indeterminate = indeterminate; w->height = f80_fixed(1); }
     return w;
 }
+void f80_progress_set_time(F80Widget *w, int sec, int total_sec) {
+    if(w && w->kind==F80_PROGRESS) {
+        w->progress_sec = sec;
+        w->progress_total_sec = total_sec;
+    }
+}
 F80Widget *f80_table(const char **rows, int count) {
     F80Widget *w = f80_widget(F80_TABLE);
     if (w) { w->items = rows; w->item_count = count; w->focusable = 1; w->table_sort_col=-1; }
@@ -1165,7 +1171,15 @@ void f80_draw(F80Widget *w) {
     case F80_PROGRESS: {
         int filled=limit((int)(w->value*r.w+0.5f),0,r.w);
         int block=limit(r.w/5,3,r.w), pos=(w->app?w->app->tick:0)%(r.w+block)-block;
-        char percent[16]; snprintf(percent,sizeof(percent),"%d%%",limit((int)(w->value*100+0.5f),0,100));
+        char percent[32];
+        if(w->progress_total_sec>0) {
+            int cur_sec=limit(w->progress_sec,0,w->progress_total_sec);
+            int tot_min=w->progress_total_sec/60, tot_sec=w->progress_total_sec%60;
+            int cur_min=cur_sec/60, cur_sec_rem=cur_sec%60;
+            snprintf(percent,sizeof(percent),"%d:%02d / %d:%02d",cur_min,cur_sec_rem,tot_min,tot_sec);
+        } else {
+            snprintf(percent,sizeof(percent),"%d%%",limit((int)(w->value*100+0.5f),0,100));
+        }
         int text_x=(r.w-(int)strlen(percent))/2;
         for(int i=0;i<r.w;++i) {
             if(w->indeterminate)f80_put(r.y,r.x+i,i>=pos&&i<pos+block?"█":"░",1,1,1);

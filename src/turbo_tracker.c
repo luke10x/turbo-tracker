@@ -1940,6 +1940,13 @@ static void update_labels(void) {
                  tracker.active_order_index*tracker.song.pattern_rows:0)+
                 tracker.active_step:0;
     tracker.progress->value=total>0?(float)current/total:0;
+    if(total>0 && tracker.song.bpm>0 && tracker.song.rows_per_beat>0) {
+        float row_secs=60.0f/(tracker.song.bpm*tracker.song.rows_per_beat);
+        f80_progress_set_time(tracker.progress,
+            (int)(current*row_secs+0.5f),(int)(total*row_secs+0.5f));
+    } else {
+        f80_progress_set_time(tracker.progress,0,0);
+    }
     snprintf(tracker.wave_title,sizeof(tracker.wave_title),"%02d. %.145s",
              tracker.sample_index+1,tracker.wave.name);
     tracker.wave_frame->title=tracker.wave_title;

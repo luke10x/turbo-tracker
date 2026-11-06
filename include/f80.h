@@ -78,6 +78,7 @@ struct F80Widget {
     int gutter_width; /* optional line-number gutter for list/table content */
     float value;
     int indeterminate;
+    int progress_sec, progress_total_sec;
     F80Action action;
     F80Action activate;
     void *user;
@@ -141,6 +142,7 @@ F80Widget *f80_check_group(const char **items, int count, F80Action action, void
 int f80_checked(const F80Widget *group, int index);
 void f80_set_checked(F80Widget *group, int index, int checked);
 F80Widget *f80_progress(float value, int indeterminate);
+void f80_progress_set_time(F80Widget *w, int sec, int total_sec);
 F80Widget *f80_table(const char **rows, int count);
 void f80_table_columns(F80Widget *table, const int *starts, int count);
 void f80_table_grid(F80Widget *table, const F80TableField *fields, int count,
