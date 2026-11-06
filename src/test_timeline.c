@@ -49,7 +49,7 @@ int main(void) {
     int minute_frames=0;
     const int tick_divisor=112*4*12;
     for(int tick=0;tick<tick_divisor;++tick)
-        minute_frames+=next_tick_frames(tick_divisor);
+        minute_frames+=tt_play_next_tick_frames(tick_divisor);
     assert(minute_frames==TT_AUDIO_OUTPUT_RATE*60 && tracker.tick_remainder==0);
     table_resize(NULL,(void *)(long)1);
     assert(tracker.song.table[0].length==32);
@@ -59,8 +59,8 @@ int main(void) {
     assert(tracker.song.table[0].length==16);
     tracker.song.pattern_count=2;
     tt_pattern_init(&tracker.song.pattern[1]);
-    empty_pattern(&tracker.song.pattern[0]);
-    empty_pattern(&tracker.song.pattern[1]);
+    tt_edit_clear_pattern(&tracker.song.pattern[0]);
+    tt_edit_clear_pattern(&tracker.song.pattern[1]);
     tracker.song.order_count=3;
     tracker.song.order[0]=0;
     tracker.song.order[1]=1;
@@ -89,6 +89,22 @@ int main(void) {
     assert(effect_entry->value==4);
     tracker.follow=1;
     tracker.play_mode=PLAY_SONG;
+    tracker.loop=0;
+    toggle_loop(NULL,NULL);
+    assert(tracker.loop==1);
+    assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_TOGGLE_LOOP}));
+    assert(tracker.loop==1);
+    tt_play_flush();
+    assert(tracker.loop==0);
+    toggle_loop(NULL,NULL);
+    toggle_follow(NULL,NULL);
+    assert(tracker.follow==0);
+    toggle_follow(NULL,NULL);
+    assert(tracker.follow==1);
+    F80Widget order_choice={0};order_choice.cursor=1;
+    order_panel_selected(&order_choice,NULL);
+    assert(tracker.play_order==1 && tracker.play_mode==PLAY_SONG);
+    tracker.play_order=0;
     tracker.active_order_index=-1;
     tracker.active_step=-1;
     assert(grid_total_rows()==48);
@@ -124,7 +140,7 @@ int main(void) {
 
     tracker.phrase_scroll=0;
     tracker.play_order=1;
-    play_row(0);
+    tt_play_play_row(0);
     assert(tracker.active_order_index==1);
     assert(tracker.pattern_index==0 && tracker.edit_order==0);
 
@@ -155,13 +171,13 @@ int main(void) {
     tracker.song.table[0].tick[0].effect[0]=(TtTableEffect){'M',0x33};
     tracker.song.table[0].tick[0].effect[1]=(TtTableEffect){'U',2};
     tracker.song.table[0].tick[1].effect[0]=(TtTableEffect){'X',1};
-    play_row(0);
+    tt_play_play_row(0);
     assert(tracker.table_voice[0].active && tracker.table_voice[0].table==0);
-    play_table_ticks();
+    tt_play_table_ticks();
     assert(tracker.table_voice[0].pending && tracker.table_voice[0].delay==2);
-    play_table_ticks();
+    tt_play_table_ticks();
     assert(tracker.table_voice[0].table==1 && tracker.table_voice[0].tick==0);
-    play_table_ticks();
+    tt_play_table_ticks();
     assert(!tracker.table_voice[0].pending);
     const int fields[]={3,2,3,3,3,3,3,3};
     f80_grid_init(&tracker.table_grid,16,8,fields,NULL);
@@ -193,18 +209,18 @@ int main(void) {
     tracker.play_mode=PLAY_PATTERN;
     tracker.loop_pattern_index=tracker.pattern_index;
     tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0};
-    play_row(0);
+    tt_play_play_row(0);
     assert(tt_audio_pan(5)==0);
     tracker.song.table[0].tick[6].effect[0]=(TtTableEffect){'P',255};
     tracker.table_voice[5]=(TableVoice){.active=1,.table=0,.tick=6,.next_table=-1};
-    play_table_ticks();
+    tt_play_table_ticks();
     assert(tt_audio_pan(5)==1);
     tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_STRETCH,0x40};
-    play_row(0);
+    tt_play_play_row(0);
     assert(fabs(tt_audio_stretch(5)-2)<1e-10);
     tracker.song.table[0].tick[7].effect[0]=(TtTableEffect){'R',0xc0};
     tracker.table_voice[5]=(TableVoice){.active=1,.table=0,.tick=7,.next_table=-1};
-    play_table_ticks();
+    tt_play_table_ticks();
     assert(fabs(tt_audio_stretch(5)-.5)<1e-10);
     float silent[1600]={0};
     tracker.wave.pcm=silent;tracker.wave.frames=1600;tracker.wave.rate=44100;

@@ -17,6 +17,9 @@
 #include "tt_pattern.h"
 #include "tt_sample.h"
 #include "tt_song.h"
+#include "tt_edit.h"
+#include "tt_tracker_internal.h"
+#include "tt_play.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 EM_JS(void, choose_web_wav, (), {
@@ -51,79 +54,8 @@ EM_JS(int, tt_web_compact_editing, (), {
 });
 #endif
 
-enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_REFERENCE };
-enum { PLAY_SONG, PLAY_PATTERN };
-enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
-enum { TT_HISTORY_MAX=8 };
-enum { SONG_LOOKAHEAD_FRAMES=4096, SONG_DISPLAY_ROWS=64 };
-typedef struct {
-    TtWave wave;
-    TtPhrase phrase;
-    char loaded_path[512],csv_path[256];
-} TtStored;
-typedef struct {
-    int active,table,tick,next_table,delay,pending;
-    int delayed_glide;
-    TtCell delayed_note;
-} TableVoice;
-typedef struct {
-    Uint64 frame;
-    int row,pattern,order;
-} SongDisplayRow;
-typedef struct {
-    F80App app;
-    TtWave wave;
-    TtPhrase phrase;
-    TtPattern pattern;
-    TtSong song;
-    F80Widget *root,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
-    F80Widget *phrase_frame,*phrase_canvas;
-    F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
-    F80Widget *progress,*bpm_label,*details,*status;
-    int focus,marker,zoom,view_start,step,channel,field,entry_octave;
-    int selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
-    TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
-    int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
-    int compact_editing;
-    int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
-    int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
-    Uint64 next_audition_tick_at;
-    int audition_effect_active;
-    int tick_phase,tick_remainder;
-    int frames_to_tick,song_finished,rendering_song;
-    Uint64 song_written_frames;
-    SongDisplayRow display_rows[SONG_DISPLAY_ROWS];
-    int display_head,display_tail;
-    TableVoice table_voice[TT_CHANNELS];
-    F80Widget *table_dialog,*table_panel,*table_canvas,*table_name,*table_name_label;
-    F80Widget *table_scrollbar,*table_buttons[5];
-    F80Grid table_grid;
-    F80Wrap table_actions;
-    int table_index;
-    TtTableTick table_clip[TT_TABLE_MAX_TICKS];
-    int table_clip_rows,table_clip_left,table_clip_right;
-    char table_title[32];
-    char header_text[256],bpm_text[16],details_text[256],wave_title[160],phrase_title[96];
-    char message[192],loaded_path[512],csv_path[256],song_path[512];
-    TtStored samples[TT_HISTORY_MAX];
-    int sample_count,sample_index;
-    F80Widget *manage_dialog,*manage_list_bg,*manage_list,*manage_name,*manage_info;
-    F80Widget *slices_dialog,*slices_list_bg,*slices_list,*slices_note,*slices_info;
-    F80Widget *order_dialog,*order_bank_label,*order_bank_bg,*order_bank;
-    F80Widget *order_seq_label,*order_seq_bg,*order_seq,*order_name;
-    F80Widget *settings_dialog,*settings_label[4],*settings_input[4];
-    F80Widget *settings_apply,*settings_close;
-    char bank_rows[TT_SONG_PATTERNS][100],order_rows[TT_SONG_ORDER][100];
-    char order_panel_rows[TT_SONG_ORDER][8];
-    char order_heading[64];
-    const char *bank_items[TT_SONG_PATTERNS],*order_items[TT_SONG_ORDER];
-    const char *order_panel_items[TT_SONG_ORDER];
-    char manage_rows[TT_HISTORY_MAX][290],slice_rows[TT_SLICES][96];
-    const char *manage_items[TT_HISTORY_MAX],*slice_items[TT_SLICES];
-    char manage_details[320],slice_details[320];
-    int delete_armed;
-} TtTracker;
-static TtTracker tracker;
+TtTracker tracker;
+
 #ifndef __EMSCRIPTEN__
 static F80FileDialog file_dialog;
 #endif
@@ -131,16 +63,62 @@ static F80FileDialog file_dialog;
 static int clamp(int value,int low,int high) {
     return value<low?low:value>high?high:value;
 }
-static void message(const char *text) {
+/* Song-edit channel: every song mutation from the UI goes through here. */
+static char edit_message[192];
+static TtEditDoc edit_doc(void) {
+    return (TtEditDoc){
+        .song=&tracker.song,.active=&tracker.pattern,.active_index=&tracker.pattern_index,
+        .samples=tracker.samples,.active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
+        .sample_count=&tracker.sample_count,.sample_index=&tracker.sample_index,
+        .active_loaded_path=tracker.loaded_path,.active_csv_path=tracker.csv_path,
+        .msg=edit_message,.msg_size=(int)sizeof(edit_message)
+    };
+}
+static int emit_edit(const TtEditEvent *event) {
+    TtEditDoc doc=edit_doc();
+    edit_message[0]=0;
+    return tt_edit_apply(&doc,event);
+}
+static void edit_cell(int row,int channel,TtCell cell) {
+    TtEditEvent event={.type=TT_EDIT_CELL_SET};
+    event.cell_set.row=row;event.cell_set.channel=channel;event.cell_set.cell=cell;
+    emit_edit(&event);
+}
+static void edit_cells(TtBulkOp op,int top,int left,int bottom,int right,int delta,
+                       const TtCell *data,int data_cols) {
+    TtEditEvent event={.type=TT_EDIT_CELLS_BULK};
+    event.cells.op=op;event.cells.top=top;event.cells.left=left;
+    event.cells.bottom=bottom;event.cells.right=right;event.cells.delta=delta;
+    event.cells.data=data;event.cells.data_cols=data_cols;
+    emit_edit(&event);
+}
+static void edit_marker(int marker,int frame) {
+    TtEditEvent event={.type=TT_EDIT_MARKER_MOVE};
+    event.marker=(TtEditMarker){marker,frame};emit_edit(&event);
+}
+static void edit_slice(int slice,int note) {
+    TtEditEvent event={.type=TT_EDIT_SLICE_NOTE};
+    event.slice=(TtEditSlice){slice,note};emit_edit(&event);
+}
+void tt_tracker_message(const char *text) {
     snprintf(tracker.message,sizeof(tracker.message),"%s",text);
 }
-static const TtPattern *playing_pattern(void) {
-    if(tracker.play_mode==PLAY_PATTERN)
-        return tracker.loop_pattern_index==tracker.pattern_index?
-               &tracker.pattern:&tracker.song.pattern[tracker.loop_pattern_index];
-    int index=tracker.song.order[tracker.play_order];
-    return index==tracker.pattern_index?&tracker.pattern:&tracker.song.pattern[index];
+static void send_play(TtPlayType type,int a,int b) {
+    if(tt_play_emit((TtPlayEvent){type,a,b,0}))tt_play_flush();
 }
+static void stop_playback(F80Widget *button,void *user) {
+    (void)button;(void)user;send_play(TT_PLAY_STOP,0,0);
+}
+static void toggle_play(F80Widget *button,void *user) {
+    (void)button;(void)user;send_play(TT_PLAY_TOGGLE,0,0);
+}
+static void audition_cell(int step,int channel) {
+    send_play(TT_PLAY_AUDITION_CELL,step,channel);
+}
+static void audition(F80Widget *button,void *user) {
+    (void)button;(void)user;send_play(TT_PLAY_AUDITION,0,0);
+}
+
 static int order_for_pattern(int pattern,int near) {
     int found=-1,best=TT_SONG_ORDER+1;
     for(int i=0;i<tracker.song.order_count;++i)if(tracker.song.order[i]==pattern) {
@@ -164,9 +142,9 @@ static int grid_pattern_for_row(int global) {
 }
 static void select_edit_pattern(int index) {
     if(index==tracker.pattern_index)return;
-    tracker.song.pattern[tracker.pattern_index]=tracker.pattern;
-    tracker.pattern=tracker.song.pattern[index];
-    tracker.pattern_index=index;
+    TtEditEvent event={.type=TT_EDIT_PATTERN_SELECT};
+    event.pattern.index=index;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     tracker.edit_order=order_for_pattern(index,tracker.edit_order);
     tracker.phrase_scroll=tracker.edit_order>=0?
         tracker.edit_order*tracker.song.pattern_rows:0;
@@ -192,6 +170,7 @@ static int pattern_is_empty(const TtPattern *pattern) {
         }
     return 1;
 }
+
 static int visible_frames(void) {
     int count=(tracker.wave.frames+((1<<tracker.zoom)-1))>>tracker.zoom;
     if(count<32)count=32;
@@ -222,29 +201,11 @@ static void pan_wave(int direction) {
     tracker.view_start+=direction*shift;
     clamp_view();
 }
-static void stop_playback(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    tracker.playing=tracker.started=0;tracker.play_step=tracker.play_order=0;
-    tracker.active_step=-1;
-    tracker.active_pattern_index=tracker.active_order_index=-1;
-    tracker.song_finished=tracker.frames_to_tick=0;
-    tracker.display_head=tracker.display_tail=0;
-    tt_audio_stop();
-    memset(tracker.table_voice,0,sizeof(tracker.table_voice));
-    message("Stopped");
-}
-static void start_playback(F80Widget *button,void *user);
+
 static void order_panel_selected(F80Widget *list,void *user) {
     (void)user;
     int at=clamp(list->cursor,0,tracker.song.order_count-1);
-    tracker.play_mode=PLAY_SONG;
-    tracker.play_order=at;
-    tracker.play_step=0;
-    if(tracker.playing)start_playback(NULL,NULL);
-    char status[64];
-    snprintf(status,sizeof(status),"Order %02X plays pattern %02X",
-             at,tracker.song.order[at]);
-    message(status);
+    send_play(TT_PLAY_SELECT_ORDER,at,0);
 }
 #ifdef __EMSCRIPTEN__
 static void order_panel_scroll(int rows) {
@@ -256,347 +217,60 @@ static void order_panel_scroll(int rows) {
     }
 }
 #endif
-static const TtWave *instrument_wave(const TtCell *cell, const TtPhrase **phrase) {
-    int index=cell->instrument==0?tracker.sample_index:cell->instrument-1;
-    if(index<0 || index>=tracker.sample_count)return NULL;
-    if(index==tracker.sample_index) { *phrase=&tracker.phrase;return tracker.wave.pcm?&tracker.wave:NULL; }
-    *phrase=&tracker.samples[index].phrase;
-    return tracker.samples[index].wave.pcm?&tracker.samples[index].wave:NULL;
-}
-static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
-    if(cell->effect!=TT_EFFECT_S || cell->value<0)return phrase->reference_note;
-    int slice=cell->value>>4;
-    return slice<15?tt_slice_base_note(phrase,slice):phrase->reference_note;
-}
-static void audition_cell(int step,int channel) {
-    int first,last;
-    TtCell *cell=&tracker.pattern.cell[step][channel];
-    const TtPhrase *phrase=NULL;
-    const TtWave *wave=instrument_wave(cell,&phrase);
-    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last)) {
-        tt_audio_stop();
-        message("Set a loaded instrument, note, and playable effect value first");
-        return;
-    }
-    int base=cell_reference_note(phrase,cell);
-    int glided=cell->effect==TT_EFFECT_G && cell->value>0 &&
-               tt_audio_glide_to(0,cell->note,base,cell->value);
-    if(!glided && !tt_audio_play(wave,first,last,cell->note,base)) {
-        message("Audio unavailable: check the output device or browser permission");
-        return;
-    }
-    tracker.audition_effect_active=0;
-    if(cell->effect==TT_EFFECT_M && cell->value>=0)
-        tt_audio_set_volume(0,cell->value);
-    else if(cell->effect==TT_EFFECT_STRETCH && cell->value>=0)
-        tt_audio_set_stretch(0,cell->value);
-    else if(cell->effect && cell->value>=0 &&
-            strchr("GIJKNOPRVWr",cell->effect)) {
-        tt_audio_command(0,(char)cell->effect,cell->value);
-        tracker.audition_effect_active=1;
-        tracker.next_audition_tick_at=SDL_GetTicks();
-    }
-    tracker.active_step=step;
-    tracker.active_pattern_index=tracker.pattern_index;
-}
-static void play_row(int row) {
-    if(!tracker.rendering_song && tracker.play_mode==PLAY_SONG &&
-       tracker.follow && tracker.order_list)
-        tracker.order_list->cursor=tracker.play_order;
-    const TtPattern *pattern=playing_pattern();
-    int pattern_index=tracker.play_mode==PLAY_PATTERN?tracker.loop_pattern_index:
-                      tracker.song.order[tracker.play_order];
-    if(row==0) {
-        char info[192];
-        if(tracker.play_mode==PLAY_PATTERN)
-            snprintf(info,sizeof(info),"Looping pattern %02X: %.90s%s",
-                     pattern_index,tracker.song.name[pattern_index],
-                     pattern_is_empty(pattern)?" [empty]":"");
-        else
-            snprintf(info,sizeof(info),"Order %02X/%02X: %.90s%s",
-                     tracker.play_order,tracker.song.order_count-1,
-                     tracker.song.name[pattern_index],
-                     pattern_is_empty(pattern)?" [empty]":"");
-        message(info);
-    }
-    for(int channel=0;channel<TT_CHANNELS;++channel) {
-        const TtCell *cell=&pattern->cell[row][channel];
-        if(cell->effect==TT_EFFECT_T && cell->value>=0 &&
-           cell->value<TT_SONG_TABLES) {
-            TableVoice *voice=&tracker.table_voice[channel];
-            voice->active=1;voice->table=cell->value;voice->tick=0;
-            voice->next_table=-1;voice->pending=0;
-        }
-        if(cell->effect==TT_EFFECT_M && cell->value>=0)
-            tt_audio_set_volume(channel,cell->value);
-        else if(cell->effect && cell->value>=0 && strchr("GIJKNOPRVWr",cell->effect))
-            tt_audio_command(channel,(char)cell->effect,cell->value);
-        int first,last;
-        const TtPhrase *phrase=NULL;
-        const TtWave *wave=instrument_wave(cell,&phrase);
-        if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))continue;
-        int base=cell_reference_note(phrase,cell);
-        if(cell->effect==TT_EFFECT_G && cell->value>0 &&
-           tt_audio_glide_to(channel,cell->note,base,cell->value))continue;
-        if(!tt_audio_play_channel(channel,wave,first,last,cell->note,base))
-            message("Audio unavailable: check the output device or browser permission");
-    }
-    if(tracker.rendering_song) {
-        int next=(tracker.display_tail+1)%SONG_DISPLAY_ROWS;
-        if(next==tracker.display_head)
-            tracker.display_head=(tracker.display_head+1)%SONG_DISPLAY_ROWS;
-        tracker.display_rows[tracker.display_tail]=(SongDisplayRow){
-            tracker.song_written_frames,row,pattern_index,
-            tracker.play_mode==PLAY_SONG?tracker.play_order:-1};
-        tracker.display_tail=next;
-    } else {
-        tracker.active_step=row;
-        tracker.active_pattern_index=pattern_index;
-        tracker.active_order_index=tracker.play_mode==PLAY_SONG?tracker.play_order:-1;
-    }
-}
-static void table_play_note(int channel,const TtCell *cell,int glide_rate) {
-    const TtPhrase *phrase=NULL;
-    const TtWave *wave=instrument_wave(cell,&phrase);
-    int first,last;
-    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))return;
-    int base=cell_reference_note(phrase,cell);
-    if(glide_rate>0 && tt_audio_glide_to(channel,cell->note,base,glide_rate))return;
-    tt_audio_play_channel(channel,wave,first,last,cell->note,base);
-}
-static void play_table_ticks(void) {
-    for(int channel=0;channel<TT_CHANNELS;++channel) {
-        TableVoice *voice=&tracker.table_voice[channel];
-        if(voice->pending && --voice->delay<=0) {
-            table_play_note(channel,&voice->delayed_note,voice->delayed_glide);
-            voice->pending=0;
-        }
-        if(!voice->active)continue;
-        const TtTable *table=&tracker.song.table[voice->table];
-        if(voice->tick>=table->length) {
-            if(voice->next_table>=0) {
-                voice->table=voice->next_table;voice->next_table=-1;
-                voice->tick=0;table=&tracker.song.table[voice->table];
-            } else { voice->active=0;continue; }
-        }
-        const TtTableTick *entry=&table->tick[voice->tick++];
-        TtCell note={entry->note,entry->instrument,TT_EFFECT_NONE,-1};
-        int delay=0,glide_rate=0,jump_table=-1,jump_tick=-1;
-        for(int fx=0;fx<TT_TABLE_EFFECTS;++fx) {
-            const TtTableEffect *effect=&entry->effect[fx];
-            if(!effect->command || effect->value<0)continue;
-            switch(effect->command) {
-            case 'M':tt_audio_set_volume(channel,effect->value);break;
-            case 'S':note.effect=TT_EFFECT_S;note.value=effect->value;break;
-            case 'U':delay=effect->value;break;
-            case 'G':glide_rate=effect->value;
-                tt_audio_command(channel,'G',effect->value);break;
-            case 'I':case 'J':case 'K':case 'N':case 'O':
-            case 'P':case 'R':case 'V':case 'W':case 'r':
-                tt_audio_command(channel,effect->command,effect->value);break;
-            case 'T':
-                if(effect->value<TT_SONG_TABLES)
-                    voice->next_table=effect->value;
-                break;
-            case 'X':
-                if(effect->value<TT_SONG_TABLES)jump_table=effect->value;
-                break;
-            case 'Y':jump_tick=effect->value;break;
-            default:break;
-            }
-        }
-        if(note.note>=0 && note.instrument>=0) {
-            voice->pending=0;
-            if(delay) {
-                voice->delayed_note=note;voice->delayed_glide=glide_rate;
-                voice->delay=delay;voice->pending=1;
-            } else table_play_note(channel,&note,glide_rate);
-        }
-        if(jump_table>=0) {
-            voice->table=jump_table;voice->tick=0;voice->next_table=-1;
-        } else if(jump_tick>=0 && jump_tick<table->length)voice->tick=jump_tick;
-    }
-}
-static void audition(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    if(tracker.focus==FOCUS_WAVE) {
-        int marker=tracker.marker;
-        int first=tracker.phrase.marker[marker];
-        int last=marker<15?tracker.phrase.marker[marker+1]:tracker.wave.frames;
-        if(last<=first) { message("Move the next marker to make a slice");return; }
-        tt_audio_set_volume(0,255);
-        int base=tt_slice_base_note(&tracker.phrase,marker<15?marker:14);
-        if(!tt_audio_play(&tracker.wave,first,last,base,base))
-            message("Audio unavailable");
-        else message("Audition marker slice");
-    } else audition_cell(tracker.step,tracker.channel);
-}
-static void start_playback(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    tt_audio_stop();
-    tracker.playing=tracker.started=0;
-    if(!tt_audio_begin_song()) {
-        message("Audio unavailable: check the output device or browser permission");
-        return;
-    }
-    for(int channel=0;channel<TT_CHANNELS;++channel)
-        tt_audio_set_volume(channel,255);
-    tracker.playing=tracker.started=1;
-    tracker.audition_effect_active=0;
-    memset(tracker.table_voice,0,sizeof(tracker.table_voice));
-    tracker.tick_phase=tracker.tick_remainder=tracker.frames_to_tick=0;
-    tracker.song_written_frames=0;
-    tracker.display_head=tracker.display_tail=0;
-    tracker.song_finished=0;
-    tracker.play_order=tracker.order_list?tracker.order_list->cursor:0;
-    tracker.play_step=0;
-    if(tracker.play_mode==PLAY_PATTERN)tracker.loop_pattern_index=tracker.pattern_index;
-    tracker.active_step=tracker.active_pattern_index=tracker.active_order_index=-1;
-    message(tracker.play_mode==PLAY_PATTERN?"Looping current pattern":"Playing song order");
-}
+
+
+
+
+
+
+
+
 static void start_song(F80Widget *button,void *user) {
-    tracker.play_mode=PLAY_SONG;start_playback(button,user);
+    (void)button;(void)user;send_play(TT_PLAY_SET_MODE,PLAY_SONG,0);
 }
 static void start_pattern_loop(F80Widget *button,void *user) {
-    tracker.play_mode=PLAY_PATTERN;start_playback(button,user);
+    (void)button;(void)user;send_play(TT_PLAY_SET_MODE,PLAY_PATTERN,0);
 }
-static void toggle_play(F80Widget *button,void *user) {
-    if(!tracker.started) { start_playback(button,user);return; }
-    if(tracker.playing) {
-        tracker.playing=0;tt_audio_stop();message("Paused");
-    } else {
-        if(tracker.song_finished) { start_playback(button,user);return; }
-        if(!tt_audio_begin_song()) {
-            message("Audio unavailable: check the output device or browser permission");
-            return;
-        }
-        tracker.playing=1;
-        tracker.frames_to_tick=0;
-        tracker.song_written_frames=0;
-        tracker.display_head=tracker.display_tail=0;
-        message("Resumed");
-    }
-}
-static int next_tick_frames(int divisor) {
-    tracker.tick_remainder+=TT_AUDIO_OUTPUT_RATE*60;
-    int frames=tracker.tick_remainder/divisor;
-    tracker.tick_remainder%=divisor;
-    return frames;
-}
-static void advance_playback(void) {
-    if(!tracker.playing)return;
-    int divisor=tracker.song.bpm*tracker.song.rows_per_beat*tracker.song.ticks_per_row;
-    int buffered=tt_audio_song_buffered_frames();
-    int needed=SONG_LOOKAHEAD_FRAMES-buffered;
-    if(needed<0)needed=0;
-    tracker.rendering_song=1;
-    while(needed>0 && !tracker.song_finished) {
-        if(!tracker.frames_to_tick) {
-            if(tracker.tick_phase==0)play_row(tracker.play_step);
-            play_table_ticks();
-            tt_audio_tick();
-            if(++tracker.tick_phase>=tracker.song.ticks_per_row) {
-                tracker.tick_phase=0;
-                if(++tracker.play_step>=tracker.song.pattern_rows) {
-                    tracker.play_step=0;
-                    if(tracker.play_mode==PLAY_SONG &&
-                       ++tracker.play_order>=tracker.song.order_count) {
-                        if(tracker.loop)tracker.play_order=0;
-                        else tracker.song_finished=1;
-                    }
-                }
-            }
-            tracker.frames_to_tick=next_tick_frames(divisor);
-        }
-        int frames=needed<tracker.frames_to_tick?needed:tracker.frames_to_tick;
-        tt_audio_render_song(frames);
-        tracker.song_written_frames+=(Uint64)frames;
-        tracker.frames_to_tick-=frames;
-        needed-=frames;
-    }
-    tracker.rendering_song=0;
-    buffered=tt_audio_song_buffered_frames();
-    Uint64 played=tracker.song_written_frames>
-        (Uint64)buffered?tracker.song_written_frames-(Uint64)buffered:0;
-    while(tracker.display_head!=tracker.display_tail &&
-          tracker.display_rows[tracker.display_head].frame<=played) {
-        SongDisplayRow row=tracker.display_rows[tracker.display_head];
-        tracker.active_step=row.row;
-        tracker.active_pattern_index=row.pattern;
-        tracker.active_order_index=row.order;
-        if(tracker.follow && row.order>=0 && tracker.order_list)
-            tracker.order_list->cursor=row.order;
-        tracker.display_head=(tracker.display_head+1)%SONG_DISPLAY_ROWS;
-    }
-    if(tracker.song_finished && buffered<512) {
-        tt_audio_end_song();
-        tracker.playing=tracker.started=0;
-    }
-}
-static void advance_audition(void) {
-    if(tracker.playing || !tracker.audition_effect_active)return;
-    if(!tt_audio_active()) { tracker.audition_effect_active=0;return; }
-    Uint64 now=SDL_GetTicks();
-    int interval=60000/(tracker.song.bpm*tracker.song.rows_per_beat*
-                        tracker.song.ticks_per_row);
-    if(interval<1)interval=1;
-    for(int tick=0;tick<64 && now>=tracker.next_audition_tick_at;++tick) {
-        tt_audio_tick();
-        tracker.next_audition_tick_at+=interval;
-    }
-}
+
+
+
+
 static int load_path(const char *path,const char *original_name) {
     if(tracker.sample_count>=TT_HISTORY_MAX) {
-        message("Sample slots full; restart to load a different set of WAVs");
+        tt_tracker_message("Sample slots full; restart to load a different set of WAVs");
         return 0;
     }
     TtWave next={0};
     char error[160];
     if(!tt_load_wav(path,&next,error,sizeof(error))) {
-        message(error);return 0;
+        tt_tracker_message(error);return 0;
     }
     stop_playback(NULL,NULL);
-    TtStored *previous=&tracker.samples[tracker.sample_index];
-    previous->wave=tracker.wave;
-    previous->phrase=tracker.phrase;
-    snprintf(previous->loaded_path,sizeof(previous->loaded_path),"%s",tracker.loaded_path);
-    snprintf(previous->csv_path,sizeof(previous->csv_path),"%s",tracker.csv_path);
-    tracker.wave=next;
     if(original_name && *original_name) {
-        snprintf(tracker.wave.name,sizeof(tracker.wave.name),"%s",original_name);
-        snprintf(tracker.wave.source_name,sizeof(tracker.wave.source_name),"%s",original_name);
+        snprintf(next.name,sizeof(next.name),"%s",original_name);
+        snprintf(next.source_name,sizeof(next.source_name),"%s",original_name);
     }
-    tt_phrase_init(&tracker.phrase,tracker.wave.frames);
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_APPEND};
+    event.loaded_wave=(TtEditLoadedWave){0,&next,path};
+    if(!emit_edit(&event)) { tt_free(&next);tt_tracker_message(edit_message);return 0; }
     tracker.zoom=tracker.view_start=tracker.marker=0;
-    tracker.sample_index=tracker.sample_count++;
-    snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",path);
-    tracker.csv_path[0]='\0';
-    message("WAV loaded; markers reset across the sample");
+    tt_tracker_message("WAV loaded; markers reset across the sample");
     return 1;
 }
 static void select_sample(int direction) {
     if(tracker.sample_count<2) {
         center_on_marker();
-        message("Only one sample; load another WAV from File");
+        tt_tracker_message("Only one sample; load another WAV from File");
         return;
     }
     int target=(tracker.sample_index+direction+tracker.sample_count)%tracker.sample_count;
     stop_playback(NULL,NULL);
-    TtStored *current=&tracker.samples[tracker.sample_index];
-    current->wave=tracker.wave;
-    current->phrase=tracker.phrase;
-    snprintf(current->loaded_path,sizeof(current->loaded_path),"%s",tracker.loaded_path);
-    snprintf(current->csv_path,sizeof(current->csv_path),"%s",tracker.csv_path);
-    TtStored *next=&tracker.samples[target];
-    tracker.wave=next->wave;
-    tracker.phrase=next->phrase;
-    snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",next->loaded_path);
-    snprintf(tracker.csv_path,sizeof(tracker.csv_path),"%s",next->csv_path);
-    memset(next,0,sizeof(*next));
-    tracker.sample_index=target;
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_SELECT};
+    event.sample.index=target;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     tracker.zoom=tracker.view_start=tracker.marker=0;
     center_on_marker();
-    message("Selected sample");
+    tt_tracker_message("Selected sample");
 }
 static void previous_sample(F80Widget *button,void *user) {
     (void)button;(void)user;select_sample(-1);
@@ -606,7 +280,8 @@ static void next_sample(F80Widget *button,void *user) {
 }
 static int save_song_at(const char *path) {
     TtSongSample meta[TT_HISTORY_MAX]={0};
-    tracker.song.pattern[tracker.pattern_index]=tracker.pattern;
+    TtEditEvent sync={.type=TT_EDIT_PATTERN_SYNC};
+    if(!emit_edit(&sync)) { tt_tracker_message(edit_message);return 0; }
     for(int i=0;i<tracker.sample_count;++i) {
         const TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
         const TtPhrase *phrase=i==tracker.sample_index?&tracker.phrase:&tracker.samples[i].phrase;
@@ -628,20 +303,20 @@ static int save_song_at(const char *path) {
     }
     char error[192];
     if(!tt_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error))) {
-        message(error);return 0;
+        tt_tracker_message(error);return 0;
     }
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
-    message("Song saved with patterns, order, sample paths and slices");
+    tt_tracker_message("Song saved with patterns, order, sample paths and slices");
     return 1;
 }
 static int load_song_at(const char *path) {
     TtSong *next=malloc(sizeof(*next));
-    if(!next) { message("Out of memory loading song");return 0; }
+    if(!next) { tt_tracker_message("Out of memory loading song");return 0; }
     TtSongSample meta[TT_HISTORY_MAX];
     TtStored loaded[TT_HISTORY_MAX]={0};
     int count=0,missing=0;char error[192];
     if(!tt_song_load(path,next,meta,&count,error,sizeof(error))) {
-        free(next);message(error);return 0;
+        free(next);tt_tracker_message(error);return 0;
     }
     for(int i=0;i<count;++i) {
         char resolved[512];
@@ -679,32 +354,26 @@ static int load_song_at(const char *path) {
         loaded[i].phrase=meta[i].phrase;
     }
     stop_playback(NULL,NULL);
-    tt_free(&tracker.wave);
-    for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
-    memset(tracker.samples,0,sizeof(tracker.samples));
-    tracker.song=*next;tracker.pattern_index=0;tracker.pattern=next->pattern[0];
+    TtEditEvent event={.type=TT_EDIT_DOCUMENT_REPLACE};
+    event.replacement=(TtEditDocumentReplace){next,loaded,count};
+    if(!emit_edit(&event)) { snprintf(error,sizeof(error),"%s",edit_message);goto failed; }
     tracker.edit_order=order_for_pattern(0,0);
     tracker.phrase_scroll=tracker.edit_order>=0?
         tracker.edit_order*tracker.song.pattern_rows:0;
     tracker.reveal_cursor=1;
-    tracker.play_mode=PLAY_SONG;
-    tracker.sample_count=count;tracker.sample_index=0;
-    tracker.wave=loaded[0].wave;tracker.phrase=loaded[0].phrase;
-    snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",loaded[0].loaded_path);
-    tracker.csv_path[0]=0;
-    for(int i=1;i<count;++i)tracker.samples[i]=loaded[i];
-    tracker.zoom=tracker.view_start=tracker.marker=tracker.step=tracker.play_order=0;
+    send_play(TT_PLAY_DOCUMENT_RESET,0,0);
+    tracker.zoom=tracker.view_start=tracker.marker=tracker.step=0;
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
     free(next);
     if(missing) {
         char info[192];
         snprintf(info,sizeof(info),"Song loaded; %d WAV file%s missing",missing,missing==1?"":"s");
-        message(info);
-    } else message("Song loaded");
+        tt_tracker_message(info);
+    } else tt_tracker_message("Song loaded");
     return 1;
 failed:
     for(int i=0;i<count;++i)tt_free(&loaded[i].wave);
-    free(next);message(error);return 0;
+    free(next);tt_tracker_message(error);return 0;
 }
 static int recover_missing(const char *name) {
     int recovered=0;
@@ -724,16 +393,12 @@ static int recover_missing(const char *name) {
         if(next.frames!=wave->frames || next.rate!=wave->rate) {
             tt_free(&next);continue;
         }
-        snprintf(next.name,sizeof(next.name),"%s",wave->name);
-        snprintf(next.source_name,sizeof(next.source_name),"%s",wave->source_name);
-        *wave=next;
-        if(i==tracker.sample_index)
-            snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",candidate);
-        else snprintf(tracker.samples[i].loaded_path,
-                      sizeof(tracker.samples[i].loaded_path),"%s",candidate);
+        TtEditEvent event={.type=TT_EDIT_SAMPLE_RECOVER};
+        event.loaded_wave=(TtEditLoadedWave){i,&next,candidate};
+        if(!emit_edit(&event)) { tt_free(&next);continue; }
         ++recovered;
     }
-    if(recovered)message("Missing WAV restored");
+    if(recovered)tt_tracker_message("Missing WAV restored");
     return recovered;
 }
 #ifdef __EMSCRIPTEN__
@@ -774,7 +439,7 @@ static void open_path_dialog(int action) {
     if(!f80_file_dialog_show(&file_dialog,&tracker.app,
                              save?F80_FILE_SAVE:F80_FILE_OPEN,title,initial,
                              filter,file_chosen,NULL))
-        message("Could not open file dialog");
+        tt_tracker_message("Could not open file dialog");
 #endif
 }
 static void open_load(F80Widget *button,void *user) {
@@ -798,12 +463,12 @@ static void zoom_in(F80Widget *button,void *user) {
 static void previous_marker(F80Widget *button,void *user) {
     (void)button;(void)user;
     focus_marker(tracker.marker-1);
-    message("Previous marker selected");
+    tt_tracker_message("Previous marker selected");
 }
 static void next_marker(F80Widget *button,void *user) {
     (void)button;(void)user;
     focus_marker(tracker.marker+1);
-    message("Next marker selected");
+    tt_tracker_message("Next marker selected");
 }
 static void set_effect(TtCell *cell,int effect) {
     if(effect==TT_EFFECT_NONE) {
@@ -819,16 +484,17 @@ static void adjust_value(int delta) {
         if(cells<1)cells=1;
         int distance=visible_frames()/cells;
         if(distance<1)distance=1;
-        tt_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,
-                           tracker.phrase.marker[tracker.marker]+delta*distance);
+        edit_marker(tracker.marker,tracker.phrase.marker[tracker.marker]+delta*distance);
         center_on_marker();
-        message("Marker moved; hold on the waveform to select and drag one");
+        tt_tracker_message("Marker moved; hold on the waveform to select and drag one");
     } else if(tracker.focus==FOCUS_REFERENCE) {
-        tt_phrase_set_reference_note(&tracker.phrase,
-            clamp(tracker.phrase.reference_note+delta,12,127));
-        message("Reference note sets the sample's original pitch");
+        TtEditEvent event={.type=TT_EDIT_SAMPLE_REFERENCE};
+        event.sample.index=tracker.sample_index;
+        event.sample.value=clamp(tracker.phrase.reference_note+delta,12,127);
+        emit_edit(&event);
+        tt_tracker_message("Reference note sets the sample's original pitch");
     } else {
-        TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+        TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*cell=&edited;
         if(tracker.field==0)
             cell->note=clamp((cell->note<0?tracker.phrase.reference_note:cell->note)+delta,
                              12,127);
@@ -843,7 +509,8 @@ static void adjust_value(int delta) {
             if(cell->effect==TT_EFFECT_NONE)set_effect(cell,TT_EFFECT_S);
             cell->value=clamp(cell->value+delta,0,255);
         }
-        message("Pattern cell changed");
+        edit_cell(tracker.step,tracker.channel,edited);
+        tt_tracker_message("Pattern cell changed");
     }
 }
 static void value_down(F80Widget *button,void *user) {
@@ -865,18 +532,13 @@ static void focus_wave(F80Widget *button,void *user) {
     (void)button;(void)user;tracker.focus=FOCUS_WAVE;
 }
 static void toggle_loop(F80Widget *button,void *user) {
-    (void)button;(void)user;tracker.loop=!tracker.loop;
-    message(tracker.loop?"Song loop on":"Song loop off");
+    (void)button;(void)user;send_play(TT_PLAY_TOGGLE_LOOP,0,0);
 }
 static void toggle_follow(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    tracker.follow=!tracker.follow;
-    message(tracker.follow?"Follow playhead on":"Follow playhead off");
+    (void)button;(void)user;send_play(TT_PLAY_TOGGLE_FOLLOW,0,0);
 }
 static void toggle_mode(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    tracker.play_mode=tracker.play_mode==PLAY_SONG?PLAY_PATTERN:PLAY_SONG;
-    start_playback(NULL,NULL);
+    (void)button;(void)user;send_play(TT_PLAY_TOGGLE_MODE,0,0);
 }
 static void tt_extrema(int first,int last,float *low,float *high) {
     *low=1;*high=-1;
@@ -1147,22 +809,6 @@ static void paint_phrase(F80Widget *canvas,void *user) {
 static void close_help(F80Widget *button,void *user) {
     (void)button;(void)user;f80_hide_modal(&tracker.app);
 }
-static void store_sample(void) {
-    TtStored *slot=&tracker.samples[tracker.sample_index];
-    slot->wave=tracker.wave;slot->phrase=tracker.phrase;
-    snprintf(slot->loaded_path,sizeof(slot->loaded_path),"%s",tracker.loaded_path);
-    snprintf(slot->csv_path,sizeof(slot->csv_path),"%s",tracker.csv_path);
-    memset(&tracker.wave,0,sizeof(tracker.wave));
-}
-static void restore_sample(int index) {
-    TtStored *slot=&tracker.samples[index];
-    tracker.wave=slot->wave;tracker.phrase=slot->phrase;
-    snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s",slot->loaded_path);
-    snprintf(tracker.csv_path,sizeof(tracker.csv_path),"%s",slot->csv_path);
-    memset(slot,0,sizeof(*slot));
-    tracker.sample_index=index;
-    tracker.zoom=tracker.view_start=tracker.marker=0;
-}
 static void manage_refresh(void) {
     if(!tracker.manage_dialog)return;
     for(int i=0;i<tracker.sample_count;++i) {
@@ -1199,63 +845,48 @@ static void manage_move(F80Widget *button,void *user) {
     int a=tracker.manage_list->cursor,b=a+direction;
     if(b<0 || b>=tracker.sample_count)return;
     stop_playback(NULL,NULL);
-    store_sample();
-    TtStored temp=tracker.samples[a];tracker.samples[a]=tracker.samples[b];
-    tracker.samples[b]=temp;
-    int selected=tracker.sample_index==a?b:tracker.sample_index==b?a:tracker.sample_index;
-    restore_sample(selected);
-    for(int pattern=0;pattern<tracker.song.pattern_count;++pattern)
-    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<TT_CHANNELS;++channel) {
-        TtPattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
-                            &tracker.song.pattern[pattern];
-        TtCell *cell=&bank->cell[row][channel];
-        if(cell->instrument==a+1)cell->instrument=b+1;
-        else if(cell->instrument==b+1)cell->instrument=a+1;
-    }
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_SWAP};
+    event.sample.index=a;event.sample.other=b;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    tracker.zoom=tracker.view_start=tracker.marker=0;
     tracker.manage_list->cursor=b;manage_selected(tracker.manage_list,NULL);
-    message("Samples reordered; pattern instrument numbers updated");
+    tt_tracker_message("Samples reordered; pattern instrument numbers updated");
 }
 static void manage_delete(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.sample_count<=1) { message("Keep at least one sample");return; }
-    if(!tracker.delete_armed) { tracker.delete_armed=1;message("Press Delete again to remove this sample");return; }
+    if(tracker.sample_count<=1) { tt_tracker_message("Keep at least one sample");return; }
+    if(!tracker.delete_armed) { tracker.delete_armed=1;tt_tracker_message("Press Delete again to remove this sample");return; }
     int removed=tracker.manage_list->cursor;
-    stop_playback(NULL,NULL);store_sample();
-    tt_free(&tracker.samples[removed].wave);
-    for(int i=removed;i<tracker.sample_count-1;++i)tracker.samples[i]=tracker.samples[i+1];
-    memset(&tracker.samples[--tracker.sample_count],0,sizeof(TtStored));
-    int next=tracker.sample_index;
-    if(next==removed)next=clamp(removed,0,tracker.sample_count-1);
-    else if(next>removed)--next;
-    restore_sample(next);
-    for(int pattern=0;pattern<tracker.song.pattern_count;++pattern)
-    for(int row=0;row<tracker.song.pattern_rows;++row)for(int channel=0;channel<TT_CHANNELS;++channel) {
-        TtPattern *bank=pattern==tracker.pattern_index?&tracker.pattern:
-                            &tracker.song.pattern[pattern];
-        TtCell *cell=&bank->cell[row][channel];
-        if(cell->instrument==removed+1)*cell=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
-        else if(cell->instrument>removed+1)--cell->instrument;
-    }
+    stop_playback(NULL,NULL);
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_DELETE};
+    event.sample.index=removed;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    tracker.zoom=tracker.view_start=tracker.marker=0;
     tracker.manage_list->cursor=clamp(removed,0,tracker.sample_count-1);
     manage_selected(tracker.manage_list,NULL);
-    message("Sample deleted; pattern references updated");
+    tt_tracker_message("Sample deleted; pattern references updated");
 }
 static void manage_rename(F80Widget *button,void *user) {
     (void)button;(void)user;
     tracker.delete_armed=0;
-    if(!tracker.manage_name->input[0]) { message("Enter a sample name");return; }
+    if(!tracker.manage_name->input[0]) { tt_tracker_message("Enter a sample name");return; }
     int index=tracker.manage_list->cursor;
-    TtWave *wave=index==tracker.sample_index?&tracker.wave:&tracker.samples[index].wave;
-    snprintf(wave->name,sizeof(wave->name),"%s",tracker.manage_name->input);
-    manage_refresh();message("Sample renamed; original WAV name retained for CSV");
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_RENAME};
+    event.sample.index=index;
+    snprintf(event.sample.name,sizeof(event.sample.name),"%s",tracker.manage_name->input);
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    manage_refresh();tt_tracker_message("Sample renamed; original WAV name retained for CSV");
 }
 static void manage_ref(F80Widget *button,void *user) {
     (void)button;int delta=(int)(long)user,index=tracker.manage_list->cursor;
     tracker.delete_armed=0;
     TtPhrase *phrase=index==tracker.sample_index?&tracker.phrase:
         &tracker.samples[index].phrase;
-    tt_phrase_set_reference_note(phrase,clamp(phrase->reference_note+delta,0,127));
-    manage_refresh();message("Sample base changed; slice bases transposed");
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_REFERENCE};
+    event.sample.index=index;
+    event.sample.value=clamp(phrase->reference_note+delta,0,127);
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    manage_refresh();tt_tracker_message("Sample base changed; slice bases transposed");
 }
 static void close_manage(F80Widget *button,void *user) {
     (void)button;(void)user;f80_hide_modal(&tracker.app);
@@ -1321,21 +952,20 @@ static void slices_selected(F80Widget *list,void *user) {
 static void slices_apply(F80Widget *button,void *user) {
     (void)button;(void)user;
     int note=parse_note(tracker.slices_note->input);
-    if(note<0) { message("Enter a note like C-4 or F#3");return; }
-    tt_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,note);
-    slices_refresh();message("Slice base note set");
+    if(note<0) { tt_tracker_message("Enter a note like C-4 or F#3");return; }
+    edit_slice(tracker.slices_list->cursor,note);
+    slices_refresh();tt_tracker_message("Slice base note set");
 }
 static void slices_inherit(F80Widget *button,void *user) {
     (void)button;(void)user;
-    tt_slice_set_note(&tracker.phrase,tracker.slices_list->cursor,-1);
-    slices_selected(tracker.slices_list,NULL);message("Slice inherits sample base note");
+    edit_slice(tracker.slices_list->cursor,-1);
+    slices_selected(tracker.slices_list,NULL);tt_tracker_message("Slice inherits sample base note");
 }
 static void slices_step(F80Widget *button,void *user) {
     (void)button;
     int index=tracker.slices_list->cursor;
-    tt_slice_set_note(&tracker.phrase,index,
-        clamp(tt_slice_base_note(&tracker.phrase,index)+(int)(long)user,0,127));
-    slices_selected(tracker.slices_list,NULL);message("Slice base note changed");
+    edit_slice(index,clamp(tt_slice_base_note(&tracker.phrase,index)+(int)(long)user,0,127));
+    slices_selected(tracker.slices_list,NULL);tt_tracker_message("Slice base note changed");
 }
 static void close_slices(F80Widget *button,void *user) {
     (void)button;(void)user;f80_hide_modal(&tracker.app);
@@ -1392,29 +1022,23 @@ static void order_bank_selected(F80Widget *list,void *user) {
              tracker.song.name[list->cursor]);
     tracker.order_name->input_pos=(int)strlen(tracker.order_name->input);
 }
-static void empty_pattern(TtPattern *pattern) {
-    for(int row=0;row<TT_MAX_STEPS;++row)for(int channel=0;channel<TT_CHANNELS;++channel)
-        pattern->cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
-}
 static void order_new_pattern(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.song.pattern_count>=TT_SONG_PATTERNS) {
-        message("Pattern bank is full");return;
-    }
-    int index=tracker.song.pattern_count++;
-    empty_pattern(&tracker.song.pattern[index]);
-    snprintf(tracker.song.name[index],TT_SONG_NAME,"Pattern %02X",index);
+    TtEditEvent event={.type=TT_EDIT_PATTERN_NEW};
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    int index=tracker.song.pattern_count-1;
     select_edit_pattern(index);
     tracker.order_bank->cursor=index;
     order_refresh();order_bank_selected(tracker.order_bank,NULL);
-    message("New pattern selected for editing; add it to the play order");
+    tt_tracker_message("New pattern selected for editing; add it to the play order");
 }
 static void order_rename(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(!tracker.order_name->input[0]) { message("Enter a pattern name");return; }
-    int index=tracker.order_bank->cursor;
-    snprintf(tracker.song.name[index],TT_SONG_NAME,"%.63s",tracker.order_name->input);
-    order_refresh();message("Pattern renamed");
+    TtEditEvent event={.type=TT_EDIT_PATTERN_RENAME};
+    event.pattern.index=tracker.order_bank->cursor;
+    snprintf(event.pattern.name,sizeof(event.pattern.name),"%s",tracker.order_name->input);
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    order_refresh();tt_tracker_message("Pattern renamed");
 }
 static void order_edit(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -1422,41 +1046,45 @@ static void order_edit(F80Widget *button,void *user) {
     stop_playback(NULL,NULL);
     select_edit_pattern(index);
     tracker.step=tracker.channel=tracker.field=0;
-    order_refresh();message("Selected pattern for editing");
+    order_refresh();tt_tracker_message("Selected pattern for editing");
 }
 static void order_add(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.song.order_count>=TT_SONG_ORDER) { message("Order is full");return; }
+    if(tracker.song.order_count>=TT_SONG_ORDER) { tt_tracker_message("Order is full");return; }
     stop_playback(NULL,NULL);
     int at=tracker.order_seq->cursor+1;
     if(at<0 || at>tracker.song.order_count)at=tracker.song.order_count;
-    memmove(tracker.song.order+at+1,tracker.song.order+at,
-            (size_t)(tracker.song.order_count-at));
-    tracker.song.order[at]=(unsigned char)tracker.order_bank->cursor;
-    ++tracker.song.order_count;tracker.order_seq->cursor=at;
-    order_refresh();message("Pattern inserted in play order");
+    TtEditEvent event={.type=TT_EDIT_ORDER_INSERT};
+    event.order.position=at;event.order.pattern=tracker.order_bank->cursor;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    tracker.order_seq->cursor=at;
+    order_refresh();tt_tracker_message("Pattern inserted in play order");
 }
 static void order_remove(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.song.order_count<=1) { message("Keep at least one order entry");return; }
+    if(tracker.song.order_count<=1) { tt_tracker_message("Keep at least one order entry");return; }
     stop_playback(NULL,NULL);
-    int at=tracker.order_seq->cursor;
-    memmove(tracker.song.order+at,tracker.song.order+at+1,
-            (size_t)(tracker.song.order_count-at-1));
-    --tracker.song.order_count;order_refresh();message("Order entry removed");
+    TtEditEvent event={.type=TT_EDIT_ORDER_REMOVE};
+    event.order.position=tracker.order_seq->cursor;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    order_refresh();tt_tracker_message("Order entry removed");
 }
 static void order_move(F80Widget *button,void *user) {
     (void)button;int a=tracker.order_seq->cursor,b=a+(int)(long)user;
     if(b<0 || b>=tracker.song.order_count)return;
     stop_playback(NULL,NULL);
-    unsigned char temp=tracker.song.order[a];tracker.song.order[a]=tracker.song.order[b];
-    tracker.song.order[b]=temp;tracker.order_seq->cursor=b;
-    order_refresh();message("Order entry moved");
+    TtEditEvent event={.type=TT_EDIT_ORDER_SWAP};
+    event.order.position=a;event.order.other=b;
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    tracker.order_seq->cursor=b;
+    order_refresh();tt_tracker_message("Order entry moved");
 }
 static void order_bpm(F80Widget *button,void *user) {
     (void)button;
-    tracker.song.bpm=clamp(tracker.song.bpm+(int)(long)user,30,300);
-    order_refresh();message("Song BPM changed");
+    TtEditEvent event={.type=TT_EDIT_BPM};
+    event.bpm=tracker.song.bpm+(int)(long)user;
+    emit_edit(&event);
+    order_refresh();tt_tracker_message("Song BPM changed");
 }
 static int setting_number(const F80Widget *input,int low,int high,int *value) {
     char *end;
@@ -1477,29 +1105,19 @@ static void apply_settings(F80Widget *button,void *user) {
        !setting_number(tracker.settings_input[1],16,TT_MAX_STEPS,&rows) ||
        rows%16 || !setting_number(tracker.settings_input[2],1,16,&beat_rows) ||
        !setting_number(tracker.settings_input[3],1,TT_MAX_TICKS_PER_ROW,&ticks)) {
-        message("Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48");
+        tt_tracker_message("Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48");
         return;
     }
     stop_playback(NULL,NULL);
-    if(rows<tracker.song.pattern_rows)
-        for(int pattern=0;pattern<tracker.song.pattern_count;++pattern) {
-            TtPattern *current=pattern==tracker.pattern_index?
-                &tracker.pattern:&tracker.song.pattern[pattern];
-            for(int row=rows;row<TT_MAX_STEPS;++row)
-                for(int channel=0;channel<TT_CHANNELS;++channel)
-                    current->cell[row][channel]=
-                        (TtCell){-1,-1,TT_EFFECT_NONE,-1};
-        }
-    tracker.song.bpm=bpm;
-    tracker.song.pattern_rows=rows;
-    tracker.song.rows_per_beat=beat_rows;
-    tracker.song.ticks_per_row=ticks;
+    TtEditEvent event={.type=TT_EDIT_SETTINGS};
+    event.settings=(TtEditSettings){bpm,rows,beat_rows,ticks};
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     tracker.step=clamp(tracker.step,0,rows-1);
     tracker.anchor_step=clamp(tracker.anchor_step,0,rows-1);
     tracker.selecting=0;
     tracker.reveal_cursor=1;
     close_settings(NULL,NULL);
-    message("Song settings updated");
+    tt_tracker_message("Song settings updated");
 }
 static void show_settings(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -1606,8 +1224,10 @@ static void table_select(F80Widget *button,void *user) {
 static void table_resize(F80Widget *button,void *user) {
     (void)button;
     TtTable *table=&tracker.song.table[tracker.table_index];
-    table->length=clamp(table->length+(int)(long)user*TT_TABLE_MIN_TICKS,
-                        TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS);
+    TtEditEvent event={.type=TT_EDIT_TABLE_LENGTH};
+    event.table.table=tracker.table_index;
+    event.table.length=table->length+(int)(long)user*TT_TABLE_MIN_TICKS;
+    emit_edit(&event);
     f80_grid_resize(&tracker.table_grid,table->length);
     table_title();
 }
@@ -1737,46 +1357,51 @@ static void next_pattern(F80Widget *button,void *user) {
 }
 static void clear_field(F80Widget *button,void *user) {
     (void)button;(void)user;
-    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*cell=&edited;
     if(tracker.field==0)cell->note=-1;
     else if(tracker.field==1)cell->instrument=-1;
     else if(tracker.field==2)set_effect(cell,TT_EFFECT_NONE);
     else if(cell->effect!=TT_EFFECT_NONE)cell->value=0;
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void tt_down(F80Widget *button,void *user) {
     (void)button;(void)user;
-    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*cell=&edited;
     cell->instrument=clamp((cell->instrument<1?tracker.sample_index+1:cell->instrument)-1,
                            1,tracker.sample_count);
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void tt_up(F80Widget *button,void *user) {
     (void)button;(void)user;
-    TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*cell=&edited;
     cell->instrument=clamp((cell->instrument<1?tracker.sample_index+1:cell->instrument)+1,
                            1,tracker.sample_count);
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void use_m(F80Widget *button,void *user) {
     (void)button;(void)user;
-    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],TT_EFFECT_M);
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    set_effect(&edited,TT_EFFECT_M);
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void use_s(F80Widget *button,void *user) {
     (void)button;(void)user;
-    set_effect(&tracker.pattern.cell[tracker.step][tracker.channel],TT_EFFECT_S);
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    set_effect(&edited,TT_EFFECT_S);
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void repeat_above(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(tracker.step==0)return;
-    TtCell *dst=&tracker.pattern.cell[tracker.step][tracker.channel];
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*dst=&edited;
     const TtCell *src=&tracker.pattern.cell[tracker.step-1][tracker.channel];
     if(tracker.field==2) { dst->effect=src->effect;dst->value=src->value; }
     else dst->value=src->value;
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void select_transpose(int delta) {
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    for(int row=top;row<=bottom;++row)for(int channel=left;channel<=right;++channel) {
-        TtCell *cell=&tracker.pattern.cell[row][channel];
-        if(cell->note>=0)cell->note=clamp(cell->note+delta,12,127);
-    }
+    edit_cells(TT_BULK_TRANSPOSE,top,left,bottom,right,delta,NULL,0);
 }
 static void transpose_down(F80Widget *button,void *user) {
     (void)button;(void)user;select_transpose(-1);
@@ -1792,19 +1417,17 @@ static void copy_selection(F80Widget *button,void *user) {
     for(int row=0;row<tracker.clip_rows;++row)
         for(int channel=0;channel<tracker.clip_channels;++channel)
             tracker.clipboard[row][channel]=tracker.pattern.cell[top+row][left+channel];
-    message("Selection copied");
+    tt_tracker_message("Selection copied");
 }
 static void clear_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(!tracker.selecting)return;
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    for(int row=top;row<=bottom;++row)
-        for(int channel=left;channel<=right;++channel)
-            tracker.pattern.cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
-    message("Selection cleared");
+    edit_cells(TT_BULK_CLEAR,top,left,bottom,right,0,NULL,0);
+    tt_tracker_message("Selection cleared");
 }
 static void cut_selection(F80Widget *button,void *user) {
-    copy_selection(button,user);clear_selection(button,user);message("Selection cut");
+    copy_selection(button,user);clear_selection(button,user);tt_tracker_message("Selection cut");
 }
 static int paste_available(void) {
     if(!tracker.selecting || !tracker.clip_rows)return 0;
@@ -1813,12 +1436,11 @@ static int paste_available(void) {
 }
 static void paste_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(!paste_available()) { message("Select an area matching the clipboard size");return; }
+    if(!paste_available()) { tt_tracker_message("Select an area matching the clipboard size");return; }
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    for(int row=0;row<tracker.clip_rows;++row)
-        for(int channel=0;channel<tracker.clip_channels;++channel)
-            tracker.pattern.cell[top+row][left+channel]=tracker.clipboard[row][channel];
-    message("Selection pasted");
+    edit_cells(TT_BULK_PASTE,top,left,top+tracker.clip_rows-1,left+tracker.clip_channels-1,0,
+               &tracker.clipboard[0][0],TT_CHANNELS);
+    tt_tracker_message("Selection pasted");
 }
 static void oct_down(F80Widget *button,void *user);
 static void oct_up(F80Widget *button,void *user);
@@ -1881,7 +1503,7 @@ static const F80StatusItem *current_status(void) {
 }
 static void change_octave(int delta) {
     tracker.entry_octave=clamp(tracker.entry_octave+delta,0,8);
-    message("Keyboard entry octave changed");
+    tt_tracker_message("Keyboard entry octave changed");
 }
 static void oct_down(F80Widget *button,void *user) {
     (void)button;(void)user;change_octave(-1);
@@ -1905,22 +1527,16 @@ static int piano_offset(int key) {
     at=strchr(high,key);
     return at?high_note[at-high]:-1;
 }
-static void table_assign_field(TtTableTick *dst,const TtTableTick *src,int field) {
-    if(field==0)dst->note=src->note;
-    else if(field==1)dst->instrument=src->instrument;
-    else dst->effect[field-2]=src->effect[field-2];
+static void edit_table_ticks(TtBulkOp op,int top,int left,int bottom,int right,
+                             const TtTableTick *data) {
+    TtEditEvent event={.type=TT_EDIT_TABLE_TICKS_BULK};
+    event.table_ticks=(TtEditTableTicksBulk){op,tracker.table_index,top,left,bottom,right,data};
+    emit_edit(&event);
 }
 static void table_clear_area(void) {
     int top,left,bottom,right;
     f80_grid_bounds(&tracker.table_grid,&top,&left,&bottom,&right);
-    TtTable *table=&tracker.song.table[tracker.table_index];
-    for(int row=top;row<=bottom;++row)
-        for(int field=left;field<=right;++field) {
-            TtTableTick *entry=&table->tick[row];
-            if(field==0)entry->note=-1;
-            else if(field==1)entry->instrument=-1;
-            else entry->effect[field-2]=(TtTableEffect){0,-1};
-        }
+    edit_table_ticks(TT_BULK_CLEAR,top,left,bottom,right,NULL);
 }
 static void table_copy_area(void) {
     int top,left,bottom,right;
@@ -1930,20 +1546,18 @@ static void table_copy_area(void) {
     tracker.table_clip_left=left;tracker.table_clip_right=right;
     for(int row=0;row<tracker.table_clip_rows;++row)
         tracker.table_clip[row]=table->tick[top+row];
-    message("Table selection copied");
+    tt_tracker_message("Table selection copied");
 }
 static void table_paste_area(void) {
     int top,left,bottom,right;
     f80_grid_bounds(&tracker.table_grid,&top,&left,&bottom,&right);
     if(!tracker.table_clip_rows || left!=tracker.table_clip_left ||
        right!=tracker.table_clip_right || bottom-top+1!=tracker.table_clip_rows) {
-        message("Select matching table fields and ticks to paste");return;
+        tt_tracker_message("Select matching table fields and ticks to paste");return;
     }
-    TtTable *table=&tracker.song.table[tracker.table_index];
-    for(int row=0;row<tracker.table_clip_rows;++row)
-        for(int field=left;field<=right;++field)
-            table_assign_field(&table->tick[top+row],&tracker.table_clip[row],field);
-    message("Table selection pasted");
+    edit_table_ticks(TT_BULK_PASTE,top,left,top+tracker.table_clip_rows-1,right,
+                     tracker.table_clip);
+    tt_tracker_message("Table selection pasted");
 }
 static void handle_table_key(int key) {
     if(key==9 || key==F80_KEY_BTAB) {
@@ -1958,18 +1572,22 @@ static void handle_table_key(int key) {
             tracker.table_name->input_pos=clamp(tracker.table_name->input_pos,0,
                                                 TT_SONG_NAME-1);
         }
-        if(tracker.table_name->input[0])
-            snprintf(tracker.song.table[tracker.table_index].name,TT_SONG_NAME,
-                     "%s",tracker.table_name->input);
+        if(tracker.table_name->input[0]) {
+            TtEditEvent event={.type=TT_EDIT_TABLE_NAME};
+            event.table.table=tracker.table_index;
+            snprintf(event.table.name,sizeof(event.table.name),"%s",tracker.table_name->input);
+            emit_edit(&event);
+        }
         return;
     }
     if(key==2005) { table_copy_area();return; }
-    if(key==2006) { table_copy_area();table_clear_area();message("Table selection cut");return; }
+    if(key==2006) { table_copy_area();table_clear_area();tt_tracker_message("Table selection cut");return; }
     if(key==2007) { table_paste_area();return; }
-    if(key==2008) { table_clear_area();message("Table selection cleared");return; }
+    if(key==2008) { table_clear_area();tt_tracker_message("Table selection cleared");return; }
     if(f80_grid_key(&tracker.table_grid,key))return;
-    TtTable *table=&tracker.song.table[tracker.table_index];
-    TtTableTick *entry=&table->tick[tracker.table_grid.row];
+    const int edit_table=tracker.table_index,edit_tick=tracker.table_grid.row;
+    TtTableTick edited=tracker.song.table[edit_table].tick[edit_tick],*entry=&edited;
+    int changed=0;
     if(key=='[')table_select(NULL,(void *)(long)-1);
     else if(key==']')table_select(NULL,(void *)(long)1);
     else if(key=='-')table_resize(NULL,(void *)(long)-1);
@@ -1980,19 +1598,30 @@ static void handle_table_key(int key) {
         int note=piano_offset(key);
         if(note>=0) {
             entry->note=clamp((tracker.entry_octave+1)*12+note,0,127);
+            changed=1;
         }
     } else if(tracker.table_grid.field==1) {
         int digit=hex_digit(key);
-        if(digit>=0)entry->instrument=((entry->instrument<0?0:entry->instrument)<<4 & 0xf0)|digit;
+        if(digit>=0) {
+            entry->instrument=((entry->instrument<0?0:entry->instrument)<<4 & 0xf0)|digit;
+            changed=1;
+        }
     } else {
         TtTableEffect *fx=&entry->effect[tracker.table_grid.field-2];
         int digit=hex_digit(key);
         if(key>='g' && key<='z')key-=32;
         if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXY",key)) {
-            if(fx->command!=key) { fx->command=(char)key;fx->value=-1; }
+            if(fx->command!=key) { fx->command=(char)key;fx->value=-1;changed=1; }
         }
-        else if(digit>=0 && fx->command)
+        else if(digit>=0 && fx->command) {
             fx->value=((fx->value<0?0:fx->value)<<4 & 0xf0)|digit;
+            changed=1;
+        }
+    }
+    if(changed) {
+        TtEditEvent event={.type=TT_EDIT_TABLE_TICK_SET};
+        event.table_tick=(TtEditTableTickSet){edit_table,edit_tick,edited};
+        emit_edit(&event);
     }
 }
 static void update_labels(void) {
@@ -2167,7 +1796,7 @@ static void handle_key(int key) {
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
         if(tracker.selecting)return;
-        TtCell *entry=&tracker.pattern.cell[tracker.step][tracker.channel];
+        TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
         int digit=hex_digit(key);
         if(key==F80_KEY_UP) {
             tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);tracker.reveal_cursor=1;
@@ -2187,19 +1816,24 @@ static void handle_key(int key) {
             else if(tracker.field==1)entry->instrument=-1;
             else if(tracker.field==2)set_effect(entry,TT_EFFECT_NONE);
             else if(entry->effect!=TT_EFFECT_NONE)entry->value=0;
+            edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field==1 && digit>=0) {
             entry->instrument=digit;
+            edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field==2 &&
-                  strchr("GIJKMNOPRSTVW",key>='a' && key<='z'?key-32:key))
+                  strchr("GIJKMNOPRSTVW",key>='a' && key<='z'?key-32:key)) {
             set_effect(entry,key>='a' && key<='z'?key-32:key);
-        else if(tracker.field==3 && digit>=0) {
+            edit_cell(tracker.step,tracker.channel,edited);
+        } else if(tracker.field==3 && digit>=0) {
             if(entry->effect==TT_EFFECT_NONE)set_effect(entry,TT_EFFECT_S);
             entry->value=(((entry->value<0?0:entry->value)<<4)&0xf0)|digit;
+            edit_cell(tracker.step,tracker.channel,edited);
         }
         else if(tracker.field==0) {
             int offset=piano_offset(key);
             if(offset>=0) {
                 entry->note=clamp((tracker.entry_octave+1)*12+offset,12,127);
+                edit_cell(tracker.step,tracker.channel,edited);
                 if(entry->instrument>=0)audition_cell(tracker.step,tracker.channel);
             } else if(key=='+' || key=='=')adjust_value(1);
             else if(key=='-')adjust_value(-1);
@@ -2248,7 +1882,7 @@ static void handle_mouse(int x,int y,int wheel) {
         tracker.focus=FOCUS_WAVE;
         if(!tracker.wave.pcm) {
             if(!wheel && y==r.y+r.h-2) {
-                if(!recover_missing(NULL))message("WAV still missing; check its saved path");
+                if(!recover_missing(NULL))tt_tracker_message("WAV still missing; check its saved path");
             }
             return;
         }
@@ -2268,7 +1902,7 @@ static void handle_mouse(int x,int y,int wheel) {
                 tracker.marker=marker;
                 char status[48];
                 snprintf(status,sizeof(status),"Marker %X selected",marker);
-                message(status);
+                tt_tracker_message(status);
             }
         }
         return;
@@ -2401,7 +2035,7 @@ static void hold_wave_marker(int x) {
     wave_touch.marker_frame=tracker.phrase.marker[nearest];
     char status[64];
     snprintf(status,sizeof(status),"Marker %X selected; drag to move",nearest);
-    message(status);
+    tt_tracker_message(status);
 }
 static void move_wave_marker_touch(int x) {
     F80Rect r=tracker.wave_canvas->rect;
@@ -2409,7 +2043,7 @@ static void move_wave_marker_touch(int x) {
     x=clamp(x,r.x,r.x+r.w-1);
     int frame=wave_touch.marker_frame+
         (int)((long long)(x-wave_touch.x)*wave_touch.visible/r.w);
-    tt_move_marker(&tracker.phrase,tracker.wave.frames,tracker.marker,frame);
+    edit_marker(tracker.marker,frame);
 }
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE void tt_tracker_begin_touch_selection(int x,int y) {
@@ -2655,8 +2289,7 @@ static int frame(void *user) {
 #ifndef __EMSCRIPTEN__
     native_poll_hold();
 #endif
-    advance_playback();
-    advance_audition();
+    tt_play_advance();
     update_labels();
     const F80StatusItem *items=current_status();
     tracker.status->status_items=items;
@@ -2846,14 +2479,14 @@ static int load_default_song(const char *executable) {
         }
     }
     if(!realpath("default.song",resolved)) {
-        message("default.song is missing");return 0;
+        tt_tracker_message("default.song is missing");return 0;
     }
     if(!load_song_at(resolved))return 0;
 loaded:
 #endif
     for(int i=0;i<tracker.sample_count;++i) {
         TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
-        if(!wave->pcm) { message("Default song has a missing WAV");return 0; }
+        if(!wave->pcm) { tt_tracker_message("Default song has a missing WAV");return 0; }
     }
     return 1;
 }
@@ -2869,7 +2502,7 @@ int main(int argc,char **argv) {
         for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
         return 1;
     }
-    message("Default song ready");
+    tt_tracker_message("Default song ready");
     if(argc>1)load_path(argv[1],NULL);
     initscr();cbreak();noecho();keypad(stdscr,TRUE);curs_set(0);f80_colors();
 #ifndef __EMSCRIPTEN__
