@@ -782,7 +782,7 @@ static void draw_menu_drop(F80Widget *w) {
     }
 }
 static void draw_status(F80Widget *w) {
-    F80Rect r=w->rect; f80_put(r.y,r.x,"",r.w,1,0); int x=r.x;
+    F80Rect r=w->rect; f80_put(r.y,r.x,"",r.w,F80_COLOR_STATUS,0); int x=r.x;
     for(int i=0;i<w->status_count && x<r.x+r.w;++i) {
         const F80StatusItem *it=&w->status_items[i]; int key=(int)strlen(it->key), label=(int)strlen(it->label);
         f80_put(r.y,x,it->key,key,16,1); x+=key;
@@ -1123,9 +1123,11 @@ void f80_draw(F80Widget *w) {
             if(w->table_col_count && w->table_starts[w->table_col_count-1]+12>w->table_hscroll+width)
                 f80_put(r.y+header-1,r.x+width-1,"►",1,8,1);
         }
-        if(w->cursor<w->scroll)w->scroll=w->cursor;
-        if(w->cursor>=w->scroll+body)w->scroll=w->cursor-body+1;
-        if(w->scroll<0)w->scroll=0;
+        if(!w->scroll_detached) {
+            if(w->cursor<w->scroll)w->scroll=w->cursor;
+            if(w->cursor>=w->scroll+body)w->scroll=w->cursor-body+1;
+        }
+        w->scroll=limit(w->scroll,0,w->item_count>body?w->item_count-body:0);
         draw_gutter(w,header);
         for(int i=0;i<body && w->scroll+i<w->item_count;++i) {
             int selected=w->scroll+i==w->cursor;

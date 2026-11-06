@@ -5,7 +5,7 @@
 #include "f80_components.h"
 #include "tt_edit.h"
 #include "tt_song.h"
-enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_REFERENCE };
+enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
 enum { TT_HISTORY_MAX=8 };

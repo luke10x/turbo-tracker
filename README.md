@@ -125,6 +125,11 @@ into the order, and Remove/Up/Down edit the order. BPM is a song property and
 can be changed there. Selecting an ORD entry opens that pattern in the grid
 and moves the playhead to its first row. As playback advances with Follow off,
 the selected entry can differ from the `>` playhead marker.
+The wheel or a touch swipe scrolls the ORD list without selecting another
+entry or moving the playhead. Tab cycles through waveform, grid, and ORD;
+Shift+Tab cycles in reverse. The shortcut bar changes to ORD actions when
+that list has focus. Its **8 New** action appends an empty pattern and an
+order entry for it, then selects the new entry. One Undo removes both.
 Starting song playback uses the selected ORD entry and advances to the next
 pattern after the configured row count; Loop restarts the order at its end.
 With Follow on, the grid follows the pattern being played while keeping the

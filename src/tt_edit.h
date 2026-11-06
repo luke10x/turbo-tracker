@@ -35,6 +35,7 @@ typedef enum {
     TT_EDIT_CELL_SET,           /* overwrite one active-pattern cell exactly */
     TT_EDIT_CELLS_BULK,         /* clear, paste, or transpose a rectangle */
     TT_EDIT_PATTERN_NEW,        /* append an empty, default-named pattern */
+    TT_EDIT_PATTERN_APPEND_ORDER, /* append a pattern and its order entry together */
     TT_EDIT_PATTERN_RENAME,     /* rename a bank pattern */
     TT_EDIT_ORDER_INSERT,       /* insert a pattern into the play order */
     TT_EDIT_ORDER_REMOVE,       /* remove a play-order entry */

@@ -181,6 +181,24 @@ int main(void) {
     float *original_pcm=original_pcm_owner->pcm;
     TtEditHistory *history=tt_edit_history_new(&doc);
     assert(history && !tt_edit_can_undo(history));
+    int pattern_before=song.pattern_count,order_before=song.order_count;
+    e=(TtEditEvent){.type=TT_EDIT_PATTERN_APPEND_ORDER};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(song.pattern_count==pattern_before+1 && song.order_count==order_before+1 &&
+           song.order[order_before]==pattern_before);
+    assert(tt_edit_undo(history,&doc));
+    assert(song.pattern_count==pattern_before && song.order_count==order_before &&
+           !tt_edit_can_undo(history));
+    assert(tt_edit_redo(history,&doc));
+    assert(song.pattern_count==pattern_before+1 && song.order_count==order_before+1);
+    assert(tt_edit_undo(history,&doc));
+    song.order_count=TT_SONG_ORDER;
+    assert(!apply(e) && song.pattern_count==pattern_before &&
+           !strcmp(message,"Order is full"));
+    song.order_count=order_before;song.pattern_count=TT_SONG_PATTERNS;
+    assert(!apply(e) && song.order_count==order_before &&
+           !strcmp(message,"Pattern bank is full"));
+    song.pattern_count=pattern_before;
     e=(TtEditEvent){.type=TT_EDIT_CELL_SET};
     e.cell_set=(TtEditCellSet){0,0,{61,1,0,-1}};
     assert(tt_edit_apply_recorded(history,&doc,&e));

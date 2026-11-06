@@ -58,6 +58,18 @@ static int apply_pattern_new(TtEditDoc *doc) {
     snprintf(song->name[index],TT_SONG_NAME,"Pattern %02X",index);
     return 1;
 }
+static int apply_pattern_append_order(TtEditDoc *doc) {
+    if(doc->song->pattern_count>=TT_SONG_PATTERNS) {
+        reject(doc,"Pattern bank is full");return 0;
+    }
+    if(doc->song->order_count>=TT_SONG_ORDER) {
+        reject(doc,"Order is full");return 0;
+    }
+    int index=doc->song->pattern_count;
+    if(!apply_pattern_new(doc))return 0;
+    doc->song->order[doc->song->order_count++]=(unsigned char)index;
+    return 1;
+}
 static int apply_pattern_rename(TtEditDoc *doc,const TtEditPattern *e) {
     if(e->index<0 || e->index>=doc->song->pattern_count) {
         reject(doc,"Pattern out of range");return 0;
@@ -363,6 +375,8 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_cells_bulk(doc,&event->cells);
     case TT_EDIT_PATTERN_NEW:
         return apply_pattern_new(doc);
+    case TT_EDIT_PATTERN_APPEND_ORDER:
+        return apply_pattern_append_order(doc);
     case TT_EDIT_PATTERN_RENAME:
         return apply_pattern_rename(doc,&event->pattern);
     case TT_EDIT_PATTERN_SELECT:

@@ -122,6 +122,24 @@ int main(void) {
     order_panel_selected(&order_choice,NULL);
     assert(tracker.pattern_index==0 && tracker.edit_order==0 && tracker.phrase_scroll==0);
     assert(tracker.play_order==0 && tracker.active_order_index==0);
+    tracker.focus=FOCUS_WAVE;
+    handle_key(9);
+    assert(tracker.focus==FOCUS_PHRASE);
+    handle_key(9);
+    assert(tracker.focus==FOCUS_ORDER && current_status()==order_status);
+    handle_key(9);
+    assert(tracker.focus==FOCUS_WAVE);
+    handle_key(F80_KEY_BTAB);
+    assert(tracker.focus==FOCUS_ORDER);
+    order_choice.item_count=3;order_choice.rect=f80_rect(80,0,10,2);
+    tracker.order_list=&order_choice;
+    tracker.follow=1;
+    handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,1});
+    assert(!tracker.follow && order_choice.scroll==1 && order_choice.scroll_detached);
+    assert(order_choice.cursor==0 && tracker.edit_order==0 &&
+           tracker.play_order==0 && tracker.active_order_index==0);
+    tracker.order_list=NULL;
+    tracker.focus=FOCUS_PHRASE;
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
     tracker.play_order=0;
@@ -151,6 +169,15 @@ int main(void) {
     tracker.wave_canvas=&wave;
     tracker.phrase_canvas=&grid;
     grid.rect=f80_rect(0,0,80,30);
+    order_choice.scroll=0;
+    tracker.order_list=&order_choice;
+    tracker.follow=1;
+    handle_mouse(81,1,1); /* wheel scrolls the list, not its selection */
+    assert(tracker.focus==FOCUS_ORDER && !tracker.follow);
+    assert(order_choice.scroll==1 && order_choice.cursor==0);
+    assert(tracker.play_order==0 && tracker.active_order_index==-1);
+    tracker.order_list=NULL;
+    tracker.focus=FOCUS_PHRASE;
     tracker.step=4;
     tracker.follow=1;
     handle_mouse(10,19,0); /* order 2 is visible, but not editable */
@@ -295,9 +322,9 @@ int main(void) {
     tracker.wave_row=&wave_row;tracker.phrase_frame=&phrase_frame;
     tracker.details=&details;tracker.status=&status;tracker.console=&console;
     int logged=event_log_count;
-    view_items[4].action(NULL,NULL);
+    view_items[5].action(NULL,NULL);
     assert(tracker.console_visible && root.window_role==F80_WINDOW_CONSOLE);
-    assert(!strcmp(view_items[4].label,"~H~ide event console"));
+    assert(!strcmp(view_items[5].label,"~H~ide event console"));
     assert(console.visible && !header.visible && !details.visible && !status.visible);
     assert(event_log_count>logged);
     int log_head_before=event_log_head;
@@ -319,8 +346,19 @@ int main(void) {
                   "bounded stream"));
     handle_key(15); /* Ctrl-O */
     assert(!tracker.console_visible && root.window_role==F80_WINDOW_BLUE);
-    assert(!strcmp(view_items[4].label,"~S~how event console"));
+    assert(!strcmp(view_items[5].label,"~S~how event console"));
     assert(!console.visible && header.visible && details.visible && status.visible);
+    int patterns_before=tracker.song.pattern_count,orders_before=tracker.song.order_count;
+    order_choice.item_count=orders_before;order_choice.cursor=0;
+    tracker.order_list=&order_choice;
+    tracker.focus=FOCUS_ORDER;
+    assert(!strcmp(order_status[7].label,"New"));
+    order_status[7].action(NULL,NULL);
+    assert(tracker.song.pattern_count==patterns_before+1 &&
+           tracker.song.order_count==orders_before+1 &&
+           tracker.song.order[orders_before]==patterns_before);
+    assert(tracker.pattern_index==patterns_before && tracker.edit_order==orders_before &&
+           order_choice.cursor==orders_before && tracker.play_order==orders_before);
     puts("default song, ordered grid, and playback follow passed");
     return 0;
 }

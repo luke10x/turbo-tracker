@@ -80,6 +80,7 @@ static const char *edit_event_name(TtEditType type) {
     static const char *const names[TT_EDIT_COUNT]={
         [TT_EDIT_CELL_SET]="cell set",[TT_EDIT_CELLS_BULK]="cells bulk",
         [TT_EDIT_PATTERN_NEW]="pattern new",[TT_EDIT_PATTERN_RENAME]="pattern rename",
+        [TT_EDIT_PATTERN_APPEND_ORDER]="pattern and order new",
         [TT_EDIT_PATTERN_SELECT]="pattern select",[TT_EDIT_PATTERN_SYNC]="pattern sync",
         [TT_EDIT_ORDER_INSERT]="order insert",[TT_EDIT_ORDER_REMOVE]="order remove",
         [TT_EDIT_ORDER_SWAP]="order swap",[TT_EDIT_BPM]="BPM",
@@ -198,9 +199,27 @@ static int grid_pattern_for_row(int global) {
     int order=grid_order_for_row(global);
     return order>=0?tracker.song.order[order]:tracker.pattern_index;
 }
-typedef enum { TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER } TtUiType;
+typedef enum {
+    TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER, TT_UI_FOCUS, TT_UI_SCROLL_ORDER
+} TtUiType;
 typedef struct { TtUiType type; int index; } TtUiEvent;
 static int handle_ui_event(TtUiEvent event) {
+    if(event.type==TT_UI_FOCUS) {
+        tracker.focus=event.index;
+        tracker.app.focus=event.index==FOCUS_ORDER?tracker.order_list:
+            event.index==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
+        return 1;
+    }
+    if(event.type==TT_UI_SCROLL_ORDER) {
+        if(!tracker.order_list || !event.index)return 0;
+        leave_follow();
+        F80Widget *list=tracker.order_list;
+        int body=list->rect.h>0?list->rect.h:1;
+        int maximum=list->item_count>body?list->item_count-body:0;
+        list->scroll=clamp(list->scroll+event.index,0,maximum);
+        list->scroll_detached=1;
+        return 1;
+    }
     int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
     int index=order>=0 && order<tracker.song.order_count?
         tracker.song.order[order]:event.index;
@@ -212,7 +231,9 @@ static int handle_ui_event(TtUiEvent event) {
         edit.pattern.index=index;
         if(!emit_edit(&edit)) { tt_tracker_message(edit_message);return 0; }
     } else if(event.type==TT_UI_SELECT_PATTERN)return 1;
+    if(order>=0 && tracker.order_list)tracker.order_list->cursor=order;
     tracker.edit_order=order>=0?order:order_for_pattern(index,tracker.edit_order);
+    if(tracker.order_list)tracker.order_list->scroll_detached=0;
     tracker.phrase_scroll=tracker.edit_order>=0?
         tracker.edit_order*tracker.song.pattern_rows:0;
     tracker.reveal_cursor=1;
@@ -283,12 +304,8 @@ static void order_panel_selected(F80Widget *list,void *user) {
 #ifdef __EMSCRIPTEN__
 static void order_panel_scroll(int rows) {
     if(!tracker.order_list || tracker.app.modal || !rows)return;
-    leave_follow();
-    int next=clamp(tracker.order_list->cursor+rows,0,tracker.song.order_count-1);
-    if(next!=tracker.order_list->cursor) {
-        tracker.order_list->cursor=next;
-        order_panel_selected(tracker.order_list,NULL);
-    }
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
+    handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,rows});
 }
 #endif
 
@@ -600,10 +617,16 @@ static void value_up_16(F80Widget *button,void *user) {
     (void)button;(void)user;adjust_value(16);
 }
 static void focus_phrase(F80Widget *button,void *user) {
-    (void)button;(void)user;tracker.focus=FOCUS_PHRASE;
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
 }
 static void focus_wave(F80Widget *button,void *user) {
-    (void)button;(void)user;tracker.focus=FOCUS_WAVE;
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
+}
+static void focus_order(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
 }
 static void toggle_loop(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_TOGGLE_LOOP,0,0);
@@ -1507,7 +1530,8 @@ static const F80MenuItem song_items[]={
 };
 static const F80MenuItem view_items[]={
     {"Zoom ~o~ut",NULL,zoom_out,1},{"Zoom ~i~n",NULL,zoom_in,1},
-    {"~W~aveform",NULL,focus_wave,1},{"P~a~ttern",NULL,focus_phrase,1},
+    {"~W~aveform",NULL,focus_wave,1},{"~O~RD list",NULL,focus_order,1},
+    {"P~a~ttern",NULL,focus_phrase,1},
     {event_console_menu_label,"Ctrl+O",toggle_console,1}
 };
 static const F80MenuItem help_items[]={ {"~K~eys and format",NULL,show_help,1} };
@@ -1525,6 +1549,43 @@ static const F80StatusItem wave_status[]={
     {"3","Mk-",previous_marker},{"4","Mk+",next_marker},
     {"5","Mv-",value_down},{"6","Mv+",value_up},
     {"7","Zm+",zoom_in},{"8","Zm-",zoom_out},
+    {"9","Men",pull_menu},{"10","Xit",quit}
+};
+static void move_order_selection(int delta) {
+    if(!tracker.order_list)return;
+    int next=clamp(tracker.order_list->cursor+delta,0,tracker.song.order_count-1);
+    if(next==tracker.order_list->cursor)return;
+    tracker.order_list->cursor=next;
+    order_panel_selected(tracker.order_list,NULL);
+}
+static void previous_order(F80Widget *button,void *user) {
+    (void)button;(void)user;move_order_selection(-1);
+}
+static void next_order(F80Widget *button,void *user) {
+    (void)button;(void)user;move_order_selection(1);
+}
+static void append_pattern_and_order(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.song.pattern_count>=TT_SONG_PATTERNS) {
+        tt_tracker_message("Pattern bank is full");return;
+    }
+    if(tracker.song.order_count>=TT_SONG_ORDER) {
+        tt_tracker_message("Order is full");return;
+    }
+    stop_playback(NULL,NULL);
+    TtEditEvent event={.type=TT_EDIT_PATTERN_APPEND_ORDER};
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    int at=tracker.song.order_count-1;
+    leave_follow();
+    if(handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))
+        send_play(TT_PLAY_SELECT_ORDER,at,0);
+    tt_tracker_message("New pattern and order appended");
+}
+static const F80StatusItem order_status[]={
+    {"1","Ord-",previous_order},{"2","Ord+",next_order},
+    {"3","Ply",toggle_play},{"4","Stp",stop_playback},
+    {"5","Fol",toggle_follow},{"6","Pat",show_order},
+    {"7","Wav",focus_wave},{"8","New",append_pattern_and_order},
     {"9","Men",pull_menu},{"10","Xit",quit}
 };
 static void prev_pattern(F80Widget *button,void *user) {
@@ -1669,6 +1730,7 @@ static const F80StatusItem reference_status[]={
 static F80StatusItem selection_visible[10];
 static const F80StatusItem *current_status(void) {
     if(tracker.focus==FOCUS_WAVE)return wave_status;
+    if(tracker.focus==FOCUS_ORDER)return order_status;
     if(tracker.focus==FOCUS_REFERENCE)return reference_status;
     if(tracker.selecting) {
         memcpy(selection_visible,selection_status,sizeof(selection_visible));
@@ -1856,6 +1918,13 @@ static void update_labels(void) {
                  "WAVE  marker %X %.3fs  |  %s",tracker.marker,
                  (double)tracker.phrase.marker[tracker.marker]/tracker.wave.rate,
                  tracker.message);
+    else if(tracker.focus==FOCUS_ORDER)
+        snprintf(tracker.details_text,sizeof(tracker.details_text),
+                 "ORD %02X -> PAT %02X  |  PLAYHEAD %02X  |  %s",
+                 tracker.order_list?tracker.order_list->cursor:0,
+                 tracker.song.order[tracker.order_list?tracker.order_list->cursor:0],
+                 tracker.active_order_index>=0?tracker.active_order_index:tracker.play_order,
+                 tracker.message);
     else if(tracker.focus==FOCUS_REFERENCE)
         snprintf(tracker.details_text,sizeof(tracker.details_text),
                  "REFERENCE  %s  |  %s",reference,tracker.message);
@@ -1945,10 +2014,19 @@ static void handle_key(int key) {
         return;
     }
     switch(key) {
-    case 10:case 13:audition(NULL,NULL);return;
+    case 10:case 13:
+        if(tracker.focus==FOCUS_ORDER) {
+            f80_key(&tracker.app,key);return;
+        }
+        audition(NULL,NULL);return;
     case ' ':toggle_play(NULL,NULL);return;
     case 9:case F80_KEY_BTAB:
-        tracker.focus=tracker.focus==FOCUS_PHRASE?FOCUS_WAVE:FOCUS_PHRASE;
+        handle_ui_event((TtUiEvent){TT_UI_FOCUS,
+            key==9?
+                tracker.focus==FOCUS_WAVE?FOCUS_PHRASE:
+                tracker.focus==FOCUS_PHRASE?FOCUS_ORDER:FOCUS_WAVE:
+                tracker.focus==FOCUS_WAVE?FOCUS_ORDER:
+                tracker.focus==FOCUS_ORDER?FOCUS_PHRASE:FOCUS_WAVE});
         return;
     case 27:case 'Q':quit(NULL,NULL);return;
     case '[':change_octave(-1);return;
@@ -1961,7 +2039,14 @@ static void handle_key(int key) {
         if(action)action(NULL,NULL);
         return;
     }
-    if(tracker.focus==FOCUS_WAVE) {
+    if(tracker.focus==FOCUS_ORDER) {
+        if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_PPAGE ||
+           key==F80_KEY_NPAGE || key==F80_KEY_HOME || key==F80_KEY_END) {
+            leave_follow();
+            tracker.order_list->scroll_detached=0;
+            f80_key(&tracker.app,key);
+        }
+    } else if(tracker.focus==FOCUS_WAVE) {
         int digit=hex_digit(key);
         if(digit>=0)focus_marker(digit);
         else if(key==F80_KEY_CTRL_LEFT)previous_marker(NULL,NULL);
@@ -2084,12 +2169,17 @@ static void handle_mouse(int x,int y,int wheel) {
         return;
     }
     if(tracker.order_list && f80_contains(tracker.order_list->rect,x,y)) {
-        leave_follow();
-        f80_mouse(&tracker.app,x,y,wheel);
+        handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
+        if(wheel && wheel!=2)
+            handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,wheel*3});
+        else {
+            leave_follow();
+            f80_mouse(&tracker.app,x,y,wheel);
+        }
         return;
     }
     if(f80_contains(r,x,y)) {
-        tracker.focus=FOCUS_WAVE;
+        handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
         if(!tracker.wave.pcm) {
             if(!wheel && y==r.y+r.h-2) {
                 if(!recover_missing(NULL))tt_tracker_message("WAV still missing; check its saved path");
@@ -2119,7 +2209,7 @@ static void handle_mouse(int x,int y,int wheel) {
     }
     r=tracker.phrase_canvas->rect;
     if(f80_contains(r,x,y)) {
-        tracker.focus=FOCUS_PHRASE;
+        handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
         int body=r.h-3,maximum=grid_total_rows()-body;
         if(maximum<0)maximum=0;
         if(wheel && wheel!=2) {
@@ -2211,7 +2301,7 @@ static void touch_scroll_fields(int fields) {
     /* Keep the cursor in the visible field so painting does not snap back. */
     tracker.channel=tracker.field_scroll/4;
     tracker.field=tracker.field_scroll%4;
-    tracker.focus=FOCUS_PHRASE;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
 }
 static struct {
     int x,view_start,visible,marker_frame;
@@ -2224,7 +2314,7 @@ static int wave_touch_area(int x,int y) {
 }
 #endif
 static void begin_wave_gesture(int x) {
-    tracker.focus=FOCUS_WAVE;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
     wave_touch.x=x;
     wave_touch.view_start=tracker.view_start;
     wave_touch.visible=visible_frames();
@@ -2246,7 +2336,7 @@ static void hold_wave_marker(int x) {
         long long distance=llabs((long long)tracker.phrase.marker[marker]-frame);
         if(distance<best) { best=distance;nearest=marker; }
     }
-    tracker.focus=FOCUS_WAVE;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
     tracker.marker=nearest;
     wave_touch.marker_frame=tracker.phrase.marker[nearest];
     char status[64];
@@ -2637,6 +2727,7 @@ static int frame(void *user) {
         }
 #endif
     } else tracker.app.focus=tracker.console_visible?tracker.console:
+               tracker.focus==FOCUS_ORDER?tracker.order_list:
                tracker.focus==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
