@@ -95,7 +95,7 @@ Writes `build/emscripten/itch/turbo-tracker.zip` — a standalone archive with
 
 ## Feature reference
 
-**Edit > Undo** and **Edit > Redo** are also available with Ctrl+Z and Ctrl+Y.
+**Edit > Undo** and **Edit > Redo** are also available with Ctrl+U and Ctrl+Y.
 The tracker keeps up to 32 document edits in memory. Undo restores pattern,
 table, order, settings, sample, marker, and slice changes; playback controls
 are not part of edit history.

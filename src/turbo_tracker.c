@@ -1421,7 +1421,7 @@ static void show_help(F80Widget *button,void *user) {
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W; values 00-FF.",
         "Note: Z-M and Q-U play two keyboard octaves; [/] change octave.",
-        "Delete clears a field. Enter auditions. Ctrl+Z/Y undo/redo.",
+        "Delete clears a field. Enter auditions. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "Sampler > Manage reorders, renames, deletes and retunes samples.",
@@ -1559,7 +1559,7 @@ static const F80MenuItem file_items[]={
     {"~Q~uit",NULL,quit,1}
 };
 static const F80MenuItem edit_items[]={
-    {"~U~ndo","Ctrl+Z",undo_edit,1},
+    {"~U~ndo","Ctrl+U",undo_edit,1},
     {"~R~edo","Ctrl+Y",redo_edit,1}
 };
 static const F80MenuItem play_items[]={
@@ -2010,7 +2010,7 @@ static void update_labels(void) {
 }
 static void handle_key(int key) {
     if(key==15) { toggle_console(NULL,NULL);return; } /* Ctrl-O */
-    if(key==26) { undo_edit(NULL,NULL);return; }
+    if(key==21) { undo_edit(NULL,NULL);return; }
     if(key==25) { redo_edit(NULL,NULL);return; }
     if(key==2010) { quit(NULL,NULL);return; }
     if(key==2009) { pull_menu(NULL,NULL);return; }

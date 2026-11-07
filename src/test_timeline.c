@@ -303,7 +303,9 @@ int main(void) {
     TtEditEvent change={.type=TT_EDIT_CELL_SET};
     change.cell_set=(TtEditCellSet){0,4,{72,1,TT_EFFECT_NONE,-1}};
     assert(emit_edit(&change) && tracker.pattern.cell[0][4].note==72);
-    handle_key(26); /* Ctrl-Z */
+    handle_key(26); /* Ctrl-Z is reserved for suspending the terminal. */
+    assert(tracker.pattern.cell[0][4].note==72);
+    handle_key(21); /* Ctrl-U */
     assert(tracker.pattern.cell[0][4].note==original_note);
     handle_key(25); /* Ctrl-Y */
     assert(tracker.pattern.cell[0][4].note==72);
