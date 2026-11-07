@@ -2922,7 +2922,6 @@ int main(int argc,char **argv) {
 #ifndef __EMSCRIPTEN__
     struct termios shortcut_terminal;
     if(tcgetattr(STDIN_FILENO,&shortcut_terminal)==0) {
-        shortcut_terminal.c_cc[VSUSP]=_POSIX_VDISABLE;
 #ifdef VDSUSP
         shortcut_terminal.c_cc[VDSUSP]=_POSIX_VDISABLE;
 #endif
