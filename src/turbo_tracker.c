@@ -2143,7 +2143,12 @@ static void handle_key(int key) {
            key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT)leave_follow();
-        if(tracker.selecting)return;
+        if(tracker.selecting) {
+            if(key=='y')copy_selection(NULL,NULL);
+            else if(key=='x')cut_selection(NULL,NULL);
+            else if(key=='p')paste_selection(NULL,NULL);
+            return;
+        }
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
         int digit=hex_digit(key);
         if(key==F80_KEY_UP) {

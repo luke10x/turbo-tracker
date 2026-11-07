@@ -236,8 +236,8 @@ or finger, hold still on a grid cell for one second until it turns yellow, then
 drag to extend the rectangle. A quick drag scrolls the grid vertically or
 horizontally. The yellow block selects cells, not individual fields. The line
 above the F-key bar shows selection and clipboard dimensions. In selection mode
-F3/F4 transpose by a semitone, F5 copies, F6 cuts, F7 pastes only into an
-identically sized selection, and F8 clears.
+F3/F4 transpose by a semitone, F5 or `y` copies, F6 or `x` cuts, F7 or `p`
+pastes only into an identically sized selection, and F8 clears.
 
 The waveform uses F80's 2×2 drawing renderer. F1/F2 select the previous or next
 sample. F3/F4 or Ctrl+Left/Right select and center the previous or next marker.

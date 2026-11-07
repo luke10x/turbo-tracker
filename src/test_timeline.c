@@ -299,6 +299,22 @@ int main(void) {
     TtEditDoc history_doc=edit_doc();
     edit_history=tt_edit_history_new(&history_doc);
     assert(edit_history);
+    tracker.focus=FOCUS_PHRASE;
+    tracker.anchor_step=2;tracker.step=3;
+    tracker.anchor_channel=0;tracker.channel=1;
+    tracker.selecting=1;
+    tracker.pattern.cell[2][0]=(TtCell){60,1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[2][1]=(TtCell){61,1,TT_EFFECT_M,0x12};
+    tracker.pattern.cell[3][0]=(TtCell){62,1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[3][1]=(TtCell){63,1,TT_EFFECT_S,0x34};
+    handle_key('y');
+    assert(tracker.clip_rows==2 && tracker.clip_channels==2 &&
+           tracker.clipboard[0][0].note==60 && tracker.clipboard[1][1].value==0x34);
+    handle_key('x');
+    assert(tracker.pattern.cell[2][0].note<0 && tracker.pattern.cell[3][1].effect==TT_EFFECT_NONE);
+    handle_key('p');
+    assert(tracker.pattern.cell[2][0].note==60 && tracker.pattern.cell[3][1].value==0x34);
+    tracker.selecting=0;
     int original_note=tracker.pattern.cell[0][4].note;
     TtEditEvent change={.type=TT_EDIT_CELL_SET};
     change.cell_set=(TtEditCellSet){0,4,{72,1,TT_EFFECT_NONE,-1}};
