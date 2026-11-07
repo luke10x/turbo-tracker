@@ -60,15 +60,18 @@ $(PLATFORM_BUILD)/obj/f80-core/f80_file_dialog.o: src/f80_file_dialog.c include/
 	mkdir -p $(dir $@)
 	cc -std=c11 -Wall -Wextra -O2 -Iinclude -c $< -o $@
 
+WASM_CCOPTS := -std=c11 -Wall -Wextra -O3 -flto -msimd128 -Iinclude/web_curses -Iinclude
+WASM_LDOPTS := -O3 -flto -msimd128
+
 build/emscripten/obj/f80-core/f80.o: src/f80.c include/f80.h
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
-		emcc -std=c11 -Wall -Wextra -O2 -Iinclude/web_curses -Iinclude -c $< -o $@
+		emcc $(WASM_CCOPTS) -c $< -o $@
 
 build/emscripten/obj/f80-core/f80_components.o: src/f80_components.c include/f80_components.h include/f80.h
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
-		emcc -std=c11 -Wall -Wextra -O2 -Iinclude/web_curses -Iinclude -c $< -o $@
+		emcc $(WASM_CCOPTS) -c $< -o $@
 
 # ---- turbo-tracker application (tt_ namespace) ----
 $(PLATFORM_BUILD)/obj/tt-app/%.o: src/%.c $(wildcard src/*.h) include/f80.h
@@ -84,13 +87,13 @@ $(TT_BIN): $(F80_CORE_NATIVE_OBJS) $(TT_APP_NATIVE_OBJS)
 build/emscripten/obj/tt-app/%.o: src/%.c $(wildcard src/*.h) include/f80.h
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
-		emcc -std=c11 -Wall -Wextra -O2 -Iinclude/web_curses -Iinclude -sUSE_SDL=3 -c $< -o $@
+		emcc $(WASM_CCOPTS) -sUSE_SDL=3 -c $< -o $@
 
 $(WEB_TT_JS): build/emscripten/obj/f80-core/f80.o $(F80_CORE_WASM_OBJS) $(TT_APP_WASM_OBJS) $(SAMPLE_DEMO_WAVS) $(SAMPLE_DEFAULT_SONG)
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
 		emcc $(filter %.o,$^) -lm -sUSE_SDL=3 -s FORCE_FILESYSTEM=1 \
-		-s ALLOW_MEMORY_GROWTH=1 -s EXIT_RUNTIME=0 \
+		-s ALLOW_MEMORY_GROWTH=1 -s EXIT_RUNTIME=0 $(WASM_LDOPTS) \
 		$(foreach wav,$(SAMPLE_DEMO_WAVS),--embed-file $(wav)@/$(wav)) \
 		--embed-file $(SAMPLE_DEFAULT_SONG)@/default.song \
 		-s EXPORTED_FUNCTIONS=_main,_tt_tracker_load_wav,_tt_tracker_recover_wav,_tt_tracker_load_song,_tt_tracker_save_song,_tt_tracker_begin_touch_selection,_tt_tracker_touch_scroll,_tt_tracker_touch_scroll_fields,_tt_tracker_scroll_order,_tt_tracker_hold_order_selection,_tt_tracker_drag_order_selection,_tt_tracker_scroll_table,_tt_tracker_scroll_table_horizontal,_tt_tracker_scroll_table_actions,_tt_tracker_hold_table_selection,_tt_tracker_drag_table_selection,_tt_tracker_drag_selection,_tt_tracker_begin_wave_gesture,_tt_tracker_pan_wave_touch,_tt_tracker_hold_wave_marker,_tt_tracker_move_wave_marker,_tt_tracker_flush_input,_curses_push_key,_curses_push_mouse,_curses_push_resize \

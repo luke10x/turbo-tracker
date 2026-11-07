@@ -9,7 +9,7 @@ enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
 enum { TT_HISTORY_MAX=8 };
-enum { SONG_LOOKAHEAD_FRAMES=4096, SONG_DISPLAY_ROWS=64 };
+enum { SONG_LOOKAHEAD_FRAMES=16384, SONG_DISPLAY_ROWS=64 };
 typedef struct {
     int active,table,tick,next_table,delay,pending;
     int delayed_glide;
