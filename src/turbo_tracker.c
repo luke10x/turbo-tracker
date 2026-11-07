@@ -760,6 +760,15 @@ static void paint_wave(F80Widget *canvas,void *user) {
         f80_raster_line(&raster,x,0,x,vertical-1,
                         marker==tracker.marker?4:8,marker==tracker.marker?4:3);
     }
+    for(int ch=0;ch<TT_CHANNELS;++ch) {
+        if(tt_audio_voice_pcm(ch)!=tracker.wave.pcm)continue;
+        int x=wave_x_from_frame((int)tt_audio_position(ch),pixels);
+        if(x<0)continue;
+        int dir=tt_audio_increment(ch)>0;
+        f80_raster_line(&raster,x,0,x,vertical-1,8,3);
+        if(vertical>=8)
+            f80_raster_line(&raster,x,dir?0:vertical-3,x,dir?2:vertical-1,15,2);
+    }
     f80_raster_draw_quadrants(&raster);
     f80_raster_free(&raster);
     if(!compact)for(int marker=0;marker<TT_MARKERS;++marker) {

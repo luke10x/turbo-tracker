@@ -21,6 +21,8 @@ double tt_audio_stretch(int channel);
 void tt_audio_command(int channel,char command,int value);
 void tt_audio_tick(void);
 int tt_audio_glide_to(int channel,int note,int reference_note,int rate);
+const float *tt_audio_voice_pcm(int channel);
+int tt_audio_voice_active(int channel);
 double tt_audio_position(int channel);
 double tt_audio_increment(int channel);
 float tt_audio_pan(int channel);

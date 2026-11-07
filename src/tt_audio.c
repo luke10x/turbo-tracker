@@ -324,6 +324,20 @@ void tt_audio_tick(void) {
     }
     if(audio.stream)SDL_UnlockAudioStream(audio.stream);
 }
+const float *tt_audio_voice_pcm(int channel) {
+    if(channel<0 || channel>=TT_CHANNELS)return NULL;
+    if(audio.stream)SDL_LockAudioStream(audio.stream);
+    const float *value=audio.voice[channel].active?audio.voice[channel].pcm:NULL;
+    if(audio.stream)SDL_UnlockAudioStream(audio.stream);
+    return value;
+}
+int tt_audio_voice_active(int channel) {
+    if(channel<0 || channel>=TT_CHANNELS)return 0;
+    if(audio.stream)SDL_LockAudioStream(audio.stream);
+    int value=audio.voice[channel].active;
+    if(audio.stream)SDL_UnlockAudioStream(audio.stream);
+    return value;
+}
 double tt_audio_position(int channel) {
     if(channel<0 || channel>=TT_CHANNELS)return 0;
     if(audio.stream)SDL_LockAudioStream(audio.stream);
