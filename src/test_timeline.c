@@ -272,6 +272,10 @@ int main(void) {
     tracker.play_mode=PLAY_PATTERN;
     tracker.loop_pattern_index=tracker.pattern_index;
     tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0};
+    tracker.pattern.cell[0][5].effect2=TT_EFFECT_P;
+    tracker.pattern.cell[0][5].value2=255;
+    tracker.pattern.cell[0][5].effect3=TT_EFFECT_P;
+    tracker.pattern.cell[0][5].value3=0;
     tt_play_play_row(0);
     assert(tt_audio_pan(5)==0);
     tracker.song.table[0].tick[6].effect[0]=(TtTableEffect){'P',255};

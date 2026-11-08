@@ -16,11 +16,11 @@
 
 ## Playback and audio
 
-- [ ] Process effect slots in left-to-right order for each channel row.
-- [ ] Define and test ordering when effects conflict (for example, multiple volume, glide, table, or slice commands).
-- [ ] Apply slice selection before determining sample bounds and reference pitch.
-- [ ] Update audition playback to process all populated slots consistently with row playback.
-- [ ] Treat a pattern as non-empty when any effect slot is populated.
+- [x] Process effect slots in left-to-right order for each channel row.
+- [x] Define and test ordering when effects conflict (for example, multiple volume, glide, table, or slice commands).
+- [x] Apply slice selection before determining sample bounds and reference pitch.
+- [x] Update audition playback to process all populated slots consistently with row playback.
+- [x] Treat a pattern as non-empty when any effect slot is populated.
 
 ## Compact pattern grid
 
@@ -44,6 +44,6 @@
 ## Tests and verification
 
 - [ ] Add focused tests for expansion, cursor movement, compaction, and slot shifting.
-- [ ] Add tests for playback order and multi-effect interaction.
+- [x] Add tests for playback order and multi-effect interaction.
 - [ ] Add serialization compatibility and three-slot round-trip tests.
 - [ ] Run `make test`, `make native`, and `make wasm`.

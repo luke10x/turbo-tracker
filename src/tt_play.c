@@ -20,7 +20,8 @@ static int pattern_is_empty(const TtPattern *pattern) {
     for(int row=0;row<tracker.song.pattern_rows;++row)
         for(int channel=0;channel<TT_CHANNELS;++channel) {
             const TtCell *cell=&pattern->cell[row][channel];
-            if(cell->note>=0 || cell->effect!=TT_EFFECT_NONE)return 0;
+            if(cell->note>=0 || cell->effect!=TT_EFFECT_NONE ||
+               cell->effect2!=TT_EFFECT_NONE || cell->effect3!=TT_EFFECT_NONE)return 0;
         }
     return 1;
 }
@@ -45,6 +46,17 @@ static const TtWave *instrument_wave(const TtCell *cell, const TtPhrase **phrase
     return tracker.samples[index].wave.pcm?&tracker.samples[index].wave:NULL;
 }
 
+static TtCell cell_sample_selection(const TtCell *cell) {
+    TtCell selected=*cell;
+    for(int slot=0;slot<3;++slot) {
+        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        if(fx->command==TT_EFFECT_S && fx->value>=0) {
+            selected.effect=TT_EFFECT_S;selected.value=fx->value;
+        }
+    }
+    return selected;
+}
+
 static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
     if(cell->effect!=TT_EFFECT_S || cell->value<0)return phrase->reference_note;
     int slice=cell->value>>4;
@@ -54,31 +66,41 @@ static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
 static void play_audition_cell_now(int step,int channel) {
     int first,last;
     TtCell *cell=&tracker.pattern.cell[step][channel];
+    TtCell sample=cell_sample_selection(cell);
     const TtPhrase *phrase=NULL;
     const TtWave *wave=instrument_wave(cell,&phrase);
-    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last)) {
+    if(!wave || !tt_cell_range(phrase,&sample,wave->frames,&first,&last)) {
         tt_audio_stop();
         tt_tracker_message("Set a loaded instrument, note, and playable effect value first");
         return;
     }
-    int base=cell_reference_note(phrase,cell);
-    int glided=cell->effect==TT_EFFECT_G && cell->value>0 &&
-               tt_audio_glide_to(0,cell->note,base,cell->value);
+    int base=cell_reference_note(phrase,&sample),glide=0;
+    for(int slot=0;slot<3;++slot) {
+        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        if(fx->command==TT_EFFECT_G && fx->value>0)glide=fx->value;
+    }
+    int glided=glide>0 && tt_audio_glide_to(0,cell->note,base,glide);
     if(!glided && !tt_audio_play(wave,first,last,cell->note,base)) {
         tt_tracker_message("Audio unavailable: check the output device or browser permission");
         return;
     }
     tracker.audition_effect_active=0;
-    if(cell->effect==TT_EFFECT_M && cell->value>=0)
-        tt_audio_set_volume(0,cell->value);
-    else if(cell->effect==TT_EFFECT_STRETCH && cell->value>=0)
-        tt_audio_set_stretch(0,cell->value);
-    else if(cell->effect && cell->value>=0 &&
-            strchr("GIJKNOPRVWr",cell->effect)) {
-        tt_audio_command(0,(char)cell->effect,cell->value);
-        tracker.audition_effect_active=1;
-        tracker.next_audition_tick_at=SDL_GetTicks();
+    for(int slot=0;slot<3;++slot) {
+        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
+            TableVoice *voice=&tracker.table_voice[channel];
+            voice->active=1;voice->table=fx->value;voice->tick=0;
+            voice->next_table=-1;voice->pending=0;
+        } else if(fx->command==TT_EFFECT_M && fx->value>=0)
+            tt_audio_set_volume(0,fx->value);
+        else if(fx->command==TT_EFFECT_STRETCH && fx->value>=0)
+            tt_audio_set_stretch(0,fx->value);
+        else if(fx->command && fx->value>=0 && strchr("GIJKNOPRVWr",fx->command)) {
+            tt_audio_command(0,(char)fx->command,fx->value);
+            tracker.audition_effect_active=1;
+        }
     }
+    if(tracker.audition_effect_active)tracker.next_audition_tick_at=SDL_GetTicks();
     tracker.active_step=step;
     tracker.active_pattern_index=tracker.pattern_index;
 }
@@ -106,23 +128,28 @@ void tt_play_play_row(int row) {
     }
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         const TtCell *cell=&pattern->cell[row][channel];
-        if(cell->effect==TT_EFFECT_T && cell->value>=0 &&
-           cell->value<TT_SONG_TABLES) {
-            TableVoice *voice=&tracker.table_voice[channel];
-            voice->active=1;voice->table=cell->value;voice->tick=0;
-            voice->next_table=-1;voice->pending=0;
+        int glide=0;
+        TtCell sample=cell_sample_selection(cell);
+        for(int slot=0;slot<3;++slot) {
+            const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+            if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
+                TableVoice *voice=&tracker.table_voice[channel];
+                voice->active=1;voice->table=fx->value;voice->tick=0;
+                voice->next_table=-1;voice->pending=0;
+            } else if(fx->command==TT_EFFECT_M && fx->value>=0)
+                tt_audio_set_volume(channel,fx->value);
+            else if(fx->command==TT_EFFECT_G && fx->value>0)glide=fx->value;
+            else if(fx->command==TT_EFFECT_STRETCH && fx->value>=0)
+                tt_audio_set_stretch(channel,fx->value);
+            else if(fx->command && fx->value>=0 && strchr("IJK NOPRVWr",fx->command) && fx->command!=' ')
+                tt_audio_command(channel,(char)fx->command,fx->value);
         }
-        if(cell->effect==TT_EFFECT_M && cell->value>=0)
-            tt_audio_set_volume(channel,cell->value);
-        else if(cell->effect && cell->value>=0 && strchr("GIJKNOPRVWr",cell->effect))
-            tt_audio_command(channel,(char)cell->effect,cell->value);
         int first,last;
         const TtPhrase *phrase=NULL;
         const TtWave *wave=instrument_wave(cell,&phrase);
-        if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))continue;
-        int base=cell_reference_note(phrase,cell);
-        if(cell->effect==TT_EFFECT_G && cell->value>0 &&
-           tt_audio_glide_to(channel,cell->note,base,cell->value))continue;
+        if(!wave || !tt_cell_range(phrase,&sample,wave->frames,&first,&last))continue;
+        int base=cell_reference_note(phrase,&sample);
+        if(glide>0 && tt_audio_glide_to(channel,cell->note,base,glide))continue;
         if(!tt_audio_play_channel(channel,wave,first,last,cell->note,base))
             tt_tracker_message("Audio unavailable: check the output device or browser permission");
     }

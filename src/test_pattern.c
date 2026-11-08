@@ -75,10 +75,11 @@ int main(void) {
     assert(tt_cell_range(&phrase,&loaded.cell[8][5],1600,&start,&end));
     assert(start==phrase.marker[4] && end==phrase.marker[15]);
     assert(!tt_cell_range(&phrase,&loaded.cell[10][3],1600,&start,&end));
+    TtPattern before_invalid=loaded;
     file=fopen(path,"w");assert(file);
     fputs("C-401SLC04|bad\n",file);assert(!fclose(file));
     assert(!tt_pattern_load(path,&loaded,error,sizeof(error)));
-    assert(!memcmp(&original,&loaded,sizeof(original)));
+    assert(!memcmp(&before_invalid,&loaded,sizeof(before_invalid)));
     unlink(path);
     puts("six-channel pattern round-trip and validation passed");
     return 0;
