@@ -38,11 +38,13 @@ static int apply(TtEditEvent event) {
 int main(void) {
     setup();
     TtEditEvent e={.type=TT_EDIT_CELL_SET};
-    e.cell_set=(TtEditCellSet){2,1,{60,1,TT_EFFECT_S,0x12}};
+    e.cell_set=(TtEditCellSet){2,1,{60,1,TT_EFFECT_S,0x12,
+                                      TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1}};
     assert(apply(e) && active.cell[2][1].note==60);
     e.cell_set.row=TT_MAX_STEPS;
     assert(!apply(e) && message[0]);
-    TtCell paste[1]={{72,2,0,-1}};
+    TtCell paste[1]={{72,2,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,
+                       TT_EFFECT_NONE,-1}};
     e=(TtEditEvent){.type=TT_EDIT_CELLS_BULK};
     e.cells=(TtEditCellsBulk){TT_BULK_PASTE,2,1,2,1,0,paste,1};
     assert(apply(e) && active.cell[2][1].note==72);
@@ -218,7 +220,8 @@ int main(void) {
            !strcmp(message,"Pattern bank is full"));
     song.pattern_count=pattern_before;
     e=(TtEditEvent){.type=TT_EDIT_CELL_SET};
-    e.cell_set=(TtEditCellSet){0,0,{61,1,0,-1}};
+    e.cell_set=(TtEditCellSet){0,0,{61,1,TT_EFFECT_NONE,-1,
+                                      TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1}};
     assert(tt_edit_apply_recorded(history,&doc,&e));
     assert(tt_edit_can_undo(history) && active.cell[0][0].note==61);
     assert(tt_edit_undo(history,&doc) && active.cell[0][0].note==60);

@@ -114,7 +114,8 @@ int main(void) {
     assert(loaded.table[0].tick[4].effect[0].command=='r');
     unlink(v4_path);
     song.pattern_rows=32;song.rows_per_beat=3;song.ticks_per_row=6;
-    song.pattern[1].cell[23][4]=(TtCell){72,1,TT_EFFECT_NONE,-1};
+    song.pattern[1].cell[23][4]=(TtCell){72,1,TT_EFFECT_NONE,-1,
+                                           TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     assert(tt_song_save(path,&song,sample,1,error,sizeof(error)));
     assert(tt_song_load(path,&loaded,readback,&count,error,sizeof(error)));
     assert(loaded.pattern_rows==32 && loaded.rows_per_beat==3 &&

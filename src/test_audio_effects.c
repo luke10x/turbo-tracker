@@ -54,7 +54,7 @@ int main(void) {
     tt_audio_command(0,'r',2);
     tt_audio_tick();assert(tt_audio_position(0)==100);
     TtPhrase phrase;tt_phrase_init(&phrase,1600);
-    TtCell reverse={60,1,TT_EFFECT_S,0xfa};
+    TtCell reverse={60,1,TT_EFFECT_S,0xfa,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     int start,end;
     assert(tt_cell_range(&phrase,&reverse,1600,&start,&end));
     assert(start>end && start==phrase.marker[15] && end==phrase.marker[10]);

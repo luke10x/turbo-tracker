@@ -4,7 +4,7 @@
 
 - [x] Add helper accessors around three effect slots while retaining the compatibility layout.
 - [x] Initialize unused slots in the core pattern, song, edit, and playback construction paths as `TT_EFFECT_NONE` with value `-1`.
-- [ ] Update all pattern constructors, demo data, copies, and equality-sensitive tests.
+- [x] Update all pattern constructors, demo data, copies, and equality-sensitive tests.
 - [x] Confirm edit snapshots, undo/redo, clipboard copy/cut/paste, and bulk edits retain all slots because they copy complete `TtCell` values.
 
 ## Song and pattern formats

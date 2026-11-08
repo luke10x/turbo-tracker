@@ -279,7 +279,8 @@ int main(void) {
     select_edit_pattern(1);
     assert(tracker.pattern_index==1 && tracker.edit_order==1);
     assert(tracker.phrase_scroll==16);
-    tracker.pattern.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0};
+    tracker.pattern.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     tracker.play_mode=PLAY_PATTERN;tracker.loop_pattern_index=1;
     tracker.song.table[0].tick[0].note=60;
     tracker.song.table[0].tick[0].instrument=1;
@@ -323,7 +324,8 @@ int main(void) {
     assert(tracker.song.table[0].tick[3].effect[0].command=='X');
     tracker.play_mode=PLAY_PATTERN;
     tracker.loop_pattern_index=tracker.pattern_index;
-    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0};
+    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     tracker.pattern.cell[0][5].effect2=TT_EFFECT_P;
     tracker.pattern.cell[0][5].value2=255;
     tracker.pattern.cell[0][5].effect3=TT_EFFECT_P;
@@ -334,7 +336,8 @@ int main(void) {
     tracker.table_voice[5]=(TableVoice){.active=1,.table=0,.tick=6,.next_table=-1};
     tt_play_table_ticks();
     assert(tt_audio_pan(5)==1);
-    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_STRETCH,0x40};
+    tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_STRETCH,0x40,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     tt_play_play_row(0);
     assert(fabs(tt_audio_stretch(5)-2)<1e-10);
     tracker.song.table[0].tick[7].effect[0]=(TtTableEffect){'R',0xc0};
@@ -359,10 +362,14 @@ int main(void) {
     tracker.anchor_step=2;tracker.step=3;
     tracker.anchor_channel=0;tracker.channel=1;
     tracker.selecting=1;
-    tracker.pattern.cell[2][0]=(TtCell){60,1,TT_EFFECT_NONE,-1};
-    tracker.pattern.cell[2][1]=(TtCell){61,1,TT_EFFECT_M,0x12};
-    tracker.pattern.cell[3][0]=(TtCell){62,1,TT_EFFECT_NONE,-1};
-    tracker.pattern.cell[3][1]=(TtCell){63,1,TT_EFFECT_S,0x34};
+    tracker.pattern.cell[2][0]=(TtCell){60,1,TT_EFFECT_NONE,-1,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[2][1]=(TtCell){61,1,TT_EFFECT_M,0x12,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[3][0]=(TtCell){62,1,TT_EFFECT_NONE,-1,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[3][1]=(TtCell){63,1,TT_EFFECT_S,0x34,
+                                          TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     handle_key('y');
     assert(tracker.clip_rows==2 && tracker.clip_channels==2 &&
            tracker.clipboard[0][0].note==60 && tracker.clipboard[1][1].value==0x34);
@@ -372,7 +379,7 @@ int main(void) {
     assert(tracker.pattern.cell[2][0].note==60 && tracker.pattern.cell[3][1].value==0x34);
     tracker.selecting=0;
     tracker.step=5;tracker.channel=2;
-    tracker.pattern.cell[5][3]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[5][3]=tt_cell_empty();
     handle_key(22); /* Ctrl-V */
     assert(tracker.selecting && tracker.visual_selecting &&
            tracker.anchor_step==5 && tracker.anchor_channel==2 &&
