@@ -1569,7 +1569,7 @@ static void show_help(F80Widget *button,void *user) {
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W; values 00-FF.",
         "Note: type C-4 or C#4; Space advances through the cell fields.",
-        "Delete clears a field. Enter auditions. Ctrl+U/Y undo/redo.",
+        "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "Sampler > Manage reorders, renames, deletes and retunes samples.",
@@ -2285,6 +2285,7 @@ static void handle_key(int key) {
         return;
     }
     if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.selecting)return;
+    if(key==' ')return;
     if(key==22 && tracker.focus==FOCUS_PHRASE) { /* Ctrl-V */
         handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
         return;
@@ -2295,12 +2296,7 @@ static void handle_key(int key) {
         return;
     }
     switch(key) {
-    case 10:case 13:
-        if(tracker.focus==FOCUS_ORDER) {
-            f80_key(&tracker.app,key);return;
-        }
-        audition(NULL,NULL);return;
-    case ' ':toggle_play(NULL,NULL);return;
+    case 10:case 13:toggle_play(NULL,NULL);return;
     case 9:case F80_KEY_BTAB:
         handle_ui_event((TtUiEvent){TT_UI_FOCUS,
             key==9?

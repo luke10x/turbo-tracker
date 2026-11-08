@@ -77,6 +77,11 @@ int main(void) {
     tracker.step=1;tracker.field=0;clear_note_input();
     handle_key('c');handle_key('-');handle_key('4');
     assert(tracker.pattern.cell[1][1].note==60);
+    tracker.focus=FOCUS_WAVE;tracker.started=tracker.playing=1;
+    handle_key(13);
+    assert(tracker.started && !tracker.playing);
+    handle_key(' ');
+    assert(!tracker.playing);
 
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
