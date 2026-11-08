@@ -204,9 +204,12 @@ static int grid_pattern_for_row(int global) {
     return order>=0?tracker.song.order[order]:tracker.pattern_index;
 }
 typedef enum {
-    TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER, TT_UI_FOCUS, TT_UI_SCROLL_ORDER
+    TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER, TT_UI_FOCUS, TT_UI_SCROLL_ORDER,
+    TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
+    TT_UI_END_VISUAL_SELECTION
 } TtUiType;
 typedef struct { TtUiType type; int index; } TtUiEvent;
+static void leave_follow(void);
 static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_FOCUS) {
         tracker.focus=event.index;
@@ -222,6 +225,38 @@ static int handle_ui_event(TtUiEvent event) {
         int maximum=list->item_count>body?list->item_count-body:0;
         list->scroll=clamp(list->scroll+event.index,0,maximum);
         list->scroll_detached=1;
+        return 1;
+    }
+    if(event.type==TT_UI_BEGIN_VISUAL_SELECTION) {
+        if(tracker.focus!=FOCUS_PHRASE)return 0;
+        tracker.anchor_step=tracker.step;
+        tracker.anchor_channel=tracker.channel;
+        tracker.grid_selection_invalid=0;
+        tracker.selecting=tracker.visual_selecting=1;
+        tt_tracker_log_event("UI","Visual selection started");
+        return 1;
+    }
+    if(event.type==TT_UI_EXTEND_VISUAL_SELECTION) {
+        if(tracker.focus!=FOCUS_PHRASE || !tracker.selecting ||
+           !tracker.visual_selecting)return 0;
+        leave_follow();
+        if(event.index==F80_KEY_UP)
+            tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);
+        else if(event.index==F80_KEY_DOWN)
+            tracker.step=clamp(tracker.step+1,0,tracker.song.pattern_rows-1);
+        else if(event.index==F80_KEY_LEFT)
+            tracker.channel=clamp(tracker.channel-1,0,TT_CHANNELS-1);
+        else if(event.index==F80_KEY_RIGHT)
+            tracker.channel=clamp(tracker.channel+1,0,TT_CHANNELS-1);
+        else return 0;
+        if(event.index==F80_KEY_UP || event.index==F80_KEY_DOWN)
+            tracker.reveal_cursor=1;
+        return 1;
+    }
+    if(event.type==TT_UI_END_VISUAL_SELECTION) {
+        if(!tracker.visual_selecting)return 0;
+        tracker.selecting=tracker.visual_selecting=0;
+        tt_tracker_log_event("UI","Visual selection ended");
         return 1;
     }
     int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
@@ -2075,6 +2110,15 @@ static void handle_key(int key) {
         else if(key==' ')toggle_play(NULL,NULL);
         return;
     }
+    if(key==22 && tracker.focus==FOCUS_PHRASE) { /* Ctrl-V */
+        handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
+        return;
+    }
+    if(tracker.focus==FOCUS_PHRASE && tracker.selecting &&
+       tracker.visual_selecting && key==27) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+        return;
+    }
     switch(key) {
     case 10:case 13:
         if(tracker.focus==FOCUS_ORDER) {
@@ -2099,6 +2143,8 @@ static void handle_key(int key) {
     if(key>=2001 && key<=2008) {
         F80Action action=current_status()[key-2001].action;
         if(action)action(NULL,NULL);
+        if(key>=2005 && key<=2007 && tracker.visual_selecting)
+            handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
         return;
     }
     if(tracker.focus==FOCUS_ORDER) {
@@ -2123,6 +2169,13 @@ static void handle_key(int key) {
         else if(key=='-')zoom_wave(-1);
         else f80_key(&tracker.app,key);
     } else if(tracker.focus==FOCUS_PHRASE) {
+        if(tracker.selecting && tracker.visual_selecting &&
+           (key==F80_KEY_UP || key==F80_KEY_DOWN ||
+            key==F80_KEY_LEFT || key==F80_KEY_RIGHT)) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+                .index=key});
+            return;
+        }
         if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
            key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
             leave_follow();
@@ -2144,9 +2197,21 @@ static void handle_key(int key) {
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT)leave_follow();
         if(tracker.selecting) {
-            if(key=='y')copy_selection(NULL,NULL);
-            else if(key=='x')cut_selection(NULL,NULL);
-            else if(key=='p')paste_selection(NULL,NULL);
+            if(key=='y') {
+                copy_selection(NULL,NULL);
+                if(tracker.visual_selecting)
+                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+            }
+            else if(key=='x') {
+                cut_selection(NULL,NULL);
+                if(tracker.visual_selecting)
+                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+            }
+            else if(key=='p') {
+                paste_selection(NULL,NULL);
+                if(tracker.visual_selecting)
+                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+            }
             return;
         }
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
@@ -2927,6 +2992,10 @@ int main(int argc,char **argv) {
 #ifndef __EMSCRIPTEN__
     struct termios shortcut_terminal;
     if(tcgetattr(STDIN_FILENO,&shortcut_terminal)==0) {
+#ifdef VLNEXT
+        /* Ctrl-V starts tracker visual selection; do not treat it as literal-next. */
+        shortcut_terminal.c_cc[VLNEXT]=_POSIX_VDISABLE;
+#endif
 #ifdef VDSUSP
         shortcut_terminal.c_cc[VDSUSP]=_POSIX_VDISABLE;
 #endif

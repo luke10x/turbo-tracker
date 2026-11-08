@@ -315,6 +315,37 @@ int main(void) {
     handle_key('p');
     assert(tracker.pattern.cell[2][0].note==60 && tracker.pattern.cell[3][1].value==0x34);
     tracker.selecting=0;
+    tracker.step=5;tracker.channel=2;
+    tracker.pattern.cell[5][3]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
+    handle_key(22); /* Ctrl-V */
+    assert(tracker.selecting && tracker.visual_selecting &&
+           tracker.anchor_step==5 && tracker.anchor_channel==2 &&
+           selected_cell(grid_edit_row(),tracker.channel));
+    handle_key(F80_KEY_RIGHT);
+    assert(tracker.channel==3 && tracker.selecting);
+    handle_key('d');
+    assert(tracker.pattern.cell[5][3].note<0);
+    handle_key(22);
+    handle_key('y');
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key('x');
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key('p');
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key(2005); /* F5 */
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key(2006); /* F6 */
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key(27);
+    assert(!tracker.selecting && !tracker.visual_selecting);
+    handle_key(22);
+    handle_key(2007); /* F7 */
+    assert(!tracker.selecting && !tracker.visual_selecting);
     int original_note=tracker.pattern.cell[0][4].note;
     TtEditEvent change={.type=TT_EDIT_CELL_SET};
     change.cell_set=(TtEditCellSet){0,4,{72,1,TT_EFFECT_NONE,-1}};

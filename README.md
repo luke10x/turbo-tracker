@@ -238,6 +238,10 @@ horizontally. The yellow block selects cells, not individual fields. The line
 above the F-key bar shows selection and clipboard dimensions. In selection mode
 F3/F4 transpose by a semitone, F5 or `y` copies, F6 or `x` cuts, F7 or `p`
 pastes only into an identically sized selection, and F8 clears.
+Press Ctrl+V to begin visual selection when Shift+arrow keys are unavailable;
+plain arrows extend it. `y`/F5 copy, `x`/F6 cut, and `p`/F7 paste the active
+selection, then end visual mode, as does Escape. Notes, effects, and values
+are not entered while the selection is active.
 
 The waveform uses F80's 2×2 drawing renderer. F1/F2 select the previous or next
 sample. F3/F4 or Ctrl+Left/Right select and center the previous or next marker.

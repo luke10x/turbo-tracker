@@ -30,7 +30,7 @@ typedef struct {
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
     F80Widget *progress,*bpm_label,*details,*status;
     int focus,marker,zoom,view_start,step,channel,field,entry_octave;
-    int selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
+    int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
     int compact_editing;
