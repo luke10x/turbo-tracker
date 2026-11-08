@@ -83,19 +83,59 @@ static int parse_cell(const char *text,TtCell *cell) {
     }
     return 1;
 }
-void tt_pattern_row_text(const TtPattern *pattern,int row,char text[67]) {
-    for(int channel=0;channel<TT_CHANNELS;++channel) {
-        if(channel)text[channel*11-1]='|';
-        tt_cell_text(&pattern->cell[row][channel],text+channel*11);
+static void cell_row_text(const TtCell *cell,char text[20]) {
+    static const char digits[]="0123456789ABCDEF";
+    if(cell->note>=0)tt_note_name(cell->note,text);
+    else memcpy(text,"...",3);
+    if(cell->instrument>=0 && cell->instrument<=255) {
+        text[3]=digits[cell->instrument>>4];text[4]=digits[cell->instrument&15];
+    } else memcpy(text+3,"..",2);
+    for(int slot=0;slot<3;++slot) {
+        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        const char *alias=fx->command==TT_EFFECT_NONE?NULL:
+                          fx->command==TT_EFFECT_STRETCH?"~ST":effect_alias(fx->command);
+        if(!alias)memcpy(text+5+slot*5,".....",5);
+        else {
+            memcpy(text+5+slot*5,alias,3);
+            if(fx->value>=0 && fx->value<=255) {
+                text[8+slot*5]=digits[fx->value>>4];text[9+slot*5]=digits[fx->value&15];
+            } else memcpy(text+8+slot*5,"..",2);
+        }
     }
-    text[65]=0;
+    text[20]=0;
+}
+void tt_pattern_row_text(const TtPattern *pattern,int row,char text[126]) {
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
+        if(channel)text[channel*21-1]='|';
+        cell_row_text(&pattern->cell[row][channel],text+channel*21);
+    }
+    text[125]=0;
 }
 int tt_pattern_parse_row(const char *text,TtPattern *pattern,int row) {
-    if(row<0 || row>=TT_MAX_STEPS || strlen(text)!=65)return 0;
+    size_t length=strlen(text);
+    if(row<0 || row>=TT_MAX_STEPS || (length!=65 && length!=125))return 0;
+    if(length==65) {
+        for(int channel=0;channel<TT_CHANNELS;++channel) {
+            int at=channel*11;
+            if(channel && text[at-1]!='|')return 0;
+            if(!parse_cell(text+at,&pattern->cell[row][channel]))return 0;
+            pattern->cell[row][channel].effect2=pattern->cell[row][channel].effect3=TT_EFFECT_NONE;
+            pattern->cell[row][channel].value2=pattern->cell[row][channel].value3=-1;
+        }
+        return 1;
+    }
     for(int channel=0;channel<TT_CHANNELS;++channel) {
-        int at=channel*11;
+        int at=channel*21;
         if(channel && text[at-1]!='|')return 0;
-        if(!parse_cell(text+at,&pattern->cell[row][channel]))return 0;
+        TtCell *cell=&pattern->cell[row][channel];
+        char old[11];memcpy(old,text+at,5);memcpy(old+5,text+at+5,5);old[10]=0;
+        if(!parse_cell(old,cell))return 0;
+        for(int slot=1;slot<3;++slot) {
+            char token[11]="..... .....";memcpy(token+5,text+at+5+slot*5,5);
+            TtCell fx=tt_cell_empty();
+            if(!parse_cell(token,&fx))return 0;
+            TtPatternEffect *dst=tt_cell_effect(cell,slot);*dst=*tt_cell_effect(&fx,0);
+        }
     }
     return 1;
 }
@@ -105,7 +145,7 @@ int tt_pattern_save(const char *path,const TtPattern *pattern,
     if(!file) { snprintf(error,error_size,"Cannot save pattern: %s",strerror(errno));return 0; }
     for(int row=0;row<TT_STEPS;++row) {
         for(int channel=0;channel<TT_CHANNELS;++channel) {
-            char text[11];tt_cell_text(&pattern->cell[row][channel],text);
+            char text[21];cell_row_text(&pattern->cell[row][channel],text);
             if(channel)fputc('|',file);
             fputs(text,file);
         }
@@ -126,12 +166,10 @@ int tt_pattern_load(const char *path,TtPattern *pattern,
     while(fgets(line,sizeof(line),file)) {
         if(row>=TT_STEPS) { valid=0;break; }
         size_t length=strcspn(line,"\r\n");
-        if(length!=TT_CHANNELS*10+TT_CHANNELS-1) { valid=0;break; }
-        for(int channel=0;channel<TT_CHANNELS;++channel) {
-            int at=channel*11;
-            if(channel && line[at-1]!='|') { valid=0;break; }
-            if(!parse_cell(line+at,&next.cell[row][channel])) { valid=0;break; }
-        }
+        if(length!=TT_CHANNELS*10+TT_CHANNELS-1 &&
+           length!=TT_CHANNELS*20+TT_CHANNELS-1) { valid=0;break; }
+        line[length]=0;
+        if(!tt_pattern_parse_row(line,&next,row))valid=0;
         if(!valid)break;
         ++row;
     }

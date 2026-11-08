@@ -9,10 +9,10 @@
 
 ## Song and pattern formats
 
-- [ ] Extend pattern-row text rendering to encode three effect/value pairs.
-- [ ] Make the parser accept both existing one-effect rows and the new three-effect representation.
-- [ ] Preserve existing `.song` files without data loss.
-- [ ] Add round-trip tests for one, two, and three effects, including empty middle/trailing slots.
+- [x] Extend pattern-row text rendering to encode three effect/value pairs.
+- [x] Make the parser accept both existing one-effect rows and the new three-effect representation.
+- [x] Preserve existing `.song` files without data loss.
+- [x] Add round-trip tests for one, two, and three effects, including empty middle/trailing slots.
 
 ## Playback and audio
 

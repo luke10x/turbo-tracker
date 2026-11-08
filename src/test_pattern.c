@@ -12,28 +12,34 @@ int main(void) {
     assert(descriptor>=0);close(descriptor);
     TtPattern original,loaded;
     tt_pattern_init(&original);
-    original.cell[0][1]=(TtCell){60,1,TT_EFFECT_M,0xff};
-    original.cell[8][5]=(TtCell){72,0,TT_EFFECT_S,0x4f};
-    original.cell[9][2]=(TtCell){-1,-1,TT_EFFECT_M,0x80};
-    original.cell[10][3]=(TtCell){60,1,TT_EFFECT_S,0xff};
-    original.cell[11][3]=(TtCell){-1,-1,TT_EFFECT_S,-1};
+    original.cell[0][1]=(TtCell){60,1,TT_EFFECT_M,0xff,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[8][5]=(TtCell){72,0,TT_EFFECT_S,0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[9][2]=(TtCell){-1,-1,TT_EFFECT_M,0x80,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[10][3]=(TtCell){60,1,TT_EFFECT_S,0xff,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[11][3]=(TtCell){-1,-1,TT_EFFECT_S,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     const char *commands="GIJKMNOPRSTVW";
     for(int row=0;commands[row];++row)
-        original.cell[row+1][4]=(TtCell){-1,-1,commands[row],0x4f};
-    original.cell[14][4]=(TtCell){60,1,TT_EFFECT_STRETCH,0x40};
+        original.cell[row+1][4]=(TtCell){-1,-1,commands[row],0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[14][4]=(TtCell){60,1,TT_EFFECT_STRETCH,0x40,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[15][0].effect3=TT_EFFECT_P;
+    original.cell[15][0].value3=0x56;
     char blank_value[11];
     tt_cell_text(&original.cell[11][3],blank_value);
     assert(!strcmp(blank_value,".....SLC.."));
     assert(tt_pattern_save(path,&original,error,sizeof(error)));
     FILE *file=fopen(path,"r");assert(file);
     char line[128];assert(fgets(line,sizeof(line),file));
-    assert(!strncmp(line,"C-401SLC04|C-401MVLFF|..........",32));
+    assert(strstr(line,"|C-401MVLFF.....")!=NULL);
     fclose(file);
     memset(&loaded,0,sizeof(loaded));
     assert(tt_pattern_load(path,&loaded,error,sizeof(error)));
     assert(!memcmp(&original,&loaded,sizeof(original)));
-    char legacy_row[67];
-    tt_pattern_row_text(&original,0,legacy_row);
+    char legacy_row[66];
+    for(int channel=0;channel<TT_CHANNELS;++channel) {
+        if(channel)legacy_row[channel*11-1]='|';
+        tt_cell_text(&original.cell[0][channel],legacy_row+channel*11);
+    }
+    legacy_row[65]=0;
     memcpy(legacy_row+5,"SLI",3);
     memcpy(legacy_row+16,"VOL",3);
     TtPattern legacy;tt_pattern_init(&legacy);
@@ -41,14 +47,27 @@ int main(void) {
     assert(!memcmp(&legacy.cell[0],&original.cell[0],sizeof(original.cell[0])));
     file=fopen(path,"w");assert(file);
     for(int row=0;row<TT_STEPS;++row) {
-        char row_text[67];
+        char row_text[126];
         tt_pattern_row_text(&original,row,row_text);
-        if(row==0)memcpy(row_text,legacy_row,65);
         assert(fputs(row_text,file)>=0 && fputc('\n',file)!=EOF);
     }
     assert(!fclose(file));
     assert(tt_pattern_load(path,&loaded,error,sizeof(error)));
     assert(!memcmp(&original,&loaded,sizeof(original)));
+    file=fopen(path,"w");assert(file);
+    for(int row=0;row<TT_STEPS;++row) {
+        for(int channel=0;channel<TT_CHANNELS;++channel) {
+            if(channel)fputc('|',file);
+            char cell[11];tt_cell_text(&original.cell[row][channel],cell);fputs(cell,file);
+        }
+        fputc('\n',file);
+    }
+    assert(!fclose(file));
+    assert(tt_pattern_load(path,&loaded,error,sizeof(error)));
+    for(int row=0;row<TT_STEPS;++row)for(int channel=0;channel<TT_CHANNELS;++channel) {
+        assert(loaded.cell[row][channel].effect2==TT_EFFECT_NONE);
+        assert(loaded.cell[row][channel].effect3==TT_EFFECT_NONE);
+    }
     TtPhrase phrase;tt_phrase_init(&phrase,1600);
     int start,end;
     assert(tt_cell_range(&phrase,&loaded.cell[0][1],1600,&start,&end));

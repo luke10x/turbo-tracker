@@ -215,7 +215,7 @@ int tt_song_save(const char *path,const TtSong *song,
         char name[192];if(!encode(song->name[i],name,sizeof(name))) { valid=0;break; }
         fprintf(file,"PATTERN\t%d\t%s\n",i,name);
         for(int row=0;row<song->pattern_rows;++row) {
-            char text[67];tt_pattern_row_text(&song->pattern[i],row,text);
+            char text[126];tt_pattern_row_text(&song->pattern[i],row,text);
             fprintf(file,"ROW\t%d\t%s\n",row,text);
         }
     }
