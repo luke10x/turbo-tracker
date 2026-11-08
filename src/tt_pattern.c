@@ -22,7 +22,7 @@ static const char *effect_alias(int effect) {
 }
 void tt_pattern_effect_text(int command,int value,char text[6]) {
     static const char digits[]="0123456789ABCDEF";
-    const char *alias=command==TT_EFFECT_STRETCH?"~ST":effect_alias(command);
+    const char *alias=effect_alias(command);
     if(!alias)alias="...";
     memcpy(text,alias,3);
     if(value>=0 && value<=255) {
@@ -102,8 +102,7 @@ static void cell_row_text(const TtCell *cell,char text[20]) {
     } else memcpy(text+3,"..",2);
     for(int slot=0;slot<3;++slot) {
         const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
-        const char *alias=fx->command==TT_EFFECT_NONE?NULL:
-                          fx->command==TT_EFFECT_STRETCH?"~ST":effect_alias(fx->command);
+        const char *alias=fx->command==TT_EFFECT_NONE?NULL:effect_alias(fx->command);
         if(!alias)memcpy(text+5+slot*5,".....",5);
         else {
             memcpy(text+5+slot*5,alias,3);

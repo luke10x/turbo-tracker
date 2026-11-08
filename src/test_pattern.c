@@ -26,6 +26,9 @@ int main(void) {
     char blank_value[11];
     tt_cell_text(&original.cell[11][3],blank_value);
     assert(!strcmp(blank_value,".....SLC.."));
+    char reverse_alias[6];
+    tt_pattern_effect_text(TT_EFFECT_R,0x40,reverse_alias);
+    assert(!strcmp(reverse_alias,"RRR40"));
     assert(tt_pattern_save(path,&original,error,sizeof(error)));
     FILE *file=fopen(path,"r");assert(file);
     char line[128];assert(fgets(line,sizeof(line),file));
