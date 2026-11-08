@@ -20,6 +20,16 @@ static const char *effect_alias(int effect) {
     case 'W':return "WBL";default:return NULL;
     }
 }
+void tt_pattern_effect_text(int command,int value,char text[6]) {
+    static const char digits[]="0123456789ABCDEF";
+    const char *alias=command==TT_EFFECT_STRETCH?"~ST":effect_alias(command);
+    if(!alias)alias="...";
+    memcpy(text,alias,3);
+    if(value>=0 && value<=255) {
+        text[3]=digits[value>>4];text[4]=digits[value&15];
+    } else memcpy(text+3,"..",2);
+    text[5]=0;
+}
 void tt_cell_text(const TtCell *cell,char text[11]) {
     static const char digits[]="0123456789ABCDEF";
     memcpy(text,"..........",11);

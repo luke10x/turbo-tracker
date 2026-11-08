@@ -35,7 +35,7 @@ typedef struct {
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
-    int compact_editing;
+    int compact_editing,effect_slots;
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
     int order_range_active,order_range_anchor,order_range_end;

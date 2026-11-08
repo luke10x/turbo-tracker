@@ -24,14 +24,14 @@
 
 ## Compact pattern grid
 
-- [ ] Generalize the fixed four-fields-per-channel layout to note, instrument, and one to three effect/value pairs.
-- [ ] Render the first effect pair by default.
-- [ ] Reveal effect pair 2 when Space is pressed on effect pair 1's value; move the cursor to pair 2's effect field.
-- [ ] Reveal effect pair 3 when Space is pressed on effect pair 2's value; move the cursor to pair 3's effect field.
-- [ ] Use the expanded layout for keyboard navigation, mouse hit testing, scrolling, cursor visibility, selection rendering, and status actions.
-- [ ] Keep extra effect pairs visible while editing effect fields.
+- [x] Generalize the fixed four-fields-per-channel layout to note, instrument, and one to three effect/value pairs.
+- [x] Render the first effect pair by default.
+- [x] Reveal effect pair 2 when Space is pressed on effect pair 1's value; move the cursor to pair 2's effect field.
+- [x] Reveal effect pair 3 when Space is pressed on effect pair 2's value; move the cursor to pair 3's effect field.
+- [x] Use the expanded layout for keyboard navigation, mouse hit testing, scrolling, cursor visibility, selection rendering, and status actions.
+- [x] Keep extra effect pairs visible while editing effect fields.
 - [ ] When focus leaves effect fields or the pattern grid, compact slots left within every cell: slot 3 moves to slot 2 if slot 2 is empty.
-- [ ] Hide any trailing effect pair that is empty in every displayed pattern/order.
+- [x] Hide any trailing effect pair that is empty in every displayed pattern/order.
 
 ## Input behavior
 
