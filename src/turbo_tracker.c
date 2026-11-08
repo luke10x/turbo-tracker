@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <limits.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -174,9 +175,6 @@ static void stop_playback(F80Widget *button,void *user) {
 }
 static void toggle_play(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_TOGGLE,0,0);
-}
-static void audition_cell(int step,int channel) {
-    send_play(TT_PLAY_AUDITION_CELL,step,channel);
 }
 static void audition(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_AUDITION,0,0);
@@ -917,6 +915,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             snprintf(shown,sizeof(shown),"%.3s %.2s %.5s",compact,compact+3,compact+5);
             int editrow=editable && tracker.focus==FOCUS_PHRASE && row==tracker.step;
             int editcol=tracker.focus==FOCUS_PHRASE && channel==tracker.channel;
+            if(editrow && editcol && field==0 && tracker.note_input_length)
+                memcpy(shown,tracker.note_input,(size_t)tracker.note_input_length);
             int selected=editrow && editcol && field==tracker.field;
             int empty=field==0?cell->note<0:field==1?cell->instrument<0:
                       cell->effect==TT_EFFECT_NONE;
@@ -1455,7 +1455,7 @@ static void show_help(F80Widget *button,void *user) {
         "Wave: F7/F8 or Down/Up zoom; Left/Right pans; 0-F selects.",
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W; values 00-FF.",
-        "Note: Z-M and Q-U play two keyboard octaves; [/] change octave.",
+        "Note: type C-4 or C#4; Space advances through the cell fields.",
         "Delete clears a field. Enter auditions. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
@@ -1854,6 +1854,38 @@ static int piano_offset(int key) {
     at=strchr(high,key);
     return at?high_note[at-high]:-1;
 }
+static void clear_note_input(void) { tracker.note_input_length=0; }
+static int typed_note_value(const char input[4]) {
+    static const char letters[]="CDEFGAB";
+    static const int semitones[]={0,2,4,5,7,9,11};
+    const char *letter=strchr(letters,input[0]);
+    if(!letter || (input[1]!='-' && input[1]!='#') ||
+       input[2]<'0' || input[2]>'9')return -1;
+    int note=(input[2]-'0'+1)*12+semitones[letter-letters]+(input[1]=='#');
+    return note<=127?note:-1;
+}
+static void type_note_key(int key) {
+    char character=(char)toupper((unsigned char)key);
+    int length=tracker.note_input_length;
+    int valid=length==0?strchr("CDEFGAB",character)!=NULL:
+              length==1?(character=='-' || character=='#'):
+              length==2?character>='0' && character<='9':0;
+    if(!valid) { clear_note_input();tt_tracker_message("Type notes as C-4 or C#4");return; }
+    tracker.note_input[length++]=character;
+    tracker.note_input_length=length;
+    if(length!=3)return;
+    int note=typed_note_value(tracker.note_input);
+    clear_note_input();
+    if(note<0) { tt_tracker_message("Note must be between C-0 and G-9");return; }
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    edited.note=note;
+    edit_cell(tracker.step,tracker.channel,edited);
+}
+static void advance_pattern_field(void) {
+    clear_note_input();
+    if(tracker.field<3)++tracker.field;
+    else if(tracker.channel<TT_CHANNELS-1) { ++tracker.channel;tracker.field=0; }
+}
 static void edit_table_ticks(TtBulkOp op,int top,int left,int bottom,int right,
                              const TtTableTick *data) {
     TtEditEvent event={.type=TT_EDIT_TABLE_TICKS_BULK};
@@ -2110,6 +2142,12 @@ static void handle_key(int key) {
         else if(key==' ')toggle_play(NULL,NULL);
         return;
     }
+    if(key==' ' && tracker.focus==FOCUS_PHRASE && !tracker.selecting) {
+        if(tracker.field==0 && tracker.note_input_length)
+            tt_tracker_message("Complete the note as C-4 or C#4 before advancing");
+        else advance_pattern_field();
+        return;
+    }
     if(key==22 && tracker.focus==FOCUS_PHRASE) { /* Ctrl-V */
         handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
         return;
@@ -2217,19 +2255,24 @@ static void handle_key(int key) {
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
         int digit=hex_digit(key);
         if(key==F80_KEY_UP) {
+            clear_note_input();
             tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);tracker.reveal_cursor=1;
         } else if(key==F80_KEY_DOWN) {
+            clear_note_input();
             tracker.step=clamp(tracker.step+1,0,tracker.song.pattern_rows-1);tracker.reveal_cursor=1;
         }
         else if(key==F80_KEY_LEFT) {
+            clear_note_input();
             if(tracker.field)tracker.field--;
             else if(tracker.channel) { tracker.channel--;tracker.field=3; }
         } else if(key==F80_KEY_RIGHT) {
+            clear_note_input();
             if(tracker.field<3)tracker.field++;
             else if(tracker.channel<TT_CHANNELS-1) {
                 tracker.channel++;tracker.field=0;
             }
         } else if(key==F80_KEY_DELETE || key==F80_KEY_BACKSPACE || key=='.') {
+            clear_note_input();
             if(tracker.field==0)entry->note=-1;
             else if(tracker.field==1)entry->instrument=-1;
             else if(tracker.field==2)set_effect(entry,TT_EFFECT_NONE);
@@ -2248,14 +2291,7 @@ static void handle_key(int key) {
             edit_cell(tracker.step,tracker.channel,edited);
         }
         else if(tracker.field==0) {
-            int offset=piano_offset(key);
-            if(offset>=0) {
-                entry->note=clamp((tracker.entry_octave+1)*12+offset,12,127);
-                edit_cell(tracker.step,tracker.channel,edited);
-                if(entry->instrument>=0)audition_cell(tracker.step,tracker.channel);
-            } else if(key=='+' || key=='=')adjust_value(1);
-            else if(key=='-')adjust_value(-1);
-            else f80_key(&tracker.app,key);
+            type_note_key(key);
         } else f80_key(&tracker.app,key);
     } else {
         if(key==F80_KEY_UP || key==F80_KEY_RIGHT || key=='+')adjust_value(1);

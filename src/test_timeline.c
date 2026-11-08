@@ -73,19 +73,19 @@ int main(void) {
     TtCell *note_entry=&tracker.pattern.cell[0][1];
     assert(note_entry->note<0 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE);
-    handle_key('c');
-    assert(note_entry->note==64 && note_entry->instrument<0 &&
+    handle_key('c');handle_key('-');handle_key('4');handle_key(' ');
+    assert(note_entry->note==60 && tracker.field==1 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE && note_entry->value<0);
     note_entry->instrument=1;
     note_entry->effect=TT_EFFECT_M;note_entry->value=0x40;
-    handle_key('x');
+    handle_key(' ');handle_key('x');
     assert(note_entry->instrument==1 && note_entry->effect==TT_EFFECT_M &&
            note_entry->value==0x40);
     tracker.channel=2;tracker.field=2;
     TtCell *effect_entry=&tracker.pattern.cell[0][2];
     handle_key('s');
     assert(effect_entry->effect==TT_EFFECT_S && effect_entry->value==-1);
-    tracker.field=3;handle_key('4');
+    handle_key(' ');handle_key('4');
     assert(effect_entry->value==4);
     tracker.follow=1;
     tracker.play_mode=PLAY_SONG;

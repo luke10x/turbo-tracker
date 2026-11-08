@@ -178,14 +178,15 @@ waveform frame title shows the sample slot and display name.
 
 The grid shows cells as `C-4 01 SLC04`. Up/Down selects a row and Left/Right
 moves through note, instrument, effect, and value fields and into adjacent
-channels. On narrow screens, the grid scrolls by field. `Z`–`M` and `Q`–`U`
-enter notes at the selected octave. `[` and `]` change that octave. Type `S` or
-`M` in the effect field to select `SLC` or `MVL`. The same field accepts
+channels. On narrow screens, the grid scrolls by field. Type notes as `C-4` or
+`C#4`; after a complete note, Space advances through instrument, effect, and
+value fields (then to the next channel). Type `S` or `M` in the effect field to
+select `SLC` or `MVL`. The same field accepts
 `G I J K N O P R V W`; their current status and byte meanings are in
 [the effect status](docs/turbo-tracker-effect-status.md). The value stays `..`
 until entered in the value field. F3/F4 change a selected value by 16, and
-F5/F6 by 1. Delete clears a field. Enter auditions the selected cell. Space
-controls playback. F9 opens the menu and F10 exits. Pattern F1/F2 select the
+F5/F6 by 1. Delete clears a field. Enter auditions the selected cell. Outside
+the pattern grid, Space controls playback. F9 opens the menu and F10 exits. Pattern F1/F2 select the
 previous/next pattern. F3–F8 depend on the selected field: note controls
 octave, semitone, order, and clear; instrument controls sample, markers,
 management, load, and clear; effect controls type, MVL, SLC, repeat, and clear;
