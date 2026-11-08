@@ -2654,9 +2654,7 @@ static void update_labels(void) {
         }
     }
     char reference[4];tt_note_name(tracker.phrase.reference_note,reference);
-    int rows,cols;getmaxyx(stdscr,rows,cols);(void)rows;
-    snprintf(tracker.header_text,sizeof(tracker.header_text),
-             "%s",cols<70?"Tracker":"Sample Tracker");
+    snprintf(tracker.header_text,sizeof(tracker.header_text),"Turbo Tracker");
     tracker.play_button->text=tracker.playing?"~P~ause":"~P~lay";
     tracker.follow_button->text=tracker.follow?"~F~ollow":"~H~old";
     tracker.mode_button->text=tracker.play_mode==PLAY_SONG?"~S~ong":"~P~attern";
