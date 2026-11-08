@@ -65,6 +65,8 @@ enum { TT_EVENT_LOG_CAPACITY=512, TT_EVENT_LOG_WIDTH=192 };
 static char event_log[TT_EVENT_LOG_CAPACITY][TT_EVENT_LOG_WIDTH];
 static int event_log_head,event_log_count;
 static char event_console_menu_label[32]="~S~how event console";
+static F80Wrap order_pattern_actions,order_play_actions;
+static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
 
 void tt_tracker_log_event(const char *category,const char *description) {
     Uint64 ticks=SDL_GetTicks();
@@ -1612,10 +1614,12 @@ static void order_refresh(void) {
     }
     for(int i=0;i<tracker.song.order_count;++i) {
         int pattern=tracker.song.order[i];
+        int name_width=tracker.order_dialog && tracker.order_dialog->rect.w>=70?12:9;
         snprintf(tracker.order_rows[i],sizeof(tracker.order_rows[i]),
-                 "[%c] %02Xo > %02Xp: %.12s",
+                 "[%c] %02Xo>%02Xp:%.12s",
                  tracker.song.order_active[i]?'x':' ',i,pattern,
                  tracker.song.name[pattern]);
+        if(name_width<12)tracker.order_rows[i][16+name_width]='\0';
         tracker.order_items[i]=tracker.order_rows[i];
     }
     tracker.order_bank->item_count=tracker.song.pattern_count;
@@ -1771,14 +1775,16 @@ static void show_order(F80Widget *button,void *user) {
                        tracker.song.order_count,NULL,NULL));
     tracker.order_seq->window_role=F80_WINDOW_CYAN;
     tracker.order_name=f80_add(dialog,f80_input());
-    f80_add(dialog,f80_button("Pattern ~U~p",order_pattern_move,(void *)(long)-1));
-    f80_add(dialog,f80_button("Pattern ~D~own",order_pattern_move,(void *)(long)1));
-    f80_add(dialog,f80_button("~A~dd to order",order_add,NULL));
-    f80_add(dialog,f80_button("~N~ew pattern",order_new_pattern,NULL));
-    f80_add(dialog,f80_button("Order ~U~p",order_move,(void *)(long)-1));
-    f80_add(dialog,f80_button("Order ~D~own",order_move,(void *)(long)1));
-    f80_add(dialog,f80_button("Add ~o~rder",order_append,NULL));
-    f80_add(dialog,f80_button("Remo~v~e order",order_remove,NULL));
+    order_pattern_buttons[0]=f80_add(dialog,f80_button("Up",order_pattern_move,(void *)(long)-1));
+    order_pattern_buttons[1]=f80_add(dialog,f80_button("Down",order_pattern_move,(void *)(long)1));
+    order_pattern_buttons[2]=f80_add(dialog,f80_button("New",order_new_pattern,NULL));
+    order_pattern_buttons[3]=f80_add(dialog,f80_button("To order",order_add,NULL));
+    order_play_buttons[0]=f80_add(dialog,f80_button("Up",order_move,(void *)(long)-1));
+    order_play_buttons[1]=f80_add(dialog,f80_button("Down",order_move,(void *)(long)1));
+    order_play_buttons[2]=f80_add(dialog,f80_button("New",order_append,NULL));
+    order_play_buttons[3]=f80_add(dialog,f80_button("Delete",order_remove,NULL));
+    f80_wrap_init(&order_pattern_actions,1,0);
+    f80_wrap_init(&order_play_actions,1,0);
     f80_add(dialog,f80_button("~C~lose",close_order,NULL));
     order_refresh();order_bank_selected(tracker.order_bank,NULL);
     f80_show_modal(&tracker.app,dialog);
@@ -3339,6 +3345,7 @@ static struct {
     Uint64 started_at;
 } native_touch;
 static int native_other_button_down;
+static int native_ignore_followup_click;
 static void native_poll_hold(void) {
     if(tracker.console_visible) { native_touch.down=0;return; }
     if(!native_touch.down || native_touch.moved || native_touch.selecting ||
@@ -3422,6 +3429,7 @@ static void native_mouse_event(void) {
     }
 #endif
     if(event.bstate&BUTTON1_PRESSED) {
+        native_ignore_followup_click=0;
         if(native_touch.down) { native_move(x,y);return; }
         F80Rect r=tracker.phrase_canvas->rect;
         if(!tracker.app.modal && tracker.order_list &&
@@ -3457,6 +3465,7 @@ static void native_mouse_event(void) {
         } else {
             native_other_button_down=1;
             handle_mouse(x,y,0);
+            native_ignore_followup_click=1;
         }
         return;
     }
@@ -3466,11 +3475,16 @@ static void native_mouse_event(void) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
             if(native_touch.selecting || native_touch.moved)native_move(x,y);
             else handle_mouse(native_touch.x,native_touch.y,0);
+            native_ignore_followup_click=1;
             native_touch.down=native_touch.kind=0;
         }
         return;
     }
     if(event.bstate&BUTTON1_CLICKED) {
+        if(native_ignore_followup_click) {
+            native_ignore_followup_click=0;
+            return;
+        }
         native_other_button_down=0;
         if(native_touch.down) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
@@ -3571,13 +3585,14 @@ static int frame(void *user) {
            tracker.app.modal==tracker.settings_dialog) {
             w=tracker.app.modal==tracker.manage_dialog?66:72;
             h=tracker.app.modal==tracker.manage_dialog?19:24;
-            if(tracker.app.modal==tracker.order_dialog) { w=90;h=28; }
+            if(tracker.app.modal==tracker.order_dialog) { w=cols>=92?90:50;h=30; }
             if(tracker.app.modal==tracker.table_dialog) { w=46;h=25; }
             if(tracker.app.modal==tracker.settings_dialog) { w=48;h=16; }
         }
         if(w>cols-2)w=cols-2;
         if(h>rows-2)h=rows-2;
         f80_layout(tracker.app.modal,f80_rect((cols-w)/2,(rows-h)/2,w,h));
+        if(tracker.app.modal==tracker.order_dialog)order_refresh();
         if(tracker.app.modal==tracker.settings_dialog) {
             F80Rect r=tracker.app.modal->rect;
             int left=r.x+2,label_w=r.w>=30?21:r.w/2;
@@ -3609,16 +3624,17 @@ static int frame(void *user) {
                        f80_rect(actions.x+actions.w-1,actions.y,1,actions.h));
         } else if(tracker.app.modal==tracker.order_dialog) {
             F80Rect r=tracker.app.modal->rect;
-            int wide=r.w>=70;
+            int wide=r.w>=36;
             int left=r.x+2,inner=r.w-4;
             int bank_y=r.y+2,bank_list_y=r.y+3,bank_h;
             int seq_y,seq_list_y,seq_h,seq_x=left,bank_w=inner,seq_w=inner;
             if(wide) {
                 bank_w=(inner-2)/2;seq_x=left+bank_w+2;seq_w=inner-bank_w-2;
-                seq_y=bank_y;seq_list_y=bank_list_y;bank_h=seq_h=r.h-16;
+                seq_y=bank_y;seq_list_y=bank_list_y;bank_h=seq_h=r.h-19;
+                if(bank_h<2)bank_h=seq_h=2;
             } else {
-                bank_h=(r.h-18)/2;if(bank_h<2)bank_h=2;
-                seq_y=bank_list_y+bank_h;seq_list_y=seq_y+1;seq_h=bank_h;
+                bank_h=(r.h-21)/2;if(bank_h<2)bank_h=2;
+                seq_y=bank_list_y+bank_h+1;seq_list_y=seq_y+1;seq_h=bank_h;
             }
             f80_layout(tracker.order_bank_label,f80_rect(left,bank_y,bank_w,1));
             f80_layout(tracker.order_bank_bg,f80_rect(left,bank_list_y,bank_w,bank_h));
@@ -3626,25 +3642,20 @@ static int frame(void *user) {
             f80_layout(tracker.order_seq_label,f80_rect(seq_x,seq_y,seq_w,1));
             f80_layout(tracker.order_seq_bg,f80_rect(seq_x,seq_list_y,seq_w,seq_h));
             f80_layout(tracker.order_seq,f80_rect(seq_x,seq_list_y,seq_w,seq_h));
-            int input_y=bank_list_y+bank_h+1;
+            int input_y=wide?bank_list_y+bank_h+1:seq_list_y+seq_h+1;
             f80_layout(tracker.order_name,f80_rect(left,input_y,bank_w,1));
-            int row=input_y+2;
-            for(int i=0;i<4;++i) {
-                F80Widget *child=tracker.app.modal->children[7+i];
-                int cw,ch;f80_fit_size(child,&cw,&ch);
-                f80_layout(child,f80_rect(left,row+i*2,cw,ch));
-            }
-            for(int i=0;i<4;++i) {
-                F80Widget *child=tracker.app.modal->children[11+i];
-                int cw,ch;f80_fit_size(child,&cw,&ch);
-                int x=seq_x;
-                if(x+cw>seq_x+seq_w)x=seq_x+seq_w-cw;
-                f80_layout(child,f80_rect(x,row+i*2,cw,ch));
-            }
+            int actions_y=input_y+2;
             F80Widget *close=tracker.app.modal->children[15];
             int close_w,close_h;f80_fit_size(close,&close_w,&close_h);
             int close_x=seq_x+seq_w-close_w;
-            f80_layout(close,f80_rect(close_x,row+8,close_w,close_h));
+            int close_y=r.y+r.h-5;
+            f80_wrap_layout(&order_pattern_actions,
+                f80_rect(left,actions_y,bank_w,close_y-actions_y),
+                order_pattern_buttons,4);
+            f80_wrap_layout(&order_play_actions,
+                f80_rect(seq_x,actions_y,seq_w,close_y-actions_y),
+                order_play_buttons,4);
+            f80_layout(close,f80_rect(close_x,close_y,close_w,close_h));
         } else if(tracker.app.modal==tracker.manage_dialog ||
                   tracker.app.modal==tracker.slices_dialog) {
             F80Rect r=tracker.app.modal->rect;
