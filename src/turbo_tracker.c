@@ -677,13 +677,20 @@ static void next_marker(F80Widget *button,void *user) {
     focus_marker(tracker.marker+1);
     tt_tracker_message("Next marker selected");
 }
-static void set_effect(TtCell *cell,int effect) {
+static void set_effect_slot(TtCell *cell,int slot,int effect) {
+    TtPatternEffect *fx=tt_cell_effect(cell,slot);
+    if(!fx)return;
     if(effect==TT_EFFECT_NONE) {
-        cell->effect=effect;cell->value=-1;
-    } else if(cell->effect!=effect) {
-        cell->effect=effect;
-        cell->value=-1;
+        fx->command=effect;fx->value=-1;
+    } else if(fx->command!=effect) {
+        fx->command=effect;fx->value=-1;
     }
+}
+static int pattern_effect_slot(void) {
+    return tracker.field>=2?(tracker.field-2)/2:0;
+}
+static int pattern_effect_field(void) {
+    return tracker.field>=2 && tracker.field%2==0;
 }
 static void adjust_value(int delta) {
     if(tracker.focus==FOCUS_WAVE) {
@@ -706,15 +713,19 @@ static void adjust_value(int delta) {
             cell->note=clamp((cell->note<0?tracker.phrase.reference_note:cell->note)+delta,
                              12,127);
         else if(tracker.field==1)cell->instrument=tracker.sample_index+1;
-        else if(tracker.field==2) {
+        else if(pattern_effect_field()) {
+            int slot=pattern_effect_slot();
+            TtPatternEffect *fx=tt_cell_effect(cell,slot);
             const char *effects="GIJKMNOPRSTVW";
-            const char *current=cell->effect?strchr(effects,cell->effect):NULL;
+            const char *current=fx->command?strchr(effects,fx->command):NULL;
             int index=current?(int)(current-effects):-1;
             int next=clamp(index+(delta>0?1:-1),-1,(int)strlen(effects)-1);
-            set_effect(cell,next<0?TT_EFFECT_NONE:effects[next]);
+            set_effect_slot(cell,slot,next<0?TT_EFFECT_NONE:effects[next]);
         } else {
-            if(cell->effect==TT_EFFECT_NONE)set_effect(cell,TT_EFFECT_S);
-            cell->value=clamp(cell->value+delta,0,255);
+            TtPatternEffect *fx=tt_cell_effect(cell,pattern_effect_slot());
+            if(fx->command==TT_EFFECT_NONE)set_effect_slot(cell,pattern_effect_slot(),TT_EFFECT_S);
+            fx=tt_cell_effect(cell,pattern_effect_slot());
+            fx->value=clamp(fx->value+delta,0,255);
         }
         edit_cell(tracker.step,tracker.channel,edited);
         tt_tracker_message("Pattern cell changed");
@@ -1788,8 +1799,11 @@ static void clear_field(F80Widget *button,void *user) {
     TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*cell=&edited;
     if(tracker.field==0)cell->note=-1;
     else if(tracker.field==1)cell->instrument=-1;
-    else if(tracker.field==2)set_effect(cell,TT_EFFECT_NONE);
-    else if(cell->effect!=TT_EFFECT_NONE)cell->value=0;
+    else {
+        TtPatternEffect *fx=tt_cell_effect(cell,pattern_effect_slot());
+        if(pattern_effect_field())set_effect_slot(cell,pattern_effect_slot(),TT_EFFECT_NONE);
+        else fx->value=-1;
+    }
     edit_cell(tracker.step,tracker.channel,edited);
 }
 static void tt_down(F80Widget *button,void *user) {
@@ -1809,13 +1823,13 @@ static void tt_up(F80Widget *button,void *user) {
 static void use_m(F80Widget *button,void *user) {
     (void)button;(void)user;
     TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
-    set_effect(&edited,TT_EFFECT_M);
+    set_effect_slot(&edited,pattern_effect_slot(),TT_EFFECT_M);
     edit_cell(tracker.step,tracker.channel,edited);
 }
 static void use_s(F80Widget *button,void *user) {
     (void)button;(void)user;
     TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
-    set_effect(&edited,TT_EFFECT_S);
+    set_effect_slot(&edited,pattern_effect_slot(),TT_EFFECT_S);
     edit_cell(tracker.step,tracker.channel,edited);
 }
 static void repeat_above(F80Widget *button,void *user) {
@@ -1823,8 +1837,12 @@ static void repeat_above(F80Widget *button,void *user) {
     if(tracker.step==0)return;
     TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*dst=&edited;
     const TtCell *src=&tracker.pattern.cell[tracker.step-1][tracker.channel];
-    if(tracker.field==2) { dst->effect=src->effect;dst->value=src->value; }
-    else dst->value=src->value;
+    if(tracker.field==0)dst->note=src->note;
+    else if(tracker.field==1)dst->instrument=src->instrument;
+    else {
+        int slot=pattern_effect_slot();
+        *tt_cell_effect(dst,slot)=*tt_cell_effect((TtCell *)src,slot);
+    }
     edit_cell(tracker.step,tracker.channel,edited);
 }
 static void select_transpose(int delta) {
@@ -2266,6 +2284,7 @@ static void handle_key(int key) {
         else advance_pattern_field();
         return;
     }
+    if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.selecting)return;
     if(key==22 && tracker.focus==FOCUS_PHRASE) { /* Ctrl-V */
         handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
         return;
@@ -2397,19 +2416,24 @@ static void handle_key(int key) {
             clear_note_input();
             if(tracker.field==0)entry->note=-1;
             else if(tracker.field==1)entry->instrument=-1;
-            else if(tracker.field==2)set_effect(entry,TT_EFFECT_NONE);
-            else if(entry->effect!=TT_EFFECT_NONE)entry->value=0;
+            else {
+                TtPatternEffect *fx=tt_cell_effect(entry,pattern_effect_slot());
+                if(pattern_effect_field())set_effect_slot(entry,pattern_effect_slot(),TT_EFFECT_NONE);
+                else fx->value=-1;
+            }
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field==1 && digit>=0) {
             entry->instrument=digit;
             edit_cell(tracker.step,tracker.channel,edited);
-        } else if(tracker.field==2 &&
+        } else if(pattern_effect_field() &&
                   strchr("GIJKMNOPRSTVW",key>='a' && key<='z'?key-32:key)) {
-            set_effect(entry,key>='a' && key<='z'?key-32:key);
+            set_effect_slot(entry,pattern_effect_slot(),key>='a' && key<='z'?key-32:key);
             edit_cell(tracker.step,tracker.channel,edited);
-        } else if(tracker.field==3 && digit>=0) {
-            if(entry->effect==TT_EFFECT_NONE)set_effect(entry,TT_EFFECT_S);
-            entry->value=(((entry->value<0?0:entry->value)<<4)&0xf0)|digit;
+        } else if(tracker.field>=3 && tracker.field%2==1 && digit>=0) {
+            TtPatternEffect *fx=tt_cell_effect(entry,pattern_effect_slot());
+            if(fx->command==TT_EFFECT_NONE)set_effect_slot(entry,pattern_effect_slot(),TT_EFFECT_S);
+            fx=tt_cell_effect(entry,pattern_effect_slot());
+            fx->value=(((fx->value<0?0:fx->value)<<4)&0xf0)|digit;
             edit_cell(tracker.step,tracker.channel,edited);
         }
         else if(tracker.field==0) {

@@ -37,6 +37,47 @@ int main(void) {
     assert(pattern_fields_per_channel(0)==6);
     assert(pattern_fields_per_channel(1)==4);
 
+    tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;
+    tracker.pattern.cell[0][1]=tt_cell_empty();
+    tracker.field=2;
+    handle_key('m');
+    assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M);
+    handle_key(' ');handle_key('4');handle_key('2');
+    assert(tracker.pattern.cell[0][1].value==0x42);
+    handle_key(F80_KEY_DELETE);
+    assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M &&
+           tracker.pattern.cell[0][1].value==-1);
+    tracker.playing=0;
+    handle_key(' ');
+    assert(tracker.field==4 && tracker.channel==1 && !tracker.playing);
+    handle_key('m');handle_key(' ');handle_key('4');handle_key('2');
+    assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
+           tracker.pattern.cell[0][1].value2==0x42);
+    handle_key(F80_KEY_DELETE);
+    assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
+           tracker.pattern.cell[0][1].value2==-1);
+    handle_key(' ');
+    assert(tracker.field==6 && tracker.channel==1 && !tracker.playing);
+    handle_key('p');handle_key(' ');handle_key('a');handle_key('f');
+    assert(tracker.pattern.cell[0][1].effect3==TT_EFFECT_P &&
+           tracker.pattern.cell[0][1].value3==0xaf);
+    tracker.field=6;handle_key(F80_KEY_DELETE);
+    assert(tracker.pattern.cell[0][1].effect3==TT_EFFECT_NONE &&
+           tracker.pattern.cell[0][1].effect2==TT_EFFECT_M);
+    tracker.pattern.cell[0][1].note=60;tracker.pattern.cell[0][1].instrument=1;
+    tracker.pattern.cell[0][1].effect3=TT_EFFECT_R;
+    tracker.pattern.cell[0][1].value3=0x80;
+    TtCell selected_before=tracker.pattern.cell[0][1];
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION}));
+    handle_key('G');
+    assert(!memcmp(&tracker.pattern.cell[0][1],&selected_before,sizeof(TtCell)));
+    handle_key('y');
+    assert(!memcmp(&tracker.clipboard[0][0],&selected_before,sizeof(TtCell)));
+    assert(!tracker.visual_selecting && !tracker.selecting);
+    tracker.step=1;tracker.field=0;clear_note_input();
+    handle_key('c');handle_key('-');handle_key('4');
+    assert(tracker.pattern.cell[1][1].note==60);
+
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.sample_count==4 && tracker.song.pattern_count==13 &&

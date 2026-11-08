@@ -35,15 +35,15 @@
 
 ## Input behavior
 
-- [ ] Keep typed note entry (`C-4` / `C#4`) and Space field advancement.
-- [ ] Entering an effect letter sets the current effect slot; typing hexadecimal digits edits its current value slot.
-- [ ] Delete clears only the focused note, instrument, effect/value pair, or value.
-- [ ] Ensure Space on a value expands the next effect pair rather than toggling playback while in the pattern grid.
-- [ ] Ensure visual selection prevents normal cell entry and still performs copy, cut, and paste correctly across all slots.
+- [x] Keep typed note entry (`C-4` / `C#4`) and Space field advancement.
+- [x] Entering an effect letter sets the current effect slot; typing hexadecimal digits edits its current value slot.
+- [x] Delete clears only the focused note, instrument, effect/value pair, or value.
+- [x] Ensure Space on a value expands the next effect pair rather than toggling playback while in the pattern grid.
+- [x] Ensure visual selection prevents normal cell entry and still performs copy, cut, and paste correctly across all slots.
 
 ## Tests and verification
 
-- [ ] Add focused tests for expansion and cursor movement; compaction and slot shifting are covered by edit event tests.
+- [x] Add focused tests for expansion and cursor movement; compaction and slot shifting are covered by edit event tests.
 - [x] Add tests for playback order and multi-effect interaction.
-- [ ] Add serialization compatibility and three-slot round-trip tests.
+- [x] Add serialization compatibility and three-slot round-trip tests.
 - [ ] Run `make test`, `make native`, and `make wasm`.
