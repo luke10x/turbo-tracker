@@ -7,6 +7,7 @@ enum { TT_MARKERS=16, TT_SLICES=15, TT_STEPS=16,
        TT_MAX_STEPS=256, TT_CHANNELS=6,
        TT_MAX_FRAMES=8000000 };
 enum { TT_SLICE_INHERIT=-1000 };
+enum { TT_PATTERN_EFFECTS=3 };
 enum { TT_EFFECT_NONE=0, TT_EFFECT_G='G', TT_EFFECT_I='I',
        TT_EFFECT_J='J', TT_EFFECT_K='K', TT_EFFECT_M='M',
        TT_EFFECT_N='N', TT_EFFECT_O='O', TT_EFFECT_P='P',
@@ -29,6 +30,7 @@ typedef struct {
 } TtPhrase;
 typedef struct {
     int note,instrument,effect,value;
+    int effect2,value2,effect3,value3;
 } TtCell;
 typedef struct {
     TtCell cell[TT_MAX_STEPS][TT_CHANNELS];

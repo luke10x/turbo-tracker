@@ -120,11 +120,13 @@ void tt_phrase_set_reference_note(TtPhrase *phrase,int note) {
 void tt_pattern_init(TtPattern *pattern) {
     const int melody[16]={60,64,67,72,67,64,62,59,60,67,65,62,60,64,67,72};
     for(int row=0;row<TT_MAX_STEPS;++row)for(int channel=0;channel<TT_CHANNELS;++channel)
-        pattern->cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
+        pattern->cell[row][channel]=(TtCell){-1,-1,TT_EFFECT_NONE,-1,
+                                              TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     for(int row=0;row<TT_STEPS;++row)
         pattern->cell[row][0]=(TtCell){melody[row],1,TT_EFFECT_S,
                                            ((row/4)*4<<4)|
-                                           ((row/4)*4+4>15?15:(row/4)*4+4)};
+                                           ((row/4)*4+4>15?15:(row/4)*4+4),
+                                           TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
 }
 void tt_move_marker(TtPhrase *phrase,int frames,int marker,int frame) {
     if(marker<0 || marker>=TT_MARKERS)return;
