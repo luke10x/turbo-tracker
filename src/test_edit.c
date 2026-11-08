@@ -80,6 +80,11 @@ int main(void) {
     e.order.pattern=TT_SONG_PATTERNS;assert(!apply(e));
     e.type=TT_EDIT_ORDER_SWAP;e.order.position=0;e.order.other=1;
     assert(apply(e) && song.order[0]==old_count);
+    e.type=TT_EDIT_ORDER_ACTIVE;e.order.position=0;e.order.pattern=0;
+    assert(apply(e) && !song.order_active[0]);
+    e.order.pattern=2;assert(!apply(e));
+    e.order.position=TT_SONG_ORDER;e.order.pattern=1;assert(!apply(e));
+    e.type=TT_EDIT_ORDER_SWAP;e.order.position=0;e.order.other=1;
     e.order.other=TT_SONG_ORDER;assert(!apply(e));
     e.type=TT_EDIT_ORDER_REMOVE;e.order.position=0;
     assert(apply(e) && song.order_count==old_orders);
@@ -198,6 +203,25 @@ int main(void) {
            !tt_edit_can_undo(history));
     assert(tt_edit_redo(history,&doc));
     assert(song.pattern_count==pattern_before+1 && song.order_count==order_before+1);
+    assert(tt_edit_undo(history,&doc));
+    e=(TtEditEvent){.type=TT_EDIT_ORDER_ACTIVE};
+    e.order.position=0;e.order.pattern=0;
+    int activity_before=song.order_active[0];
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(song.order_active[0]==0);
+    assert(tt_edit_undo(history,&doc) && song.order_active[0]==activity_before);
+    assert(tt_edit_redo(history,&doc) && song.order_active[0]==0);
+    assert(tt_edit_undo(history,&doc));
+    int tail=song.order_count-1,tail_pattern=song.order[tail];
+    song.order_active[tail]=0;
+    int orders_before_append=song.order_count;
+    e=(TtEditEvent){.type=TT_EDIT_ORDER_APPEND};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(song.order_count==orders_before_append+1 &&
+           song.order[orders_before_append]==tail_pattern &&
+           song.order_active[orders_before_append]==0);
+    assert(tt_edit_undo(history,&doc) && song.order_count==orders_before_append);
+    assert(tt_edit_redo(history,&doc) && song.order_active[orders_before_append]==0);
     assert(tt_edit_undo(history,&doc));
     active.cell[0][1]=(TtCell){.effect2=TT_EFFECT_M,.value2=0x20,
                                .effect3=TT_EFFECT_P,.value3=0x40};

@@ -30,6 +30,20 @@ int main(void) {
 
     memset(&tracker,0,sizeof(tracker));
     tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;
+    tracker.app.running=1;tracker.document_dirty=1;
+    handle_key(3); /* Ctrl-C uses the same dirty-exit confirmation. */
+    assert(tracker.app.modal==tracker.exit_dialog && tracker.app.running);
+    handle_key(27);
+    assert(!tracker.app.modal && tracker.app.running);
+    quit(NULL,NULL); /* Menu and status-line actions share this path. */
+    assert(tracker.app.modal==tracker.exit_dialog && tracker.app.running);
+    handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CONFIRM});
+    assert(!tracker.app.running && !tracker.app.modal);
+    tracker.app.running=1;tracker.document_dirty=0;
+    handle_key(2010); /* F10 exits without prompting when clean. */
+    assert(!tracker.app.running);
+    memset(&tracker,0,sizeof(tracker));
+    tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;
     tracker.edit_order=0;tracker.song.order_count=2;tracker.song.order[1]=1;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
         .index=5,.a=0,.b=1}));
@@ -138,11 +152,20 @@ int main(void) {
 
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
-    assert(tracker.sample_count==4 && tracker.song.pattern_count==13 &&
-           tracker.song.order_count==28);
+    assert(tracker.sample_count==4 && tracker.song.pattern_count==18 &&
+           tracker.song.order_count==45);
     assert(tracker.song.bpm==157 && tracker.song.pattern_rows==16 &&
            tracker.song.rows_per_beat==8 && tracker.song.ticks_per_row==12);
-    assert(tracker.song.order[27]==12 && tracker.phrase.marker[1]==3816);
+    assert(tracker.song.order[44]==17 && tracker.phrase.marker[1]==3816);
+    F80Widget manager_dialog={0},manager_bank={0},manager_order={0};
+    tracker.order_dialog=&manager_dialog;tracker.order_bank=&manager_bank;
+    tracker.order_seq=&manager_order;
+    order_refresh();
+    char visible_pattern_name[13];
+    snprintf(visible_pattern_name,sizeof(visible_pattern_name),"%.12s",
+             tracker.song.name[tracker.song.order[0]]);
+    assert(strstr(tracker.order_rows[0],visible_pattern_name));
+    tracker.order_dialog=NULL;tracker.order_bank=NULL;tracker.order_seq=NULL;
     int first=-1,last=-1;
     assert(tt_cell_range(&tracker.phrase,&tracker.song.pattern[0].cell[0][0],
                              tracker.wave.frames,&first,&last));
@@ -162,11 +185,11 @@ int main(void) {
         minute_frames+=tt_play_next_tick_frames(tick_divisor);
     assert(minute_frames==TT_AUDIO_OUTPUT_RATE*60 && tracker.tick_remainder==0);
     table_resize(NULL,(void *)(long)1);
-    assert(tracker.song.table[0].length==32);
+    assert(tracker.song.table[0].length==7);
     for(int i=0;i<20;++i)table_resize(NULL,(void *)(long)1);
-    assert(tracker.song.table[0].length==256);
+    assert(tracker.song.table[0].length==TT_TABLE_MAX_TICKS);
     for(int i=0;i<20;++i)table_resize(NULL,(void *)(long)-1);
-    assert(tracker.song.table[0].length==16);
+    assert(tracker.song.table[0].length==TT_TABLE_MIN_TICKS);
     tracker.song.pattern_count=2;
     tt_pattern_init(&tracker.song.pattern[1]);
     tt_edit_clear_pattern(&tracker.song.pattern[0]);
@@ -177,6 +200,22 @@ int main(void) {
     tracker.song.order[2]=0;
     tracker.pattern=tracker.song.pattern[0];
     tracker.edit_order=0;
+    TtEditDoc navigation_doc=edit_doc();
+    edit_history=tt_edit_history_new(&navigation_doc);assert(edit_history);
+    tracker.step=tracker.song.pattern_rows-1;
+    tracker.pattern_lock=0;tracker.play_order=0;tracker.active_order_index=0;
+    move_pattern_row(1);
+    assert(tracker.pattern_index==1 && tracker.edit_order==1 && tracker.step==0 &&
+           tracker.play_order==0 && tracker.active_order_index==0);
+    tracker.step=tracker.song.pattern_rows-1;
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_LOCK,.a=1});
+    move_pattern_row(1);
+    assert(tracker.pattern_lock && tracker.pattern_index==1 &&
+           tracker.edit_order==1 && tracker.step==tracker.song.pattern_rows-1);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_LOCK,.a=0});
+    handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
+    tracker.step=0;
+    tt_edit_history_free(edit_history);edit_history=NULL;
     tracker.focus=FOCUS_PHRASE;
     tracker.entry_octave=4;
     tracker.step=0;tracker.channel=1;tracker.field=0;
@@ -269,9 +308,11 @@ int main(void) {
     assert(grid_total_rows()==96);
     assert(grid_pattern_for_row(32)==1 && grid_pattern_for_row(64)==0);
     tracker.step=31;handle_key(F80_KEY_DOWN);
-    assert(tracker.step==31);
+    assert(tracker.step==0 && tracker.edit_order==1 && tracker.pattern_index==1 &&
+           tracker.play_order==0);
     assert(tracker.follow==0);
     tracker.song.pattern_rows=16;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
     tracker.step=0;
 
     F80Widget header={0},wave={0},grid={0};
@@ -290,13 +331,14 @@ int main(void) {
     tracker.focus=FOCUS_PHRASE;
     tracker.step=4;
     tracker.follow=1;
-    handle_mouse(10,19,0); /* order 2 is visible, but not editable */
-    assert(tracker.pattern_index==0 && tracker.step==4);
-    assert(tracker.follow==1);
-    assert(!begin_touch_selection(10,19));
+    handle_mouse(10,19,0); /* Mouse selects a visible order without seeking playback. */
+    assert(tracker.pattern_index==1 && tracker.edit_order==1 && tracker.step==0);
+    assert(tracker.follow==0 && tracker.play_order==0);
+    assert(begin_touch_selection(10,19));
+    tracker.selecting=0;
     tracker.phrase_scroll=32;
-    handle_mouse(10,7,0); /* repeated pattern in order 3 is also gray */
-    assert(tracker.pattern_index==0 && tracker.step==4);
+    handle_mouse(10,7,0); /* repeated patterns can be selected at another order */
+    assert(tracker.pattern_index==0 && tracker.edit_order==2 && tracker.step==4);
     tracker.phrase_scroll=0;
     handle_mouse(10,5,0); /* an editable cell is manual navigation */
     assert(tracker.follow==0 && tracker.step==2);
@@ -345,6 +387,7 @@ int main(void) {
     tracker.song.table[0].tick[0].effect[0]=(TtTableEffect){'M',0x33};
     tracker.song.table[0].tick[0].effect[1]=(TtTableEffect){'U',2};
     tracker.song.table[0].tick[1].effect[0]=(TtTableEffect){'X',1};
+    tracker.song.table[0].length=2;
     tt_play_play_row(0);
     assert(tracker.table_voice[0].active && tracker.table_voice[0].table==0);
     tt_play_table_ticks();
@@ -380,6 +423,7 @@ int main(void) {
     table_paste_area();
     assert(tracker.song.table[0].tick[2].effect[0].command=='M');
     assert(tracker.song.table[0].tick[3].effect[0].command=='X');
+    tracker.song.table[0].length=TT_TABLE_MAX_TICKS;
     tracker.play_mode=PLAY_PATTERN;
     tracker.loop_pattern_index=tracker.pattern_index;
     tracker.pattern.cell[0][5]=(TtCell){-1,-1,TT_EFFECT_P,0,
@@ -416,6 +460,44 @@ int main(void) {
     TtEditDoc history_doc=edit_doc();
     edit_history=tt_edit_history_new(&history_doc);
     assert(edit_history);
+    F80Widget order_input={0};
+    order_input.kind=F80_LISTBOX;
+    order_input.range_cursor_pair=F80_PAIR_RANGE_CURSOR;
+    order_input.rect=f80_rect(0,0,12,4);order_input.item_count=tracker.song.order_count;
+    order_input.range_active=1;order_input.range_first=1;order_input.range_last=2;
+    order_input.cursor=1;
+    assert(f80_listbox_row_pair(&order_input,1)==F80_PAIR_RANGE_CURSOR);
+    assert(f80_listbox_row_pair(&order_input,2)==65);
+    assert(f80_listbox_row_pair(&order_input,0)==2);
+    F80Widget *saved_order_list=tracker.order_list;
+    int saved_focus=tracker.focus,saved_mode=tracker.play_mode;
+    tracker.order_list=&order_input;tracker.focus=FOCUS_ORDER;tracker.play_mode=PLAY_SONG;
+    tracker.app.running=1;
+    tracker.order_range_active=0;tracker.order_list->cursor=0;
+    handle_key(22);tt_play_flush();
+    assert(tracker.order_range_active);
+    handle_key(27);tt_play_flush();
+    assert(!tracker.order_range_active && tracker.app.running!=0);
+    handle_key(22);tt_play_flush();
+    assert(tracker.order_range_active);
+    handle_key(22);tt_play_flush();
+    assert(!tracker.order_range_active);
+    tracker.order_list->cursor=1;
+    handle_key(22);tt_play_flush();
+    handle_key(F80_KEY_DOWN);tt_play_flush();
+    assert(tracker.order_range_active && tracker.order_range_anchor==1 &&
+           tracker.order_range_end==2 && tracker.order_list->cursor==2);
+    handle_key(F80_KEY_SHIFT_UP);tt_play_flush();
+    assert(tracker.order_range_active && tracker.order_range_end==1 &&
+           tracker.order_list->cursor==1);
+    handle_key(27);tt_play_flush();
+    assert(!tracker.order_range_active);
+    unsigned char activity_before=tracker.song.order_active[0];
+    begin_order_range(0,0); /* Checkbox click in the panel. */
+    assert(tracker.song.order_active[0]==!activity_before);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.song.order_active[0]==activity_before);
+    tracker.order_list=saved_order_list;tracker.focus=saved_focus;tracker.play_mode=saved_mode;
     tracker.focus=FOCUS_PHRASE;
     tracker.anchor_step=2;tracker.step=3;
     tracker.anchor_channel=0;tracker.channel=1;
@@ -522,13 +604,13 @@ int main(void) {
     order_choice.item_count=orders_before;order_choice.cursor=0;
     tracker.order_list=&order_choice;
     tracker.focus=FOCUS_ORDER;
-    assert(!strcmp(order_status[7].label,"New"));
+    tracker.play_mode=PLAY_SONG;
+    unsigned char was_active=tracker.song.order_active[0];
+    assert(!strcmp(order_status[7].label,"Act"));
     order_status[7].action(NULL,NULL);
-    assert(tracker.song.pattern_count==patterns_before+1 &&
-           tracker.song.order_count==orders_before+1 &&
-           tracker.song.order[orders_before]==patterns_before);
-    assert(tracker.pattern_index==patterns_before && tracker.edit_order==orders_before &&
-           order_choice.cursor==orders_before && tracker.play_order==orders_before);
+    assert(tracker.song.pattern_count==patterns_before &&
+           tracker.song.order_count==orders_before &&
+           tracker.song.order_active[0]==!was_active);
     puts("default song, ordered grid, and playback follow passed");
     return 0;
 }

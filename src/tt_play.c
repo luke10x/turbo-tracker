@@ -25,6 +25,14 @@ static int pattern_is_empty(const TtPattern *pattern) {
         }
     return 1;
 }
+static int next_active_order(int at,int direction) {
+    for(int count=0;count<tracker.song.order_count;++count) {
+        at+=direction;
+        if(at<0 || at>=tracker.song.order_count)return -1;
+        if(tracker.song.order_active[at])return at;
+    }
+    return -1;
+}
 
 static void play_stop_now(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -254,6 +262,19 @@ static void play_start_now(F80Widget *button,void *user) {
     (void)button;(void)user;
     tt_audio_stop();
     tracker.playing=tracker.started=0;
+    if(tracker.play_mode==PLAY_SONG && !tracker.order_range_active) {
+        int at=tracker.order_list?tracker.order_list->cursor:0;
+        if(at<0 || at>=tracker.song.order_count)at=0;
+        if(!tracker.song.order_active[at]) {
+            at=0;
+            while(at<tracker.song.order_count && !tracker.song.order_active[at])++at;
+        }
+        if(at>=tracker.song.order_count) {
+            tt_tracker_message("Activate an order before playing the song");
+            return;
+        }
+        tracker.play_order=at;
+    }
     if(!tt_audio_begin_song()) {
         tt_tracker_message("Audio unavailable: check the output device or browser permission");
         return;
@@ -326,10 +347,16 @@ static void advance_playback_now(void) {
                         int last=tracker.order_range_anchor>tracker.order_range_end?
                             tracker.order_range_anchor:tracker.order_range_end;
                         if(++tracker.play_order>last)tracker.play_order=first;
-                    } else if(tracker.play_mode==PLAY_SONG &&
-                              ++tracker.play_order>=tracker.song.order_count) {
-                        if(tracker.loop)tracker.play_order=0;
-                        else tracker.song_finished=1;
+                    } else if(tracker.play_mode==PLAY_SONG) {
+                        int next=next_active_order(tracker.play_order,1);
+                        if(next<0 && tracker.loop) {
+                            next=0;
+                            while(next<tracker.song.order_count &&
+                                  !tracker.song.order_active[next])++next;
+                            if(next>=tracker.song.order_count)next=-1;
+                        }
+                        if(next<0)tracker.song_finished=1;
+                        else tracker.play_order=next;
                     }
                 }
             }
@@ -389,6 +416,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_TOGGLE_FOLLOW:name="toggle follow";break;
     case TT_PLAY_SELECT_ORDER:name="seek order";break;
     case TT_PLAY_SET_ORDER_RANGE:name="order range";break;
+    case TT_PLAY_CLEAR_ORDER_RANGE:name="clear order range";break;
     case TT_PLAY_AUDITION:name="audition";break;
     case TT_PLAY_AUDITION_CELL:name="audition cell";break;
     case TT_PLAY_ROW_PLAYED:name="row played";break;
@@ -422,11 +450,11 @@ void tt_play_flush(void) {
         case TT_PLAY_TOGGLE:play_toggle_now(NULL,NULL);break;
         case TT_PLAY_SET_MODE:
             tracker.play_mode=event.a;
-            if(event.a==PLAY_SONG)tracker.order_range_active=0;
+            tracker.order_range_active=0;
             play_start_now(NULL,NULL);break;
         case TT_PLAY_TOGGLE_MODE:
             tracker.play_mode=tracker.play_mode==PLAY_SONG?PLAY_PATTERN:PLAY_SONG;
-            if(tracker.play_mode==PLAY_SONG)tracker.order_range_active=0;
+            tracker.order_range_active=0;
             play_start_now(NULL,NULL);break;
         case TT_PLAY_TOGGLE_LOOP:
             tracker.loop=!tracker.loop;
@@ -439,7 +467,18 @@ void tt_play_flush(void) {
             if(at<0 || at>=tracker.song.order_count)break;
             tracker.order_range_active=0;
             tracker.play_mode=PLAY_SONG;
-            if(tracker.playing)play_start_now(NULL,NULL);
+            if(tracker.playing) {
+                if(!tracker.song.order_active[at]) {
+                    int next=next_active_order(at,1);
+                    if(next<0) {
+                        next=tracker.song.order_count-1;
+                        while(next>=0 && !tracker.song.order_active[next])--next;
+                    }
+                    if(next<0) { tracker.song_finished=1;break; }
+                    at=next;
+                }
+                play_start_now(NULL,NULL);
+            }
             tracker.play_order=at;tracker.play_step=0;
             tracker.active_order_index=at;
             tracker.active_pattern_index=tracker.song.order[at];
@@ -455,7 +494,6 @@ void tt_play_flush(void) {
             tracker.order_range_active=1;
             tracker.order_range_anchor=event.a;
             tracker.order_range_end=event.b;
-            tracker.play_mode=PLAY_PATTERN;
             if(event.c && tracker.playing)play_start_now(NULL,NULL);
             int first=event.a<event.b?event.a:event.b;
             int last=event.a>event.b?event.a:event.b;
@@ -467,6 +505,9 @@ void tt_play_flush(void) {
             }
             break;
         }
+        case TT_PLAY_CLEAR_ORDER_RANGE:
+            tracker.order_range_active=0;
+            break;
         case TT_PLAY_AUDITION:play_audition_now(NULL,NULL);break;
         case TT_PLAY_AUDITION_CELL:play_audition_cell_now(event.a,event.b);break;
         case TT_PLAY_ROW_PLAYED:

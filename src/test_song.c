@@ -7,6 +7,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static void strip_order_activity(char *record) {
+    if(!strncmp(record,"AT\t",3)) {
+        char *last=strrchr(record,'\t');assert(last);*last='\n';last[1]=0;
+    }
+}
+
 int main(void) {
     char path[]="/tmp/f80-song-XXXXXX",error[192];
     int fd=mkstemp(path);assert(fd>=0);close(fd);
@@ -40,6 +46,7 @@ int main(void) {
     song.table[0].tick[3].effect[2]=(TtTableEffect){'R',0xc0};
     song.table[0].tick[4].effect[0]=(TtTableEffect){'r',0x02};
     song.order_count=3;song.order[0]=0;song.order[1]=1;song.order[2]=0;
+    song.order_active[0]=1;song.order_active[1]=0;song.order_active[2]=1;
     TtSongSample sample[8]={0},readback[8]={0};
     snprintf(sample[0].name,sizeof(sample[0].name),"Kick & Snare");
     snprintf(sample[0].source_name,sizeof(sample[0].source_name),"break.wav");
@@ -53,6 +60,7 @@ int main(void) {
     assert(loaded.pattern_rows==16 && loaded.rows_per_beat==4 &&
            loaded.ticks_per_row==12);
     assert(loaded.order_count==3 && loaded.order[2]==0);
+    assert(loaded.order_active[0] && !loaded.order_active[1] && loaded.order_active[2]);
     assert(!strcmp(loaded.name[1],"Fill % B"));
     assert(!memcmp(&loaded.pattern[1],&song.pattern[1],sizeof(TtPattern)));
     assert(!memcmp(&loaded.table,&song.table,sizeof(song.table)));
@@ -69,6 +77,7 @@ int main(void) {
         if(!strncmp(record,"TABLES\t",7))break;
         if(!strncmp(record,"ROWS\t",5) || !strncmp(record,"BEAT_ROWS\t",10) ||
            !strncmp(record,"TICKS\t",6))continue;
+        strip_order_activity(record);
         assert(fputs(record,legacy)>=0);
     }
     assert(fputs("END\n",legacy)>=0);
@@ -91,6 +100,7 @@ int main(void) {
         if(!strncmp(record,"TABLE\t",6)) {
             char *name=strrchr(record,'\t');assert(name);*name='\n';name[1]=0;
         }
+        strip_order_activity(record);
         assert(fputs(record,v2)>=0);
     }
     assert(!fclose(modern) && !fclose(v2));
@@ -108,6 +118,7 @@ int main(void) {
     while(fgets(record,sizeof(record),modern)) {
         char *fx=strstr(record,"\tRC0");if(fx)fx[1]='~';
         fx=strstr(record,"\tr02");if(fx)fx[1]='R';
+        strip_order_activity(record);
         assert(fputs(record,v4)>=0);
     }
     assert(!fclose(modern) && !fclose(v4));

@@ -68,6 +68,7 @@ static int apply_pattern_append_order(TtEditDoc *doc) {
     int index=doc->song->pattern_count;
     if(!apply_pattern_new(doc))return 0;
     doc->song->order[doc->song->order_count++]=(unsigned char)index;
+    doc->song->order_active[doc->song->order_count-1]=1;
     return 1;
 }
 static int apply_pattern_rename(TtEditDoc *doc,const TtEditPattern *e) {
@@ -124,7 +125,10 @@ static int apply_order_insert(TtEditDoc *doc,const TtEditOrder *e) {
     int at=e->position;
     if(at<0 || at>song->order_count)at=song->order_count;
     memmove(song->order+at+1,song->order+at,(size_t)(song->order_count-at));
+    memmove(song->order_active+at+1,song->order_active+at,
+            (size_t)(song->order_count-at));
     song->order[at]=(unsigned char)e->pattern;
+    song->order_active[at]=1;
     ++song->order_count;
     return 1;
 }
@@ -134,6 +138,8 @@ static int apply_order_remove(TtEditDoc *doc,const TtEditOrder *e) {
     int at=e->position;
     if(at<0 || at>=song->order_count) { reject(doc,"Order entry out of range");return 0; }
     memmove(song->order+at,song->order+at+1,(size_t)(song->order_count-at-1));
+    memmove(song->order_active+at,song->order_active+at+1,
+            (size_t)(song->order_count-at-1));
     --song->order_count;
     return 1;
 }
@@ -144,6 +150,31 @@ static int apply_order_swap(TtEditDoc *doc,const TtEditOrder *e) {
         reject(doc,"Order entry out of range");return 0;
     }
     unsigned char temp=song->order[a];song->order[a]=song->order[b];song->order[b]=temp;
+    temp=song->order_active[a];song->order_active[a]=song->order_active[b];song->order_active[b]=temp;
+    return 1;
+}
+static int apply_order_active(TtEditDoc *doc,const TtEditOrder *e) {
+    if(e->position<0 || e->position>=doc->song->order_count ||
+       (e->pattern!=0 && e->pattern!=1)) {
+        reject(doc,"Order activity out of range");return 0;
+    }
+    doc->song->order_active[e->position]=(unsigned char)e->pattern;
+    return 1;
+}
+static int apply_order_pattern(TtEditDoc *doc,const TtEditOrder *e) {
+    if(e->position<0 || e->position>=doc->song->order_count ||
+       e->pattern<0 || e->pattern>=doc->song->pattern_count) {
+        reject(doc,"Order or pattern out of range");return 0;
+    }
+    doc->song->order[e->position]=(unsigned char)e->pattern;
+    return 1;
+}
+static int apply_order_append(TtEditDoc *doc) {
+    TtSong *song=doc->song;
+    if(song->order_count>=TT_SONG_ORDER) { reject(doc,"Order is full");return 0; }
+    int at=song->order_count++;
+    song->order[at]=song->order[at-1];
+    song->order_active[at]=song->order_active[at-1];
     return 1;
 }
 static int apply_settings(TtEditDoc *doc,const TtEditSettings *e) {
@@ -415,6 +446,12 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_order_remove(doc,&event->order);
     case TT_EDIT_ORDER_SWAP:
         return apply_order_swap(doc,&event->order);
+    case TT_EDIT_ORDER_ACTIVE:
+        return apply_order_active(doc,&event->order);
+    case TT_EDIT_ORDER_PATTERN:
+        return apply_order_pattern(doc,&event->order);
+    case TT_EDIT_ORDER_APPEND:
+        return apply_order_append(doc);
     case TT_EDIT_BPM:
         doc->song->bpm=clamp(event->bpm,30,300);
         return 1;

@@ -28,6 +28,7 @@ typedef struct {
     F80Widget *root,*header_gap,*console,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
+    F80Widget *pattern_lock_button;
     F80Widget *progress,*bpm_label,*details,*status;
     int focus,marker,zoom,view_start,step,channel,field,entry_octave;
     int note_input_length;
@@ -38,6 +39,8 @@ typedef struct {
     int compact_editing,effect_slots[TT_CHANNELS];
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
+    int pattern_lock;
+    int document_dirty;
     int order_range_active,order_range_anchor,order_range_end;
     int grid_selection_anchor,grid_selection_end,grid_selection_invalid;
     int inline_table_open,inline_table_index,inline_table_parent,inline_table_channel;
@@ -68,9 +71,10 @@ typedef struct {
     F80Widget *order_dialog,*order_bank_label,*order_bank_bg,*order_bank;
     F80Widget *order_seq_label,*order_seq_bg,*order_seq,*order_name;
     F80Widget *settings_dialog,*settings_label[5],*settings_input[5];
+    F80Widget *exit_dialog;
     F80Widget *settings_apply,*settings_close;
     char bank_rows[TT_SONG_PATTERNS][100],order_rows[TT_SONG_ORDER][100];
-    char order_panel_rows[TT_SONG_ORDER][8];
+    char order_panel_rows[TT_SONG_ORDER][96];
     char order_heading[64];
     const char *bank_items[TT_SONG_PATTERNS],*order_items[TT_SONG_ORDER];
     const char *order_panel_items[TT_SONG_ORDER];

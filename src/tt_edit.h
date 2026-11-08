@@ -40,6 +40,9 @@ typedef enum {
     TT_EDIT_ORDER_INSERT,       /* insert a pattern into the play order */
     TT_EDIT_ORDER_REMOVE,       /* remove a play-order entry */
     TT_EDIT_ORDER_SWAP,         /* swap two play-order entries */
+    TT_EDIT_ORDER_ACTIVE,       /* activate or deactivate one play-order entry */
+    TT_EDIT_ORDER_PATTERN,      /* replace one order's pattern reference */
+    TT_EDIT_ORDER_APPEND,       /* append a copy of the final order entry */
     TT_EDIT_BPM,                /* set song BPM (clamped 30..300) */
     TT_EDIT_SETTINGS,           /* set BPM, rows, rows per beat, ticks per row */
     TT_EDIT_TABLE_TICK_SET,     /* overwrite one table tick exactly */

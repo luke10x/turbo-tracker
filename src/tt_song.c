@@ -15,7 +15,7 @@ void tt_song_init(TtSong *song) {
     song->bpm=120;song->pattern_rows=TT_STEPS;
     song->rows_per_beat=4;
     song->ticks_per_row=TT_TICKS_PER_ROW;
-    song->pattern_count=1;song->order_count=1;
+    song->pattern_count=1;song->order_count=1;song->order_active[0]=1;
     for(int pattern=0;pattern<TT_SONG_PATTERNS;++pattern)
         for(int row=0;row<TT_MAX_STEPS;++row)
             for(int channel=0;channel<TT_CHANNELS;++channel)
@@ -41,6 +41,7 @@ void tt_song_make_demo(TtSong *song) {
     song->order_count=4;
     song->order[0]=0;song->order[1]=2;
     song->order[2]=1;song->order[3]=3;
+    for(int i=0;i<song->order_count;++i)song->order_active[i]=1;
     const char *names[]={"tgndshtn part 1","tgndshtn part 2",
                          "tgndshtn part 3","tgndshtn part 4"};
     for(int pattern=0;pattern<4;++pattern) {
@@ -199,7 +200,7 @@ int tt_song_save(const char *path,const TtSong *song,
     }
     FILE *file=fopen(path,"w");
     if(!file) { snprintf(error,error_size,"Cannot save song: %s",strerror(errno));return 0; }
-    fprintf(file,"F80_SAMPLE_SONG\t5\nBPM\t%d\nROWS\t%d\nBEAT_ROWS\t%d\nTICKS\t%d\nSAMPLES\t%d\n",
+    fprintf(file,"F80_SAMPLE_SONG\t6\nBPM\t%d\nROWS\t%d\nBEAT_ROWS\t%d\nTICKS\t%d\nSAMPLES\t%d\n",
             song->bpm,song->pattern_rows,song->rows_per_beat,
             song->ticks_per_row,sample_count);
     int valid=1;
@@ -231,7 +232,8 @@ int tt_song_save(const char *path,const TtSong *song,
     fprintf(file,"ORDER\t%d\n",song->order_count);
     for(int i=0;i<song->order_count;++i) {
         if(song->order[i]>=song->pattern_count)valid=0;
-        fprintf(file,"AT\t%d\t%d\n",i,song->order[i]);
+        fprintf(file,"AT\t%d\t%d\t%d\n",i,song->order[i],
+                song->order_active[i]?1:0);
     }
     fprintf(file,"TABLES\t%d\n",TT_SONG_TABLES);
     for(int table=0;table<TT_SONG_TABLES;++table) {
@@ -286,6 +288,7 @@ int tt_song_load(const char *path,TtSong *song,
     else if(!strcmp(field[1],"3"))version=3;
     else if(!strcmp(field[1],"4"))version=4;
     else if(!strcmp(field[1],"5"))version=5;
+    else if(!strcmp(field[1],"6"))version=6;
     else valid=0;
     next->pattern_rows=TT_STEPS;
     next->rows_per_beat=4;
@@ -348,10 +351,16 @@ int tt_song_load(const char *path,TtSong *song,
     if(valid && (!READ(2) || strcmp(field[0],"ORDER") ||
                  !integer(field[1],1,TT_SONG_ORDER,&next->order_count)))valid=0;
     for(int i=0;i<next->order_count && valid;++i) {
-        if(!READ(3) || strcmp(field[0],"AT") ||
+        int fields_needed=version>=6?4:3;
+        if(!READ(fields_needed) || strcmp(field[0],"AT") ||
            !integer(field[1],i,i,&number) ||
            !integer(field[2],0,next->pattern_count-1,&number))valid=0;
-        else next->order[i]=(unsigned char)number;
+        else {
+            next->order[i]=(unsigned char)number;
+            next->order_active[i]=1;
+            if(version>=6 && !integer(field[3],0,1,&number))valid=0;
+            else if(version>=6)next->order_active[i]=(unsigned char)number;
+        }
     }
     for(int table=0;table<TT_SONG_TABLES;++table) {
         snprintf(next->table[table].name,TT_SONG_NAME,"Table %02X",table);

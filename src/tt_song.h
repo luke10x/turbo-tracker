@@ -26,6 +26,7 @@ typedef struct {
     char name[TT_SONG_PATTERNS][TT_SONG_NAME];
     int pattern_count;
     unsigned char order[TT_SONG_ORDER];
+    unsigned char order_active[TT_SONG_ORDER];
     int order_count,bpm,pattern_rows,rows_per_beat,ticks_per_row;
     TtTable table[TT_SONG_TABLES];
 } TtSong;

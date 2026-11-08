@@ -14,6 +14,7 @@ typedef enum { F80_WINDOW_INHERIT, F80_WINDOW_BLUE, F80_WINDOW_CYAN,
                F80_WINDOW_GRAY, F80_WINDOW_CONSOLE, F80_WINDOW_PURPLE,
                F80_WINDOW_ROLE_COUNT } F80WindowRole;
 enum { F80_PALETTE_SLOTS = 31 };
+enum { F80_PAIR_RANGE_CURSOR = 67 }; /* blue foreground on yellow selection */
 typedef enum {
     F80_COLOR_PANEL=1, F80_COLOR_TEXT, F80_COLOR_SELECTION,
     F80_COLOR_HIGHLIGHT, F80_COLOR_BUTTON, F80_COLOR_STATUS,
@@ -73,6 +74,7 @@ struct F80Widget {
     int item_count, cursor, scroll;
     int scroll_detached; /* allow list viewport to move without moving its cursor */
     int range_active,range_first,range_last; /* optional highlighted list rows */
+    int range_cursor_pair; /* optional foreground/background for selected row in a range */
     int selected; /* radio-group selection; -1 when the group is empty */
     unsigned char *checked; /* owned checkbox state, one entry per item */
     int gutter_width; /* optional line-number gutter for list/table content */
@@ -169,6 +171,7 @@ void f80_free(F80Widget *widget);
 void f80_fit_size(F80Widget *widget, int *width, int *height);
 void f80_layout(F80Widget *widget, F80Rect rect);
 void f80_draw(F80Widget *widget);
+int f80_listbox_row_pair(const F80Widget *widget,int row);
 void f80_draw_screen(F80App *app);
 void f80_focus_next(F80App *app, int step);
 int f80_key(F80App *app, int key);
