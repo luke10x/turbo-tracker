@@ -20,7 +20,7 @@ void tt_song_init(TtSong *song) {
         for(int row=0;row<TT_MAX_STEPS;++row)
             for(int channel=0;channel<TT_CHANNELS;++channel)
                 song->pattern[pattern].cell[row][channel]=
-                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
+                    tt_cell_empty();
     snprintf(song->name[0],TT_SONG_NAME,"Pattern 00");
     tt_pattern_init(&song->pattern[0]);
     for(int table=0;table<TT_SONG_TABLES;++table) {
@@ -48,9 +48,9 @@ void tt_song_make_demo(TtSong *song) {
         for(int row=0;row<TT_STEPS;++row)
             for(int channel=0;channel<TT_CHANNELS;++channel)
                 song->pattern[pattern].cell[row][channel]=
-                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
+                    tt_cell_empty();
         song->pattern[pattern].cell[0][0]=
-            (TtCell){60,pattern+1,TT_EFFECT_NONE,-1};
+            (TtCell){60,pattern+1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     }
     TtTableTick *demo=&song->table[0].tick[0];
     demo->note=60;demo->instrument=1;
@@ -326,7 +326,7 @@ int tt_song_load(const char *path,TtSong *song,
         for(int row=0;row<TT_MAX_STEPS;++row)
             for(int channel=0;channel<TT_CHANNELS;++channel)
                 next->pattern[i].cell[row][channel]=
-                    (TtCell){-1,-1,TT_EFFECT_NONE,-1};
+                    tt_cell_empty();
         if(!READ(3) || strcmp(field[0],"PATTERN") ||
            !integer(field[1],i,i,&number) ||
            !decode(field[2],next->name[i],TT_SONG_NAME) || !next->name[i][0])valid=0;

@@ -169,7 +169,8 @@ void tt_play_table_ticks(void) {
             } else { voice->active=0;continue; }
         }
         const TtTableTick *entry=&table->tick[voice->tick++];
-        TtCell note={entry->note,entry->instrument,TT_EFFECT_NONE,-1};
+        TtCell note={entry->note,entry->instrument,TT_EFFECT_NONE,-1,
+                     TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
         int delay=0,glide_rate=0,jump_table=-1,jump_tick=-1;
         for(int fx=0;fx<TT_TABLE_EFFECTS;++fx) {
             const TtTableEffect *effect=&entry->effect[fx];

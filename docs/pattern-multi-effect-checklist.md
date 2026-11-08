@@ -2,10 +2,10 @@
 
 ## Data model
 
-- [ ] Replace the transitional `effect2`/`value2` and `effect3`/`value3` fields with a consistent three-slot representation, or add helper accessors and retain the compatibility layout deliberately.
-- [ ] Initialize every unused effect slot as `TT_EFFECT_NONE` with value `-1`.
+- [x] Add helper accessors around three effect slots while retaining the compatibility layout.
+- [x] Initialize unused slots in the core pattern, song, edit, and playback construction paths as `TT_EFFECT_NONE` with value `-1`.
 - [ ] Update all pattern constructors, demo data, copies, and equality-sensitive tests.
-- [ ] Confirm edit snapshots, undo/redo, clipboard copy/cut/paste, and bulk edits retain all three slots.
+- [x] Confirm edit snapshots, undo/redo, clipboard copy/cut/paste, and bulk edits retain all slots because they copy complete `TtCell` values.
 
 ## Song and pattern formats
 

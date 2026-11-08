@@ -15,6 +15,8 @@ enum { TT_EFFECT_NONE=0, TT_EFFECT_G='G', TT_EFFECT_I='I',
        TT_EFFECT_V='V', TT_EFFECT_W='W',
        TT_EFFECT_STRETCH='R', TT_EFFECT_LEGACY_RETRIGGER='r' };
 
+typedef struct { int command,value; } TtPatternEffect;
+
 typedef struct { float low,high; } TtPeak;
 typedef struct {
     float *pcm;
@@ -32,6 +34,18 @@ typedef struct {
     int note,instrument,effect,value;
     int effect2,value2,effect3,value3;
 } TtCell;
+
+static inline TtPatternEffect *tt_cell_effect(TtCell *cell,int slot) {
+    return slot==0?(TtPatternEffect *)&cell->effect:
+           slot==1?(TtPatternEffect *)&cell->effect2:
+           slot==2?(TtPatternEffect *)&cell->effect3:NULL;
+}
+static inline const TtPatternEffect *tt_cell_effect_const(const TtCell *cell,int slot) {
+    return tt_cell_effect((TtCell *)cell,slot);
+}
+static inline TtCell tt_cell_empty(void) {
+    return (TtCell){-1,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+}
 typedef struct {
     TtCell cell[TT_MAX_STEPS][TT_CHANNELS];
 } TtPattern;

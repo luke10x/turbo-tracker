@@ -10,7 +10,7 @@ static int clamp(int value,int low,int high) {
     return value<low?low:value>high?high:value;
 }
 static void clear_cell(TtCell *cell) {
-    *cell=(TtCell){-1,-1,TT_EFFECT_NONE,-1};
+    *cell=tt_cell_empty();
 }
 static int apply_cell_set(TtEditDoc *doc,const TtEditCellSet *e) {
     if(e->row<0 || e->row>=TT_MAX_STEPS || e->channel<0 || e->channel>=TT_CHANNELS) {
