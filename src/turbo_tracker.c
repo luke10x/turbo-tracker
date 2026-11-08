@@ -3540,12 +3540,11 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
 }
 static void native_mouse_event(void) {
     MEVENT event;
-    if(getmouse(&event)==OK) {
-        native_mouse_event_at(event.x,event.y,event.bstate);
-        return;
-    }
-    /* Older system ncurses only decodes the legacy mouse format. In SGR mode
-       define_key maps ESC[< to KEY_MOUSE; read its decimal payload here. */
+    if(getmouse(&event)==OK)native_mouse_event_at(event.x,event.y,event.bstate);
+}
+static void native_sgr_mouse_event(void) {
+    /* Keep this separate from KEY_MOUSE so ncurses retains its legacy mouse
+       sequence while older macOS ncurses decodes SGR reports here. */
     char payload[64];size_t length=0;int ending=0;
     while(length+1<sizeof(payload)) {
         int key=getch();
@@ -3791,7 +3790,11 @@ static int frame(void *user) {
         int x,y,wheel;
         if(f80_curses_mouse(&x,&y,&wheel)==OK)handle_mouse(x,y,wheel);
 #endif
-    } else if(key!=ERR)handle_key(f80_curses_key(key));
+    }
+#ifndef __EMSCRIPTEN__
+    else if(key==KEY_F(64))native_sgr_mouse_event();
+#endif
+    else if(key!=ERR)handle_key(f80_curses_key(key));
     return 1;
 }
 static int load_default_song(const char *executable) {
@@ -3880,7 +3883,7 @@ int main(int argc,char **argv) {
     define_key("\033[1;2C",KEY_SRIGHT);
     define_key("\033[1;2A",KEY_F(62));
     define_key("\033[1;2B",KEY_F(63));
-    define_key("\033[<",KEY_MOUSE);
+    define_key("\033[<",KEY_F(64));
 #endif
 #ifdef REPORT_MOUSE_POSITION
     mousemask(ALL_MOUSE_EVENTS|REPORT_MOUSE_POSITION,NULL);
