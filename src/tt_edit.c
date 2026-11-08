@@ -150,7 +150,8 @@ static int apply_settings(TtEditDoc *doc,const TtEditSettings *e) {
     TtSong *song=doc->song;
     if(e->bpm<30 || e->bpm>300 || e->pattern_rows<16 || e->pattern_rows>TT_MAX_STEPS ||
        e->pattern_rows%16 || e->rows_per_beat<1 || e->rows_per_beat>16 ||
-       e->ticks_per_row<1 || e->ticks_per_row>TT_MAX_TICKS_PER_ROW) {
+       e->ticks_per_row<1 || e->ticks_per_row>TT_MAX_TICKS_PER_ROW ||
+       e->table_length<TT_TABLE_MIN_TICKS || e->table_length>TT_TABLE_MAX_TICKS) {
         reject(doc,"Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48");
         return 0;
     }
@@ -168,6 +169,8 @@ static int apply_settings(TtEditDoc *doc,const TtEditSettings *e) {
     song->pattern_rows=e->pattern_rows;
     song->rows_per_beat=e->rows_per_beat;
     song->ticks_per_row=e->ticks_per_row;
+    for(int table=0;table<TT_SONG_TABLES;++table)
+        song->table[table].length=e->table_length;
     return 1;
 }
 
@@ -210,7 +213,9 @@ static int apply_table_ticks_bulk(TtEditDoc *doc,const TtEditTableTicksBulk *e) 
 }
 static int apply_table_length(TtEditDoc *doc,const TtEditTable *e) {
     if(!table_ok(doc,e->table))return 0;
-    doc->song->table[e->table].length=clamp(e->length,TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS);
+    int length=clamp(e->length,TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS);
+    for(int table=0;table<TT_SONG_TABLES;++table)
+        doc->song->table[table].length=length;
     return 1;
 }
 static int apply_table_name(TtEditDoc *doc,const TtEditTable *e) {

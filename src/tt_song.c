@@ -25,7 +25,7 @@ void tt_song_init(TtSong *song) {
     tt_pattern_init(&song->pattern[0]);
     for(int table=0;table<TT_SONG_TABLES;++table) {
         snprintf(song->table[table].name,TT_SONG_NAME,"Table %02X",table);
-        song->table[table].length=TT_TABLE_MIN_TICKS;
+        song->table[table].length=TT_TABLE_DEFAULT_TICKS;
         for(int tick=0;tick<TT_TABLE_MAX_TICKS;++tick) {
             song->table[table].tick[tick].note=-1;
             song->table[table].tick[tick].instrument=-1;
@@ -52,6 +52,15 @@ void tt_song_make_demo(TtSong *song) {
         song->pattern[pattern].cell[0][0]=
             (TtCell){60,pattern+1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     }
+    song->pattern[2].cell[0][0].effect2=TT_EFFECT_T;
+    song->pattern[2].cell[0][0].value2=5;
+    snprintf(song->table[5].name,TT_SONG_NAME,"Demo table");
+    song->table[5].tick[0].note=60;song->table[5].tick[0].instrument=1;
+    song->table[5].tick[1].note=64;song->table[5].tick[1].instrument=1;
+    song->table[5].tick[2].note=67;song->table[5].tick[2].instrument=1;
+    song->table[5].tick[3].note=64;song->table[5].tick[3].instrument=1;
+    song->table[5].tick[4].note=62;song->table[5].tick[4].instrument=1;
+    song->table[5].tick[5].note=60;song->table[5].tick[5].instrument=1;
     TtTableTick *demo=&song->table[0].tick[0];
     demo->note=60;demo->instrument=1;
     demo->effect[0]=(TtTableEffect){'M',0x33};
@@ -60,7 +69,7 @@ void tt_song_make_demo(TtSong *song) {
     song->table[0].tick[1].effect[0]=(TtTableEffect){'V',0x43};
     song->table[0].tick[1].effect[1]=(TtTableEffect){'W',0x34};
     song->table[0].tick[1].effect[2]=(TtTableEffect){'N',0x37};
-    demo=&song->table[0].tick[8];
+    demo=&song->table[0].tick[5];
     demo->note=64;demo->instrument=1;
     demo->effect[0]=(TtTableEffect){'S',0xfa};
 }
@@ -230,7 +239,7 @@ int tt_song_save(const char *path,const TtSong *song,
         char name[3*TT_SONG_NAME];
         if(!t->name[0] || !encode(t->name,name,sizeof(name)))valid=0;
         if(t->length<TT_TABLE_MIN_TICKS || t->length>TT_TABLE_MAX_TICKS ||
-           t->length%TT_TABLE_MIN_TICKS)valid=0;
+           t->length!=song->table[0].length)valid=0;
         fprintf(file,"TABLE\t%d\t%d\t%s\n",table,t->length,valid?name:"");
         for(int tick=0;tick<t->length && tick<TT_TABLE_MAX_TICKS;++tick) {
             const TtTableTick *entry=&song->table[table].tick[tick];
@@ -346,7 +355,7 @@ int tt_song_load(const char *path,TtSong *song,
     }
     for(int table=0;table<TT_SONG_TABLES;++table) {
         snprintf(next->table[table].name,TT_SONG_NAME,"Table %02X",table);
-        next->table[table].length=TT_TABLE_MIN_TICKS;
+        next->table[table].length=TT_TABLE_DEFAULT_TICKS;
         for(int tick=0;tick<TT_TABLE_MAX_TICKS;++tick) {
             next->table[table].tick[tick].note=-1;
             next->table[table].tick[tick].instrument=-1;
@@ -361,15 +370,23 @@ int tt_song_load(const char *path,TtSong *song,
             int length=0;
             if(!READ(version>=3?4:3) || strcmp(field[0],"TABLE") ||
                !integer(field[1],table,table,&number) ||
-               !integer(field[2],TT_TABLE_MIN_TICKS,TT_TABLE_MAX_TICKS,&length) ||
-               length%TT_TABLE_MIN_TICKS) { valid=0;break; }
+               !integer(field[2],TT_TABLE_MIN_TICKS,TT_TABLE_LEGACY_MAX_TICKS,&length)) {
+                valid=0;break;
+            }
             if(version>=3 && (!decode(field[3],next->table[table].name,
                                       TT_SONG_NAME) || !next->table[table].name[0])) {
                 valid=0;break;
             }
-            next->table[table].length=length;
+            next->table[table].length=length>TT_TABLE_MAX_TICKS?
+                TT_TABLE_MAX_TICKS:length;
+            if(table==0)for(int other=1;other<TT_SONG_TABLES;++other)
+                next->table[other].length=next->table[0].length;
             for(int tick=0;tick<length && valid;++tick) {
-                TtTableTick *entry=&next->table[table].tick[tick];
+                TtTableTick parsed={.note=-1,.instrument=-1};
+                for(int effect=0;effect<TT_TABLE_EFFECTS;++effect)
+                    parsed.effect[effect].value=-1;
+                TtTableTick *entry=tick<TT_TABLE_MAX_TICKS?
+                    &next->table[table].tick[tick]:&parsed;
                 if(!READ(10) || strcmp(field[0],"TICK") ||
                    !integer(field[1],tick,tick,&number) ||
                    !integer(field[2],-1,127,&entry->note) ||
@@ -396,6 +413,8 @@ int tt_song_load(const char *path,TtSong *song,
             }
         }
     }
+    if(valid && version>=2)for(int table=0;table<TT_SONG_TABLES;++table)
+        next->table[table].length=next->table[0].length;
     if(valid && (!READ(1) || strcmp(field[0],"END") || fgetc(file)!=EOF))valid=0;
     if(ferror(file))valid=0;
     fclose(file);

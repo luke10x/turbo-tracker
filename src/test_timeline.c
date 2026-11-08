@@ -21,14 +21,67 @@ int main(void) {
     }
     assert(memcmp(&demo.pattern[0],&demo.pattern[1],sizeof(TtPattern))!=0);
     assert(memcmp(&demo.pattern[1],&demo.pattern[2],sizeof(TtPattern))!=0);
-    assert(demo.table[0].length==16);
+    assert(demo.table[0].length==TT_TABLE_DEFAULT_TICKS);
     assert(demo.table[0].tick[0].effect[0].command=='M');
     assert(demo.table[0].tick[1].effect[0].command=='V' &&
-           demo.table[0].tick[8].effect[0].value==0xfa);
+           demo.table[0].tick[5].effect[0].value==0xfa);
+    assert(demo.table[5].length==6);
+    assert(inline_table_row_width()==42);
 
     memset(&tracker,0,sizeof(tracker));
     tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;
     tracker.edit_order=0;tracker.song.order_count=2;tracker.song.order[1]=1;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=1}));
+    assert(tracker.inline_table_open && tracker.inline_table_index==5);
+    assert(pattern_fields_per_channel(1)==4);
+    assert(grid_total_rows()==grid_base_total_rows()+6);
+    int inline_tick=-1;
+    assert(grid_is_inline_table_row(1,&inline_tick) && inline_tick==0);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=5,.b=13}));
+    assert(tracker.inline_table_selected && tracker.inline_table_tick==5 &&
+           tracker.inline_table_field==13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=3,.a=0,.b=2}));
+    assert(tracker.inline_table_open && tracker.inline_table_index==3 &&
+           tracker.inline_table_channel==2);
+    assert(!handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=6,.b=0}));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=3,.a=0,.b=2}));
+    assert(!tracker.inline_table_open);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=5}));
+    assert(pattern_fields_per_channel(5)==4);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=5}));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=1}));
+    tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;tracker.field=2;
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.inline_table_selected && tracker.inline_table_tick==0);
+    handle_key('c');assert(tracker.note_input_length==1);
+    handle_key('-');handle_key('4');
+    assert(tracker.song.table[5].tick[0].note==60 && !tracker.note_input_length);
+    handle_key(F80_KEY_DOWN);
+    handle_key('c');handle_key('#');handle_key('4');
+    assert(tracker.song.table[5].tick[1].note==61);
+    handle_key('z');
+    assert(tracker.song.table[5].tick[1].note==61);
+    for(int tick=2;tick<TT_TABLE_DEFAULT_TICKS;++tick)handle_key(F80_KEY_DOWN);
+    assert(tracker.inline_table_selected &&
+           tracker.inline_table_tick==TT_TABLE_DEFAULT_TICKS-1);
+    handle_key(F80_KEY_DOWN);
+    assert(!tracker.inline_table_selected && tracker.step==1);
+    handle_key(F80_KEY_UP);
+    assert(tracker.inline_table_selected &&
+           tracker.inline_table_tick==TT_TABLE_DEFAULT_TICKS-1);
+    while(tracker.inline_table_tick>0)handle_key(F80_KEY_UP);
+    handle_key(F80_KEY_UP);
+    assert(!tracker.inline_table_selected && tracker.step==0);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=1}));
     tracker.song.pattern[1].cell[0][2].effect2=TT_EFFECT_M;
     tracker.song.pattern[1].cell[0][2].value2=0x40;
     assert(pattern_fields_per_channel(0)==4);

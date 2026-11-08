@@ -15,6 +15,8 @@ int main(void) {
     snprintf(song.name[0],TT_SONG_NAME,"Break A");
     snprintf(song.name[1],TT_SONG_NAME,"Fill %% B");
     tt_pattern_init(&song.pattern[1]);
+    for(int table=0;table<TT_SONG_TABLES;++table)
+        song.table[table].length=TT_TABLE_MAX_TICKS;
     song.pattern[1].cell[3][2]=(TtCell){64,1,TT_EFFECT_M,128,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     song.pattern[1].cell[4][2]=(TtCell){-1,-1,TT_EFFECT_T,0,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     song.pattern[1].cell[5][2]=(TtCell){67,1,TT_EFFECT_V,0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
@@ -24,14 +26,14 @@ int main(void) {
     song.pattern[1].cell[3][2].value2=0x12;
     song.pattern[1].cell[3][2].effect3=TT_EFFECT_N;
     song.pattern[1].cell[3][2].value3=0x34;
-    song.table[0].length=32;
+    song.table[0].length=TT_TABLE_MAX_TICKS;
     snprintf(song.table[0].name,TT_SONG_NAME,"Chop %% Table");
     song.table[0].tick[0].note=60;
     song.table[0].tick[0].instrument=1;
     song.table[0].tick[0].effect[0]=(TtTableEffect){'M',0x33};
     song.table[0].tick[0].effect[1]=(TtTableEffect){'S',0xaf};
     song.table[0].tick[0].effect[4]=(TtTableEffect){'U',0x05};
-    song.table[0].tick[31].effect[5]=(TtTableEffect){'X',0x01};
+    song.table[0].tick[TT_TABLE_MAX_TICKS-1].effect[5]=(TtTableEffect){'X',0x01};
     song.table[0].tick[2].effect[0]=(TtTableEffect){'S',-1};
     song.table[0].tick[3].effect[0]=(TtTableEffect){'W',0x4f};
     song.table[0].tick[3].effect[1]=(TtTableEffect){'N',0x38};
@@ -72,7 +74,7 @@ int main(void) {
     assert(fputs("END\n",legacy)>=0);
     assert(!fclose(modern) && !fclose(legacy));
     assert(tt_song_load(legacy_path,&loaded,readback,&count,error,sizeof(error)));
-    assert(loaded.table[0].length==TT_TABLE_MIN_TICKS);
+    assert(loaded.table[0].length==TT_TABLE_DEFAULT_TICKS);
     assert(loaded.table[0].tick[0].note==-1);
     unlink(legacy_path);
     char v2_path[]="/tmp/f80-v2-song-XXXXXX";
@@ -94,7 +96,7 @@ int main(void) {
     assert(!fclose(modern) && !fclose(v2));
     assert(tt_song_load(v2_path,&loaded,readback,&count,error,sizeof(error)));
     assert(!strcmp(loaded.table[0].name,"Table 00"));
-    assert(loaded.table[0].length==32 &&
+    assert(loaded.table[0].length==TT_TABLE_MAX_TICKS &&
            loaded.table[0].tick[0].effect[1].value==0xaf);
     unlink(v2_path);
     char v4_path[]="/tmp/f80-v4-song-XXXXXX";

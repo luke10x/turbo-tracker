@@ -93,7 +93,7 @@ typedef struct {
 } TtEditOrder;
 
 typedef struct {
-    int bpm,pattern_rows,rows_per_beat,ticks_per_row;
+    int bpm,pattern_rows,rows_per_beat,ticks_per_row,table_length;
 } TtEditSettings;
 
 typedef struct {

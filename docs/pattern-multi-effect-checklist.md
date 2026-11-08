@@ -37,6 +37,7 @@
 
 - [x] Keep typed note entry (`C-4` / `C#4`) and Space field advancement.
 - [x] Entering an effect letter sets the current effect slot; typing hexadecimal digits edits its current value slot.
+- [x] Enter table notes with the same `C-4` / `C#4` typing used in pattern cells.
 - [x] Delete clears only the focused note, instrument, effect/value pair, or value.
 - [x] Ensure Space on a value expands the next effect pair rather than toggling playback while in the pattern grid.
 - [x] Ensure visual selection prevents normal cell entry and still performs copy, cut, and paste correctly across all slots.
@@ -46,4 +47,15 @@
 - [x] Add focused tests for expansion and cursor movement; compaction and slot shifting are covered by edit event tests.
 - [x] Add tests for playback order and multi-effect interaction.
 - [x] Add serialization compatibility and three-slot round-trip tests.
-- [ ] Run `make test`, `make native`, and `make wasm`.
+- [x] Run `make test`, `make native`, and `make wasm` (native and wasm pass; `make test` reaches the existing stale default-song count assertion in `test_timeline.c`).
+
+## Inline table editor
+
+- [x] Expand the selected `TBLxx` inline from the pattern grid, including when its value is selected.
+- [x] Keep at most one table expanded and highlight its parent effect/value pair in purple.
+- [x] Insert table ticks under the parent row in a separate spanning area; interrupt and resume pattern channel separators around it, and show compact note, instrument, and six effect/value columns with one space between columns.
+- [x] Support inline table cursor movement and edits through table edit events.
+- [x] Keep inline table width independent of pattern channel widths; Up/Down enters from the parent row and exits to adjacent pattern rows.
+- [x] Use one song-wide table length, defaulting to 6 ticks and capped at 16; keep the existing table file records.
+- [x] Remove the Tables window from the Song menu and update the default demo to show an inline table.
+- [ ] Verify the inline layout and table length setting in the running native and web interfaces.

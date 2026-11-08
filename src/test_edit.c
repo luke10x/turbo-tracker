@@ -87,8 +87,13 @@ int main(void) {
     e=(TtEditEvent){.type=TT_EDIT_BPM};e.bpm=400;
     assert(apply(e) && song.bpm==300);
     e=(TtEditEvent){.type=TT_EDIT_SETTINGS};
-    e.settings=(TtEditSettings){120,16,4,12};
-    assert(apply(e));e.settings.pattern_rows=15;assert(!apply(e));
+    e.settings=(TtEditSettings){120,16,4,12,TT_TABLE_DEFAULT_TICKS};
+    assert(apply(e));
+    for(int table=0;table<TT_SONG_TABLES;++table)
+        assert(song.table[table].length==TT_TABLE_DEFAULT_TICKS);
+    e.settings.table_length=TT_TABLE_MAX_TICKS+1;assert(!apply(e));
+    e.settings.table_length=TT_TABLE_DEFAULT_TICKS;
+    e.settings.pattern_rows=15;assert(!apply(e));
 
     e=(TtEditEvent){.type=TT_EDIT_TABLE_TICK_SET};
     e.table_tick=(TtEditTableTickSet){0,0,{.note=64,.instrument=1}};
