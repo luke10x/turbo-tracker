@@ -192,6 +192,24 @@ int main(void) {
     assert(tt_edit_redo(history,&doc));
     assert(song.pattern_count==pattern_before+1 && song.order_count==order_before+1);
     assert(tt_edit_undo(history,&doc));
+    active.cell[0][1]=(TtCell){.effect2=TT_EFFECT_M,.value2=0x20,
+                               .effect3=TT_EFFECT_P,.value3=0x40};
+    e=(TtEditEvent){.type=TT_EDIT_PATTERN_EFFECTS_COMPACT};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(active.cell[0][1].effect==TT_EFFECT_M &&
+           active.cell[0][1].value==0x20 &&
+           active.cell[0][1].effect2==TT_EFFECT_P &&
+           active.cell[0][1].value2==0x40 &&
+           active.cell[0][1].effect3==TT_EFFECT_NONE &&
+           active.cell[0][1].value3==-1);
+    assert(tt_edit_undo(history,&doc) &&
+           active.cell[0][1].effect2==TT_EFFECT_M &&
+           active.cell[0][1].effect3==TT_EFFECT_P);
+    assert(tt_edit_redo(history,&doc) &&
+           active.cell[0][1].effect==TT_EFFECT_M &&
+           active.cell[0][1].effect2==TT_EFFECT_P);
+    assert(tt_edit_undo(history,&doc));
+    e=(TtEditEvent){.type=TT_EDIT_PATTERN_APPEND_ORDER};
     song.order_count=TT_SONG_ORDER;
     assert(!apply(e) && song.pattern_count==pattern_before &&
            !strcmp(message,"Order is full"));

@@ -27,6 +27,17 @@ int main(void) {
            demo.table[0].tick[8].effect[0].value==0xfa);
 
     memset(&tracker,0,sizeof(tracker));
+    tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;
+    tracker.edit_order=0;tracker.song.order_count=2;tracker.song.order[1]=1;
+    tracker.song.pattern[1].cell[0][2].effect2=TT_EFFECT_M;
+    tracker.song.pattern[1].cell[0][2].value2=0x40;
+    assert(pattern_fields_per_channel(0)==4);
+    assert(pattern_fields_per_channel(2)==6);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=4}));
+    assert(pattern_fields_per_channel(0)==6);
+    assert(pattern_fields_per_channel(1)==4);
+
+    memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.sample_count==4 && tracker.song.pattern_count==13 &&
            tracker.song.order_count==28);

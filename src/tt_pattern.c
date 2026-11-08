@@ -140,7 +140,7 @@ int tt_pattern_parse_row(const char *text,TtPattern *pattern,int row) {
         char old[11];memcpy(old,text+at,5);memcpy(old+5,text+at+5,5);old[10]=0;
         if(!parse_cell(old,cell))return 0;
         for(int slot=1;slot<3;++slot) {
-            char token[11]="..... .....";memcpy(token+5,text+at+5+slot*5,5);
+            char token[12]="..... .....";memcpy(token+5,text+at+5+slot*5,5);
             TtCell fx=tt_cell_empty();
             if(!parse_cell(token,&fx))return 0;
             TtPatternEffect *dst=tt_cell_effect(cell,slot);*dst=*tt_cell_effect(&fx,0);

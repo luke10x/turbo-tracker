@@ -83,6 +83,7 @@ static const char *edit_event_name(TtEditType type) {
         [TT_EDIT_PATTERN_NEW]="pattern new",[TT_EDIT_PATTERN_RENAME]="pattern rename",
         [TT_EDIT_PATTERN_APPEND_ORDER]="pattern and order new",
         [TT_EDIT_PATTERN_SELECT]="pattern select",[TT_EDIT_PATTERN_SYNC]="pattern sync",
+        [TT_EDIT_PATTERN_EFFECTS_COMPACT]="pattern effects compact",
         [TT_EDIT_ORDER_INSERT]="order insert",[TT_EDIT_ORDER_REMOVE]="order remove",
         [TT_EDIT_ORDER_SWAP]="order swap",[TT_EDIT_BPM]="BPM",
         [TT_EDIT_SETTINGS]="settings",[TT_EDIT_TABLE_TICK_SET]="table tick",
@@ -134,6 +135,28 @@ static int emit_edit(const TtEditEvent *event) {
         tt_tracker_log_event("EDIT",detail);
     }
     return applied;
+}
+static int pattern_needs_effect_compaction(void) {
+    for(int pattern=0;pattern<tracker.song.pattern_count;++pattern) {
+        const TtPattern *source=pattern==tracker.pattern_index?
+            &tracker.pattern:&tracker.song.pattern[pattern];
+        for(int row=0;row<TT_MAX_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel) {
+                const TtCell *cell=&source->cell[row][channel];
+                int empty=cell->effect==TT_EFFECT_NONE;
+                for(int slot=1;slot<3;++slot) {
+                    const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+                    if(fx->command!=TT_EFFECT_NONE && empty)return 1;
+                    if(fx->command==TT_EFFECT_NONE)empty=1;
+                }
+            }
+    }
+    return 0;
+}
+static void compact_pattern_effects_if_needed(void) {
+    if(!pattern_needs_effect_compaction())return;
+    TtEditEvent event={.type=TT_EDIT_PATTERN_EFFECTS_COMPACT};
+    if(!emit_edit(&event))tt_tracker_message(edit_message);
 }
 static void edit_cell(int row,int channel,TtCell cell) {
     TtEditEvent event={.type=TT_EDIT_CELL_SET};
@@ -201,7 +224,7 @@ static int grid_pattern_for_row(int global) {
     int order=grid_order_for_row(global);
     return order>=0?tracker.song.order[order]:tracker.pattern_index;
 }
-static int pattern_fields_per_channel(void);
+static int pattern_fields_per_channel(int channel);
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_ORDER, TT_UI_FOCUS, TT_UI_SCROLL_ORDER,
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
@@ -211,19 +234,25 @@ typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
 static void leave_follow(void);
 static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_PATTERN_CURSOR) {
+        if(tracker.field>=2 && event.b<2)compact_pattern_effects_if_needed();
+        int channel=clamp(event.a,0,TT_CHANNELS-1);
         if(event.b>=2) {
             int requested=(event.b-2)/2+1;
-            if(requested>tracker.effect_slots)tracker.effect_slots=requested;
+            if(requested>tracker.effect_slots[channel])
+                tracker.effect_slots[channel]=requested;
         }
-        int fields=pattern_fields_per_channel();
-        tracker.channel=clamp(event.a,0,TT_CHANNELS-1);
+        int fields=pattern_fields_per_channel(channel);
+        tracker.channel=channel;
         tracker.field=clamp(event.b,0,fields-1);
         tracker.reveal_cursor=1;
         return 1;
     }
     if(event.type==TT_UI_FOCUS) {
+        if(tracker.focus==FOCUS_PHRASE && event.index!=FOCUS_PHRASE)
+            compact_pattern_effects_if_needed();
         tracker.focus=event.index;
-        if(event.index!=FOCUS_PHRASE)tracker.effect_slots=0;
+        if(event.index!=FOCUS_PHRASE)
+            memset(tracker.effect_slots,0,sizeof(tracker.effect_slots));
         tracker.app.focus=event.index==FOCUS_ORDER?tracker.order_list:
             event.index==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
         return 1;
@@ -834,19 +863,29 @@ static void paint_wave(F80Widget *canvas,void *user) {
         f80_put(r.y+r.h-1,r.x+r.w-1,"►",1,8,1);
     }
 }
-static int pattern_effect_slots_visible(void) {
-    int slots=tracker.effect_slots>1?tracker.effect_slots:1;
-    for(int pattern=0;pattern<tracker.song.pattern_count;++pattern)
-        for(int row=0;row<tracker.song.pattern_rows;++row)
-            for(int channel=0;channel<TT_CHANNELS;++channel) {
-                const TtCell *cell=&tracker.song.pattern[pattern].cell[row][channel];
-                if(cell->effect3!=TT_EFFECT_NONE)slots=3;
-                else if(cell->effect2!=TT_EFFECT_NONE && slots<2)slots=2;
-            }
-    int cursor_slots=tracker.field<2?1:(tracker.field-2)/2+1;
-    return slots>cursor_slots?slots:cursor_slots;
+static int pattern_effect_slots_visible(int channel) {
+    int slots=tracker.effect_slots[channel]>1?tracker.effect_slots[channel]:1;
+    int displayed=tracker.edit_order>=0?tracker.song.order_count:1;
+    for(int item=0;item<displayed;++item) {
+        int pattern=tracker.edit_order>=0?tracker.song.order[item]:tracker.pattern_index;
+        if(pattern<0 || pattern>=tracker.song.pattern_count)continue;
+        const TtPattern *source=pattern==tracker.pattern_index?
+            &tracker.pattern:&tracker.song.pattern[pattern];
+        for(int row=0;row<tracker.song.pattern_rows;++row) {
+            const TtCell *cell=&source->cell[row][channel];
+            if(cell->effect3!=TT_EFFECT_NONE)slots=3;
+            else if(cell->effect2!=TT_EFFECT_NONE && slots<2)slots=2;
+        }
+    }
+    if(channel==tracker.channel && tracker.field>=2) {
+        int cursor_slots=(tracker.field-2)/2+1;
+        if(cursor_slots>slots)slots=cursor_slots;
+    }
+    return slots;
 }
-static int pattern_fields_per_channel(void) { return 2+2*pattern_effect_slots_visible(); }
+static int pattern_fields_per_channel(int channel) {
+    return 2+2*pattern_effect_slots_visible(channel);
+}
 static int pattern_field_width(int field) {
     if(field==0)return 4;
     if(field==1 || field%2==0)return 3;
@@ -858,14 +897,31 @@ static int pattern_field_offset(int field) {
     return offset;
 }
 static int pattern_field_count(void) {
-    return TT_CHANNELS*pattern_fields_per_channel();
+    int total=0;
+    for(int channel=0;channel<TT_CHANNELS;++channel)
+        total+=pattern_fields_per_channel(channel);
+    return total;
+}
+static int pattern_channel_start(int channel) {
+    int start=0;
+    for(int at=0;at<channel;++at)start+=pattern_fields_per_channel(at);
+    return start;
+}
+static void pattern_field_at(int index,int *channel,int *field) {
+    int at=0;
+    for(int ch=0;ch<TT_CHANNELS;++ch) {
+        int count=pattern_fields_per_channel(ch);
+        if(index<at+count) { *channel=ch;*field=index-at;return; }
+        at+=count;
+    }
+    *channel=TT_CHANNELS-1;*field=pattern_fields_per_channel(*channel)-1;
 }
 static int pattern_field_span(int first,int last) {
     int width=0;
     for(int index=first;index<=last;++index) {
-        int fields=pattern_fields_per_channel();
-        if(index>first && index%fields==0)++width;
-        width+=pattern_field_width(index%fields);
+        int channel,field;pattern_field_at(index,&channel,&field);
+        if(index>first && field==0)++width;
+        width+=pattern_field_width(field);
     }
     return width;
 }
@@ -901,8 +957,7 @@ static void ensure_pattern_visible(F80Rect r) {
     tracker.phrase_scroll=clamp(tracker.phrase_scroll,0,maximum);
     int available=r.w-6;
     if(available<1)available=1;
-    int fields=pattern_fields_per_channel();
-    int selected=tracker.channel*fields+tracker.field;
+    int selected=pattern_channel_start(tracker.channel)+tracker.field;
     tracker.field_scroll=clamp(tracker.field_scroll,0,pattern_max_field_scroll(available));
     if(selected<tracker.field_scroll)tracker.field_scroll=selected;
     while(tracker.field_scroll<selected &&
@@ -919,9 +974,9 @@ static void paint_phrase(F80Widget *canvas,void *user) {
     int start[TT_CHANNELS],end[TT_CHANNELS];
     for(int channel=0;channel<TT_CHANNELS;++channel)
         start[channel]=end[channel]=-1;
-    int fields=pattern_fields_per_channel(),field_count=pattern_field_count();
+    int field_count=pattern_field_count();
     for(int index=tracker.field_scroll;index<field_count && x<right;++index) {
-        int channel=index/fields,field=index%fields;
+        int channel,field;pattern_field_at(index,&channel,&field);
         if(index>tracker.field_scroll && field==0) {
             for(int y=r.y;y<r.y+r.h;++y)f80_put(y,x,"│",1,10,0);
             if(++x>=right)break;
@@ -2328,13 +2383,13 @@ static void handle_key(int key) {
             clear_note_input();
             int channel=tracker.channel,field=tracker.field;
             if(field)field--;
-            else if(channel) { channel--;field=pattern_fields_per_channel()-1; }
+            else if(channel) { channel--;field=pattern_fields_per_channel(channel)-1; }
             handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
                 .a=channel,.b=field});
         } else if(key==F80_KEY_RIGHT) {
             clear_note_input();
             int channel=tracker.channel,field=tracker.field;
-            if(field<pattern_fields_per_channel()-1)field++;
+            if(field<pattern_fields_per_channel(channel)-1)field++;
             else if(channel<TT_CHANNELS-1) { channel++;field=0; }
             handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
                 .a=channel,.b=field});
@@ -2466,9 +2521,9 @@ static void handle_mouse(int x,int y,int wheel) {
                 leave_follow();
                 int maximum_field=pattern_max_field_scroll(r.w-6);
                 tracker.field_scroll=clamp(tracker.field_scroll+direction,0,maximum_field);
-                int fields=pattern_fields_per_channel();
+                int channel,field;pattern_field_at(tracker.field_scroll,&channel,&field);
                 handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
-                    .a=tracker.field_scroll/fields,.b=tracker.field_scroll%fields});
+                    .a=channel,.b=field});
             }
             return;
         }
@@ -2481,15 +2536,14 @@ static void handle_mouse(int x,int y,int wheel) {
             int old_step=tracker.step,old_channel=tracker.channel;
             tracker.step=global%tracker.song.pattern_rows;
             int position=r.x+5;
-            int fields=pattern_fields_per_channel();
             for(int index=tracker.field_scroll;index<pattern_field_count() &&
                 position<r.x+r.w-1;++index) {
-                int field=index%fields;
+                int channel,field;pattern_field_at(index,&channel,&field);
                 if(index>tracker.field_scroll && field==0)++position;
                 int width=pattern_field_width(field);
                 if(x>=position && x<position+width) {
                     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
-                        .a=index/fields,.b=field});
+                        .a=channel,.b=field});
                     break;
                 }
                 position+=width;
@@ -2536,10 +2590,8 @@ static void touch_scroll_fields(int fields) {
     int maximum=pattern_max_field_scroll(r.w-6);
     tracker.field_scroll=clamp(tracker.field_scroll+fields,0,maximum);
     /* Keep the cursor in the visible field so painting does not snap back. */
-    int fields_per_channel=pattern_fields_per_channel();
-    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
-        .a=tracker.field_scroll/fields_per_channel,
-        .b=tracker.field_scroll%fields_per_channel});
+    int channel,field;pattern_field_at(tracker.field_scroll,&channel,&field);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=channel,.b=field});
     handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
 }
 static struct {

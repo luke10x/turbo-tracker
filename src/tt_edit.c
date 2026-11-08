@@ -96,6 +96,25 @@ static int apply_pattern_sync(TtEditDoc *doc) {
     doc->song->pattern[*doc->active_index]=*doc->active;
     return 1;
 }
+static int apply_pattern_effects_compact(TtEditDoc *doc) {
+    for(int pattern=0;pattern<doc->song->pattern_count;++pattern) {
+        TtPattern *target=(doc->active_index && pattern==*doc->active_index)?
+            doc->active:&doc->song->pattern[pattern];
+        for(int row=0;row<TT_MAX_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel) {
+                TtCell *cell=&target->cell[row][channel];
+                TtPatternEffect kept[3];int count=0;
+                for(int slot=0;slot<3;++slot) {
+                    TtPatternEffect fx=*tt_cell_effect(cell,slot);
+                    if(fx.command!=TT_EFFECT_NONE)kept[count++]=fx;
+                }
+                for(int slot=0;slot<3;++slot)
+                    *tt_cell_effect(cell,slot)=slot<count?kept[slot]:
+                        (TtPatternEffect){TT_EFFECT_NONE,-1};
+            }
+    }
+    return 1;
+}
 static int apply_order_insert(TtEditDoc *doc,const TtEditOrder *e) {
     TtSong *song=doc->song;
     if(song->order_count>=TT_SONG_ORDER) { reject(doc,"Order is full");return 0; }
@@ -383,6 +402,8 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_pattern_select(doc,event->pattern.index);
     case TT_EDIT_PATTERN_SYNC:
         return apply_pattern_sync(doc);
+    case TT_EDIT_PATTERN_EFFECTS_COMPACT:
+        return apply_pattern_effects_compact(doc);
     case TT_EDIT_ORDER_INSERT:
         return apply_order_insert(doc,&event->order);
     case TT_EDIT_ORDER_REMOVE:
