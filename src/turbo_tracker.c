@@ -3402,24 +3402,67 @@ static void native_move(int x,int y) {
     native_touch.last_x=x;
     native_touch.last_y=y;
 }
-static void native_mouse_event(void) {
-    MEVENT event;
-    if(getmouse(&event)!=OK)return;
-    int x=event.x,y=event.y;
-    if(tracker.console_visible) {
-        if(event.bstate&BUTTON4_PRESSED)handle_mouse(x,y,-1);
+static int native_decode_sgr_mouse(const char *payload,char ending,
+                                   int *x,int *y,mmask_t *state) {
+    int button,column,row;
+    if(!payload || sscanf(payload,"%d;%d;%d",&button,&column,&row)!=3 ||
+       column<1 || row<1)return 0;
+    *x=column-1;*y=row-1;*state=0;
+    int code=button&3;
+    if(button&64) {
 #ifdef BUTTON5_PRESSED
-        else if(event.bstate&BUTTON5_PRESSED)handle_mouse(x,y,1);
+        *state=(button&1)?BUTTON5_PRESSED:BUTTON4_PRESSED;
+#else
+        if(button&1)return 0;
+        *state=BUTTON4_PRESSED;
 #endif
-        else if(event.bstate&(BUTTON1_CLICKED|BUTTON1_PRESSED))handle_mouse(x,y,0);
+        return 1;
+    }
+    if(ending=='m') {
+        if(code==0)*state=BUTTON1_RELEASED;
+#ifdef BUTTON2_RELEASED
+        else if(code==1)*state=BUTTON2_RELEASED;
+#endif
+#ifdef BUTTON3_RELEASED
+        else if(code==2)*state=BUTTON3_RELEASED;
+#endif
+        else return 0;
+    } else if(button&32) {
+        *state=REPORT_MOUSE_POSITION;
+        if(code==0)*state|=BUTTON1_PRESSED;
+#ifdef BUTTON2_PRESSED
+        else if(code==1)*state|=BUTTON2_PRESSED;
+#endif
+#ifdef BUTTON3_PRESSED
+        else if(code==2)*state|=BUTTON3_PRESSED;
+#endif
+    } else {
+        if(code==0)*state=BUTTON1_PRESSED;
+#ifdef BUTTON2_PRESSED
+        else if(code==1)*state=BUTTON2_PRESSED;
+#endif
+#ifdef BUTTON3_PRESSED
+        else if(code==2)*state=BUTTON3_PRESSED;
+#endif
+        else return 0;
+    }
+    return *state!=0;
+}
+static void native_mouse_event_at(int x,int y,mmask_t bstate) {
+    if(tracker.console_visible) {
+        if(bstate&BUTTON4_PRESSED)handle_mouse(x,y,-1);
+#ifdef BUTTON5_PRESSED
+        else if(bstate&BUTTON5_PRESSED)handle_mouse(x,y,1);
+#endif
+        else if(bstate&(BUTTON1_CLICKED|BUTTON1_PRESSED))handle_mouse(x,y,0);
         return;
     }
-    if(event.bstate&BUTTON4_PRESSED) { handle_mouse(x,y,-1);return; }
+    if(bstate&BUTTON4_PRESSED) { handle_mouse(x,y,-1);return; }
 #ifdef BUTTON5_PRESSED
-    if(event.bstate&BUTTON5_PRESSED) { handle_mouse(x,y,1);return; }
+    if(bstate&BUTTON5_PRESSED) { handle_mouse(x,y,1);return; }
 #endif
 #ifdef REPORT_MOUSE_POSITION
-    if(event.bstate&REPORT_MOUSE_POSITION) {
+    if(bstate&REPORT_MOUSE_POSITION) {
         if(native_touch.down)native_move(x,y);
 #ifndef BUTTON5_PRESSED
         /* Older ncurses reports wheel-down as position motion. */
@@ -3428,7 +3471,7 @@ static void native_mouse_event(void) {
         return;
     }
 #endif
-    if(event.bstate&BUTTON1_PRESSED) {
+    if(bstate&BUTTON1_PRESSED) {
         native_ignore_followup_click=0;
         if(native_touch.down) { native_move(x,y);return; }
         F80Rect r=tracker.phrase_canvas->rect;
@@ -3469,7 +3512,7 @@ static void native_mouse_event(void) {
         }
         return;
     }
-    if(event.bstate&BUTTON1_RELEASED) {
+    if(bstate&BUTTON1_RELEASED) {
         native_other_button_down=0;
         if(native_touch.down) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
@@ -3480,7 +3523,7 @@ static void native_mouse_event(void) {
         }
         return;
     }
-    if(event.bstate&BUTTON1_CLICKED) {
+    if(bstate&BUTTON1_CLICKED) {
         if(native_ignore_followup_click) {
             native_ignore_followup_click=0;
             return;
@@ -3494,6 +3537,26 @@ static void native_mouse_event(void) {
             native_touch.down=native_touch.kind=0;
         } else handle_mouse(x,y,0);
     }
+}
+static void native_mouse_event(void) {
+    MEVENT event;
+    if(getmouse(&event)==OK) {
+        native_mouse_event_at(event.x,event.y,event.bstate);
+        return;
+    }
+    /* Older system ncurses only decodes the legacy mouse format. In SGR mode
+       define_key maps ESC[< to KEY_MOUSE; read its decimal payload here. */
+    char payload[64];size_t length=0;int ending=0;
+    while(length+1<sizeof(payload)) {
+        int key=getch();
+        if(key==ERR)return;
+        if(key=='M' || key=='m') { ending=key;break; }
+        payload[length++]=(char)key;
+    }
+    payload[length]='\0';
+    int x,y;mmask_t state;
+    if(ending && native_decode_sgr_mouse(payload,(char)ending,&x,&y,&state))
+        native_mouse_event_at(x,y,state);
 }
 #endif
 static int header_button_width(void) {
@@ -3817,6 +3880,7 @@ int main(int argc,char **argv) {
     define_key("\033[1;2C",KEY_SRIGHT);
     define_key("\033[1;2A",KEY_F(62));
     define_key("\033[1;2B",KEY_F(63));
+    define_key("\033[<",KEY_MOUSE);
 #endif
 #ifdef REPORT_MOUSE_POSITION
     mousemask(ALL_MOUSE_EVENTS|REPORT_MOUSE_POSITION,NULL);
@@ -3825,8 +3889,8 @@ int main(int argc,char **argv) {
 #endif
 #ifndef __EMSCRIPTEN__
     mouseinterval(0);
-    /* ncurses enables clicks, but some terminals need drag reporting enabled explicitly. */
-    fputs("\033[?1002h",stdout);fflush(stdout);
+    /* SGR mouse reports use decimal coordinates beyond the legacy 223-column limit. */
+    fputs("\033[?1006h\033[?1002h",stdout);fflush(stdout);
 #endif
     tracker.root=f80_window(F80_WINDOW_BLUE,F80_COL);
     tracker.app.menu=f80_add(tracker.root,f80_menubar(menus,sizeof(menus)/sizeof(*menus)));
@@ -3874,7 +3938,7 @@ int main(int argc,char **argv) {
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);
-    fputs("\033[?1002l",stdout);fflush(stdout);
+    fputs("\033[?1002l\033[?1006l",stdout);fflush(stdout);
 #endif
     return 0;
 }

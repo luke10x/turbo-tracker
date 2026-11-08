@@ -32,13 +32,24 @@ int main(void) {
            demo.table[0].tick[5].effect[0].value==0xfa);
     assert(demo.table[5].length==6);
     assert(inline_table_row_width()==42);
+#ifndef __EMSCRIPTEN__
+    int mouse_x=-1,mouse_y=-1;mmask_t mouse_state=0;
+    assert(native_decode_sgr_mouse("0;241;17",'M',
+        &mouse_x,&mouse_y,&mouse_state));
+    assert(mouse_x==240 && mouse_y==16 && mouse_state==BUTTON1_PRESSED);
+    assert(native_decode_sgr_mouse("0;241;17",'m',
+        &mouse_x,&mouse_y,&mouse_state));
+    assert(mouse_x==240 && mouse_y==16 && mouse_state==BUTTON1_RELEASED);
+#endif
     for(int width=50;width<=100;width+=50) {
         memset(&tracker,0,sizeof(tracker));memset(header_clicks,0,sizeof(header_clicks));
         F80Widget *root=f80_box(F80_COL),*header=f80_box(F80_ROW);
+        F80Widget wave_canvas={0};
         f80_sized(root,f80_grow(),f80_grow());
         f80_sized(header,f80_grow(),f80_fixed(4));
         f80_add(root,header);
         tracker.header=header;
+        tracker.wave_canvas=&wave_canvas;
         tracker.header_title=f80_add(header,f80_label("Tracker"));
         tracker.progress=f80_add(header,f80_progress(0,0));
         tracker.bpm_label=f80_add(header,f80_label("BPM 157"));
@@ -51,10 +62,17 @@ int main(void) {
         f80_layout(root,f80_rect(0,0,width,4));
         int wide=header_is_wide(width);
         layout_header(width,wide);
-        int x=tracker.follow_button->rect.x+tracker.follow_button->rect.w/2;
-        int y=tracker.follow_button->rect.y;
-        assert(f80_mouse(&tracker.app,x,y,0));
-        assert(header_clicks[2]==1 && header_clicks[1]==0);
+        F80Widget *header_buttons[]={tracker.play_button,tracker.stop_button,
+            tracker.follow_button,tracker.mode_button,tracker.pattern_lock_button};
+        for(int i=0;i<5;++i) {
+            memset(header_clicks,0,sizeof(header_clicks));
+            int x=header_buttons[i]->rect.x+header_buttons[i]->rect.w/2;
+            int y=header_buttons[i]->rect.y;
+            handle_mouse(x,y,0);
+            for(int j=0;j<5;++j) {
+                assert(header_clicks[j]==(i==j?1:0));
+            }
+        }
         f80_free(root);
     }
     F80Widget *flex_buttons[]={f80_button("Up",NULL,NULL),
