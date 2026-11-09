@@ -3579,13 +3579,13 @@ static void layout_header(int cols,int wide) {
     f80_fit_size(tracker.header_title,&title_w,&title_h);
     f80_fit_size(tracker.bpm_label,&bpm_w,&bpm_h);
     int button_w=header_button_width();
-    int button_x=wide?r.x+cols-button_w-1:r.x+1;
+    int button_x=wide?r.x+cols-button_w-2:r.x+1;
     int info_end=wide?button_x-2:r.x+cols;
-    int progress_x=r.x+title_w+2;
+    int progress_x=r.x+title_w+3;
     int bpm_x=info_end-bpm_w;
     int progress_w=bpm_x-progress_x-2;
     if(progress_w<0)progress_w=0;
-    f80_layout(tracker.header_title,f80_rect(r.x,r.y,title_w,1));
+    f80_layout(tracker.header_title,f80_rect(r.x+1,r.y,title_w,1));
     f80_layout(tracker.progress,f80_rect(progress_x,r.y,progress_w,1));
     f80_layout(tracker.bpm_label,f80_rect(bpm_x,r.y,bpm_w,1));
     F80Widget *buttons[]={tracker.play_button,tracker.stop_button,
