@@ -415,6 +415,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_TOGGLE_LOOP:name="toggle loop";break;
     case TT_PLAY_TOGGLE_FOLLOW:name="toggle follow";break;
     case TT_PLAY_SELECT_ORDER:name="seek order";break;
+    case TT_PLAY_SELECT_PATTERN:name="select pattern loop";break;
     case TT_PLAY_SET_ORDER_RANGE:name="order range";break;
     case TT_PLAY_CLEAR_ORDER_RANGE:name="clear order range";break;
     case TT_PLAY_AUDITION:name="audition";break;
@@ -431,6 +432,8 @@ int tt_play_emit(TtPlayEvent event) {
     else if(event.type==TT_PLAY_AUDITION_CELL)
         snprintf(detail,sizeof(detail),"%s row %02X ch %d",name,event.a,event.b+1);
     else if(event.type==TT_PLAY_SELECT_ORDER)
+        snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else if(event.type==TT_PLAY_SELECT_PATTERN)
         snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
     else if(event.type==TT_PLAY_SET_ORDER_RANGE)
         snprintf(detail,sizeof(detail),"%s %02X-%02X",name,event.a,event.b);
@@ -486,6 +489,21 @@ void tt_play_flush(void) {
             char status[64];
             snprintf(status,sizeof(status),"Order %02X plays pattern %02X",
                      at,tracker.song.order[at]);
+            tt_tracker_message(status);break;
+        }
+        case TT_PLAY_SELECT_PATTERN: {
+            int at=event.a;
+            if(at<0 || at>=tracker.song.pattern_count ||
+               tracker.play_mode!=PLAY_PATTERN)break;
+            tracker.order_range_active=0;
+            tracker.loop_pattern_index=at;
+            tracker.play_step=0;
+            tracker.active_order_index=-1;
+            tracker.active_pattern_index=at;
+            tracker.active_step=tracker.playing?0:-1;
+            if(tracker.playing)play_start_now(NULL,NULL);
+            char status[48];
+            snprintf(status,sizeof(status),"Looping pattern %02X",at);
             tt_tracker_message(status);break;
         }
         case TT_PLAY_SET_ORDER_RANGE: {

@@ -335,7 +335,37 @@ int main(void) {
     handle_key(9);
     assert(tracker.focus==FOCUS_PHRASE);
     handle_key(9);
-    assert(tracker.focus==FOCUS_ORDER && current_status()==order_status);
+    assert(tracker.focus==FOCUS_ORDER && current_status()==mode_status_visible);
+    assert(strcmp(current_status()[0].label,"Or-")==0 &&
+           current_status()[0].action==previous_order);
+    tracker.play_mode=PLAY_PATTERN;
+    assert(strcmp(current_status()[0].label,"Pt-")==0 &&
+           current_status()[0].action==prev_pattern);
+    tracker.focus=FOCUS_PHRASE;
+    F80Widget pattern_choice={0};pattern_choice.cursor=0;
+    tracker.order_list=&pattern_choice;
+    order_panel_selected(&pattern_choice,NULL);
+    assert(tracker.pattern_index==0 && tracker.edit_order==-1 &&
+           tracker.loop_pattern_index==0 && tracker.play_mode==PLAY_PATTERN);
+    next_pattern(NULL,NULL);
+    assert(tracker.pattern_index==1 && tracker.edit_order==-1 &&
+           tracker.loop_pattern_index==1);
+    tracker.pattern_index=0;
+    tracker.loop_pattern_index=0;
+    tracker.follow=1;tracker.playing=1;tracker.active_pattern_index=0;
+    tracker.active_step=8;tracker.phrase_scroll=0;
+    ensure_pattern_visible(f80_rect(0,0,80,14));
+    assert(tracker.phrase_scroll==3);
+    tracker.follow=0;tracker.playing=0;
+    tracker.focus=FOCUS_ORDER;
+    handle_ui_event((TtUiEvent){.type=TT_UI_MODE_CONTEXT,.a=PLAY_SONG});
+    tracker.play_mode=PLAY_SONG;
+    assert(strcmp(current_status()[0].label,"Or-")==0);
+    tracker.order_list=&order_choice;
+    tracker.edit_order=0;
+    tracker.phrase_scroll=0;
+    tracker.play_order=0;
+    tracker.active_order_index=0;
     handle_key(9);
     assert(tracker.focus==FOCUS_WAVE);
     handle_key(F80_KEY_BTAB);

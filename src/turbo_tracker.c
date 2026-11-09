@@ -272,6 +272,7 @@ static int pattern_fields_per_channel(int channel);
 static int pattern_edit_fields_per_channel(int channel);
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_PATTERN_ONLY, TT_UI_SELECT_ORDER,
+    TT_UI_MODE_CONTEXT, TT_UI_SYNC_PATTERN_ORDER,
     TT_UI_FOCUS, TT_UI_SCROLL_ORDER, TT_UI_ORDER_CURSOR,
     TT_UI_PATTERN_LOCK,
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
@@ -292,6 +293,39 @@ static void cancel_exit(F80Widget *button,void *user) {
     handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CANCEL});
 }
 static int handle_ui_event(TtUiEvent event) {
+    if(event.type==TT_UI_SYNC_PATTERN_ORDER) {
+        if(tracker.play_mode!=PLAY_SONG)return 1;
+        if(tracker.edit_order>=0 &&
+           tracker.edit_order<tracker.song.order_count &&
+           tracker.song.order[tracker.edit_order]==tracker.pattern_index)return 1;
+        int found=order_for_pattern(tracker.pattern_index,tracker.edit_order);
+        if(found!=tracker.edit_order) {
+            tracker.edit_order=found;
+            tracker.reveal_cursor=1;
+        }
+        return 1;
+    }
+    if(event.type==TT_UI_MODE_CONTEXT) {
+        if(event.a==PLAY_PATTERN) {
+            tracker.edit_order=-1;
+            tracker.phrase_scroll=0;
+        } else {
+            int order=order_for_pattern(tracker.pattern_index,tracker.edit_order);
+            if(order<0)order=tracker.order_list?
+                clamp(tracker.order_list->cursor,0,tracker.song.order_count-1):0;
+            if(tracker.song.order_count>0) {
+                if(tracker.song.order[order]!=tracker.pattern_index) {
+                    TtEditEvent edit={.type=TT_EDIT_PATTERN_SELECT};
+                    edit.pattern.index=tracker.song.order[order];
+                    if(!emit_edit(&edit))return 0;
+                }
+                tracker.edit_order=order;
+                tracker.phrase_scroll=order*tracker.song.pattern_rows;
+            }
+        }
+        tracker.reveal_cursor=1;
+        return 1;
+    }
     if(event.type==TT_UI_EXIT_REQUEST) {
         if(tracker.exit_dialog && tracker.app.modal==tracker.exit_dialog)return 1;
         if(!tracker.document_dirty) {
@@ -474,7 +508,10 @@ static int handle_ui_event(TtUiEvent event) {
     return 1;
 }
 static void select_edit_pattern(int index) {
-    handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN,index});
+    if(tracker.play_mode==PLAY_PATTERN) {
+        if(handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN_ONLY,index}))
+            send_play(TT_PLAY_SELECT_PATTERN,index,0);
+    } else handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN,index});
 }
 static void move_pattern_row(int delta) {
     int row=tracker.step+delta;
@@ -558,7 +595,8 @@ static void order_panel_selected(F80Widget *list,void *user) {
     if(tracker.play_mode==PLAY_SONG) {
         if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return;
         send_play(TT_PLAY_SELECT_ORDER,at,0);
-    } else handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN_ONLY,at});
+    } else if(handle_ui_event((TtUiEvent){TT_UI_SELECT_PATTERN_ONLY,at}))
+        send_play(TT_PLAY_SELECT_PATTERN,at,0);
 }
 static int order_at(int x,int y) {
     if(!tracker.order_list)return -1;
@@ -615,10 +653,14 @@ static void order_panel_scroll(int rows) {
 
 
 static void start_song(F80Widget *button,void *user) {
-    (void)button;(void)user;send_play(TT_PLAY_SET_MODE,PLAY_SONG,0);
+    (void)button;(void)user;
+    if(handle_ui_event((TtUiEvent){.type=TT_UI_MODE_CONTEXT,.a=PLAY_SONG}))
+        send_play(TT_PLAY_SET_MODE,PLAY_SONG,0);
 }
 static void start_pattern_loop(F80Widget *button,void *user) {
-    (void)button;(void)user;send_play(TT_PLAY_SET_MODE,PLAY_PATTERN,0);
+    (void)button;(void)user;
+    if(handle_ui_event((TtUiEvent){.type=TT_UI_MODE_CONTEXT,.a=PLAY_PATTERN}))
+        send_play(TT_PLAY_SET_MODE,PLAY_PATTERN,0);
 }
 
 
@@ -947,7 +989,10 @@ static void toggle_follow(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_TOGGLE_FOLLOW,0,0);
 }
 static void toggle_mode(F80Widget *button,void *user) {
-    (void)button;(void)user;send_play(TT_PLAY_TOGGLE_MODE,0,0);
+    (void)button;(void)user;
+    int mode=tracker.play_mode==PLAY_SONG?PLAY_PATTERN:PLAY_SONG;
+    if(handle_ui_event((TtUiEvent){.type=TT_UI_MODE_CONTEXT,.a=mode}))
+        send_play(TT_PLAY_SET_MODE,mode,0);
 }
 static void toggle_pattern_lock(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -1149,11 +1194,8 @@ static int pattern_max_field_scroll(int available) {
 static void ensure_pattern_visible(F80Rect r) {
     int body=r.h-3;
     if(body<1)body=1;
-    if(tracker.edit_order<0 || tracker.edit_order>=tracker.song.order_count ||
-       tracker.song.order[tracker.edit_order]!=tracker.pattern_index) {
-        int found=order_for_pattern(tracker.pattern_index,tracker.edit_order);
-        if(found!=tracker.edit_order) { tracker.edit_order=found;tracker.reveal_cursor=1; }
-    }
+    if(tracker.play_mode==PLAY_SONG)
+        handle_ui_event((TtUiEvent){.type=TT_UI_SYNC_PATTERN_ORDER});
     int maximum=grid_total_rows()-body;
     if(maximum<0)maximum=0;
     if(tracker.playing && tracker.follow &&
@@ -1161,6 +1203,11 @@ static void ensure_pattern_visible(F80Rect r) {
        tracker.active_order_index>=0 && tracker.edit_order>=0) {
         int playhead=tracker.active_order_index*tracker.song.pattern_rows+tracker.active_step;
         tracker.phrase_scroll=playhead-body/2;
+    } else if(tracker.playing && tracker.follow &&
+       tracker.play_mode==PLAY_PATTERN &&
+       tracker.active_pattern_index==tracker.pattern_index &&
+       tracker.active_step>=0) {
+        tracker.phrase_scroll=tracker.active_step-body/2;
     } else if(tracker.reveal_cursor) {
         int edit=tracker.inline_table_selected?
             tracker.inline_table_parent+1+tracker.inline_table_tick:grid_edit_row();
@@ -1394,7 +1441,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             (order>=0?order==tracker.active_order_index:
              pattern_index==tracker.active_pattern_index);
         char gutter[8];
-        if(row==0 && order>=0)snprintf(gutter,sizeof(gutter),"P%02X ",pattern_index);
+        if(row==0 && order>=0)snprintf(gutter,sizeof(gutter),"O%02X ",order);
         else snprintf(gutter,sizeof(gutter)," %02X ",row);
         int y=r.y+3+line;
         f80_put(y,r.x,gutter,4,editable && row==tracker.step?3:
@@ -2292,21 +2339,33 @@ static const F80StatusItem reference_status[]={
 };
 static F80StatusItem selection_visible[10];
 static F80StatusItem pattern_status_visible[10];
+static F80StatusItem mode_status_visible[10];
+static const F80StatusItem *mode_status(const F80StatusItem *base) {
+    memcpy(mode_status_visible,base,sizeof(mode_status_visible));
+    if(tracker.play_mode==PLAY_SONG) {
+        mode_status_visible[0]=(F80StatusItem){"1","Or-",previous_order};
+        mode_status_visible[1]=(F80StatusItem){"2","Or+",next_order};
+    } else {
+        mode_status_visible[0]=(F80StatusItem){"1","Pt-",prev_pattern};
+        mode_status_visible[1]=(F80StatusItem){"2","Pt+",next_pattern};
+    }
+    return mode_status_visible;
+}
 static const F80StatusItem *current_status(void) {
     if(tracker.focus==FOCUS_WAVE)return wave_status;
-    if(tracker.focus==FOCUS_ORDER)return order_status;
+    if(tracker.focus==FOCUS_ORDER)return mode_status(order_status);
     if(tracker.focus==FOCUS_REFERENCE)return reference_status;
-    if(tracker.inline_table_selected)return inline_table_status;
+    if(tracker.inline_table_selected)return mode_status(inline_table_status);
     if(tracker.selecting) {
         memcpy(selection_visible,selection_status,sizeof(selection_visible));
         if(!paste_available()) {
             selection_visible[6].label="---";
             selection_visible[6].action=NULL;
         }
-        return selection_visible;
+        return mode_status(selection_visible);
     }
-    if(tracker.field==0)return note_status;
-    if(tracker.field==1)return instrument_status;
+    if(tracker.field==0)return mode_status(note_status);
+    if(tracker.field==1)return mode_status(instrument_status);
     const F80StatusItem *base=tracker.field%2==0?effect_status:value_status;
     memcpy(pattern_status_visible,base,sizeof(pattern_status_visible));
     int table;
@@ -2315,7 +2374,7 @@ static const F80StatusItem *current_status(void) {
             tracker.inline_table_index==table?"Hide":"Tbl";
         pattern_status_visible[6].action=toggle_inline_table;
     }
-    return pattern_status_visible;
+    return mode_status(pattern_status_visible);
 }
 static void change_octave(int delta) {
     tracker.entry_octave=clamp(tracker.entry_octave+delta,0,8);
