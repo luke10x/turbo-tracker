@@ -310,6 +310,9 @@ int main(void) {
     assert(tracker.follow==0);
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
+    assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_AUDIO_RECOVER}));
+    tt_play_flush();
+    assert(tracker.audio_recovery_result==1);
     F80Widget order_choice={0};order_choice.cursor=1;
     tracker.play_order=0;
     tracker.active_order_index=0;

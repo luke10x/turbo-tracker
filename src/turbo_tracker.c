@@ -57,6 +57,40 @@ EM_JS(void, tt_web_wrap_rect, (int x,int y,int width,int height), {
 EM_JS(int, tt_web_compact_editing, (), {
     return !!window.f80CompactEditing;
 });
+EM_JS(void, tt_web_install_audio_lifecycle, (), {
+    if (Module.ttAudioLifecycleInstalled) return;
+    Module.ttAudioLifecycleInstalled = true;
+    Module.ttAudioLifecyclePending = false;
+    let lastAudioRecovery = 0;
+    const recover = (fromGesture = false) => {
+        if (!Module.ttAudioLifecyclePending || document.hidden || !Module.ccall) return;
+        const now = Date.now();
+        if (!fromGesture && now - lastAudioRecovery < 500) return;
+        lastAudioRecovery = now;
+        try {
+            if (Module.ccall('tt_tracker_audio_recover', 'number', [], []) && fromGesture)
+                Module.ttAudioLifecyclePending = false;
+        } catch (error) {
+            console.warn('Turbo Tracker audio recovery failed', error);
+        }
+    };
+    const markBackgrounded = () => { Module.ttAudioLifecyclePending = true; };
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) markBackgrounded();
+        else recover();
+    });
+    window.addEventListener('pagehide', markBackgrounded);
+    document.addEventListener('freeze', markBackgrounded);
+    window.addEventListener('pageshow', recover);
+    window.addEventListener('focus', recover);
+    window.addEventListener('pointerdown', () => recover(true), true);
+    window.addEventListener('touchstart', () => recover(true), true);
+});
+EMSCRIPTEN_KEEPALIVE int tt_tracker_audio_recover(void) {
+    if (!tt_play_emit((TtPlayEvent){.type=TT_PLAY_AUDIO_RECOVER}))return 0;
+    tt_play_flush();
+    return tracker.audio_recovery_result;
+}
 #endif
 
 TtTracker tracker;
@@ -3995,6 +4029,9 @@ int main(int argc,char **argv) {
     tracker.console->window_role=F80_WINDOW_CONSOLE;
     tracker.console->visible=0;
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
+#ifdef __EMSCRIPTEN__
+    tt_web_install_audio_lifecycle();
+#endif
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);

@@ -423,6 +423,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_ROW_PLAYED:name="row played";break;
     case TT_PLAY_FINISHED:name="finished";break;
     case TT_PLAY_DOCUMENT_RESET:name="document reset";break;
+    case TT_PLAY_AUDIO_RECOVER:name="recover audio device";break;
     }
     char detail[96];
     if(event.type==TT_PLAY_ROW_PLAYED && event.c>=0)
@@ -541,6 +542,17 @@ void tt_play_flush(void) {
             tracker.order_range_active=0;
             tracker.play_mode=PLAY_SONG;
             tracker.play_order=tracker.play_step=0;
+            break;
+        case TT_PLAY_AUDIO_RECOVER:
+            tracker.audio_recovery_result=tt_audio_recover();
+            if(tracker.audio_recovery_result) {
+                if(tracker.playing) {
+                    tracker.frames_to_tick=0;
+                    tracker.song_written_frames=0;
+                    tracker.display_head=tracker.display_tail=0;
+                }
+                tt_tracker_message("Audio output restored");
+            } else tt_tracker_message("Audio output could not be restored; tap to retry");
             break;
         }
     }

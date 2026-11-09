@@ -6,6 +6,7 @@
 enum { TT_AUDIO_OUTPUT_RATE=48000 };
 
 int tt_audio_open(void);
+int tt_audio_recover(void);
 void tt_audio_close(void);
 void tt_audio_stop(void);
 int tt_audio_begin_song(void);

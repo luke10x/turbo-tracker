@@ -128,6 +128,27 @@ int tt_audio_open(void) {
     }
     return 1;
 }
+int tt_audio_recover(void) {
+    if(!audio.stream)return 1;
+    int song_mode=audio.song_mode;
+    SDL_DestroyAudioStream(audio.stream);
+    audio.stream=NULL;
+    audio.song_mode=0;
+    SDL_AudioSpec spec={SDL_AUDIO_F32,2,OUTPUT_RATE};
+    audio.stream=SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                           &spec,fill_audio,NULL);
+    if(!audio.stream)return 0;
+    if(song_mode && !SDL_SetAudioStreamGetCallback(audio.stream,NULL,NULL)) {
+        tt_audio_close();
+        return 0;
+    }
+    audio.song_mode=song_mode;
+    if(!SDL_ResumeAudioStreamDevice(audio.stream)) {
+        tt_audio_close();
+        return 0;
+    }
+    return 1;
+}
 void tt_audio_stop(void) {
     if(audio.stream)SDL_LockAudioStream(audio.stream);
     for(int channel=0;channel<TT_CHANNELS;++channel) {
