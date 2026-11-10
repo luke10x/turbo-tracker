@@ -27,6 +27,7 @@
 #include "tt_play.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+static int web_audio_lifecycle_installed;
 EM_JS(void, choose_web_wav, (), {
     if(window.f80ChooseWav)window.f80ChooseWav();
 });
@@ -1475,7 +1476,9 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             (order>=0?order==tracker.active_order_index:
              pattern_index==tracker.active_pattern_index);
         char gutter[8];
-        if(row==0 && order>=0)snprintf(gutter,sizeof(gutter),"O%02X ",order);
+        if(row==0 && tracker.play_mode==PLAY_PATTERN)
+            snprintf(gutter,sizeof(gutter),"P%02X ",pattern_index);
+        else if(row==0 && order>=0)snprintf(gutter,sizeof(gutter),"O%02X ",order);
         else snprintf(gutter,sizeof(gutter)," %02X ",row);
         int y=r.y+3+line;
         f80_put(y,r.x,gutter,4,editable && row==tracker.step?3:
@@ -3838,6 +3841,10 @@ static int frame(void *user) {
                tracker.focus==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
+    if(!web_audio_lifecycle_installed) {
+        tt_web_install_audio_lifecycle();
+        web_audio_lifecycle_installed=1;
+    }
     if(tracker.app.modal==tracker.table_dialog && tracker.table_canvas) {
         F80Rect table=tracker.table_canvas->rect;
         tt_web_table_rect(table.x,table.y,table.w,table.h,
@@ -3926,6 +3933,7 @@ int main(int argc,char **argv) {
     setlocale(LC_ALL,"");
     memset(&tracker,0,sizeof(tracker));
     tracker.entry_octave=4;tracker.loop=tracker.follow=1;tracker.active_step=-1;
+    tracker.focus=FOCUS_PHRASE;
     tracker.edit_order=0;tracker.reveal_cursor=1;
     tracker.active_pattern_index=tracker.active_order_index=-1;
     if(!load_default_song(argv[0])) {
@@ -4029,9 +4037,6 @@ int main(int argc,char **argv) {
     tracker.console->window_role=F80_WINDOW_CONSOLE;
     tracker.console->visible=0;
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
-#ifdef __EMSCRIPTEN__
-    tt_web_install_audio_lifecycle();
-#endif
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);
