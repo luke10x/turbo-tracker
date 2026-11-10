@@ -23,6 +23,10 @@
   <script src="./curses_terminal.js?v=mobile-touch-20"></script>
   <script>
     window.f80ApplicationId = 'turbo-tracker';
+    const parameters = new URLSearchParams(location.search);
+    const initialSong = parameters.get('init_song');
+    if (initialSong) Module.INIT_SONG = initialSong;
+    if (parameters.get('init_play') === '1') Module.INIT_PLAY = '1';
     const input = document.getElementById('sample-file');
     const songInput = document.getElementById('sample-song-file');
     const status = document.getElementById('sample-file-status');

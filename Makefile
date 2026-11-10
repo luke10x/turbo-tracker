@@ -20,17 +20,19 @@ F80_CORE_WASM_OBJS := build/emscripten/obj/f80-core/f80.o \
 TT_APP_NATIVE_OBJS := $(addprefix $(PLATFORM_BUILD)/obj/tt-app/,tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
 TT_APP_WASM_OBJS := $(addprefix build/emscripten/obj/tt-app/,tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
 
-SAMPLE_DEMO_WAVS := samples/tgndshtn-part1.wav samples/tgndshtn-part2.wav \
-	samples/tgndshtn-part3.wav samples/tgndshtn-part4.wav
+SAMPLE_WAVS := samples/tgndshtn-part1.wav samples/tgndshtn-part2.wav \
+	samples/tgndshtn-part3.wav samples/tgndshtn-part4.wav samples/sine-c4.wav
 SAMPLE_DEFAULT_SONG := default.song
+SAMPLE_FEATURE_SONGS := $(wildcard examples/*/*.song)
 WASM_SRC := wasm
 WEB_DIR := build/emscripten/www
 WEB_TT_JS := $(WEB_DIR)/turbo-tracker/turbo-tracker.js
+CATALOG_DIR := build/emscripten/catalog
 ITCH_DIR := build/emscripten/itch
 SDL_CFLAGS := $(shell pkg-config --cflags sdl3)
 SDL_LIBS := $(shell pkg-config --libs sdl3)
 
-.PHONY: native wasm test serve clean check-emsdk itch
+.PHONY: native wasm test serve clean check-emsdk itch catalog catalog-wasm
 
 name:
 	@echo "turbo-tracker"
@@ -46,6 +48,17 @@ test: $(TT_TEST_CSV_BIN) $(TT_TEST_PATTERN_BIN) $(TT_TEST_SONG_BIN) $(TT_TEST_TI
 	$(TT_TEST_EDIT_BIN)
 
 wasm: check-emsdk web-assets $(WEB_TT_JS)
+
+catalog: catalog-wasm
+
+catalog-wasm: wasm
+	rm -rf $(CATALOG_DIR)
+	mkdir -p $(CATALOG_DIR)/turbo-tracker $(CATALOG_DIR)/examples
+	cp -R catalog/. $(CATALOG_DIR)/
+	cp -R wasm/. $(CATALOG_DIR)/
+	cp $(WEB_TT_JS) $(CATALOG_DIR)/turbo-tracker/
+	cp $(WEB_DIR)/turbo-tracker/turbo-tracker.wasm $(CATALOG_DIR)/turbo-tracker/
+	cp -R examples/. $(CATALOG_DIR)/examples/
 
 # ---- f80 library module (kept as-is, f80_* namespace) ----
 $(PLATFORM_BUILD)/obj/f80-core/f80.o: src/f80.c include/f80.h
@@ -89,13 +102,15 @@ build/emscripten/obj/tt-app/%.o: src/%.c $(wildcard src/*.h) include/f80.h
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
 		emcc $(WASM_CCOPTS) -sUSE_SDL=3 -c $< -o $@
 
-$(WEB_TT_JS): build/emscripten/obj/f80-core/f80.o $(F80_CORE_WASM_OBJS) $(TT_APP_WASM_OBJS) $(SAMPLE_DEMO_WAVS) $(SAMPLE_DEFAULT_SONG)
+$(WEB_TT_JS): build/emscripten/obj/f80-core/f80.o $(F80_CORE_WASM_OBJS) $(TT_APP_WASM_OBJS) $(SAMPLE_WAVS) $(SAMPLE_DEFAULT_SONG) $(SAMPLE_FEATURE_SONGS) wasm/init_song.js
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
 		emcc $(filter %.o,$^) -lm -sUSE_SDL=3 -s FORCE_FILESYSTEM=1 \
 		-s ALLOW_MEMORY_GROWTH=1 -s EXIT_RUNTIME=0 $(WASM_LDOPTS) \
-		$(foreach wav,$(SAMPLE_DEMO_WAVS),--embed-file $(wav)@/$(wav)) \
+		$(foreach wav,$(SAMPLE_WAVS),--embed-file $(wav)@/$(wav)) \
 		--embed-file $(SAMPLE_DEFAULT_SONG)@/default.song \
+		$(foreach song,$(SAMPLE_FEATURE_SONGS),--embed-file $(song)@/$(song)) \
+		--pre-js wasm/init_song.js \
 		-s EXPORTED_FUNCTIONS=_main,_tt_tracker_load_wav,_tt_tracker_recover_wav,_tt_tracker_load_song,_tt_tracker_save_song,_tt_tracker_audio_recover,_tt_tracker_begin_touch_selection,_tt_tracker_touch_scroll,_tt_tracker_touch_scroll_fields,_tt_tracker_scroll_order,_tt_tracker_hold_order_selection,_tt_tracker_drag_order_selection,_tt_tracker_scroll_table,_tt_tracker_scroll_table_horizontal,_tt_tracker_scroll_table_actions,_tt_tracker_hold_table_selection,_tt_tracker_drag_table_selection,_tt_tracker_drag_selection,_tt_tracker_begin_wave_gesture,_tt_tracker_pan_wave_touch,_tt_tracker_hold_wave_marker,_tt_tracker_move_wave_marker,_tt_tracker_flush_input,_curses_push_key,_curses_push_mouse,_curses_push_resize \
 		-s EXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,FS -o $@
 

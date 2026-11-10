@@ -1,0 +1,14 @@
+<root>
+  <node title="Effects">
+    <node title="Glide (GLD)" href="./app.html?init_song=%2Fexamples%2Fglide%2Fglide.song&amp;init_play=1"
+          source="./examples/glide/README.md" />
+    <node title="Time stretch (RRR)" href="./app.html?init_song=%2Fexamples%2Ftime-stretch%2Ftime-stretch.song&amp;init_play=1"
+          source="./examples/time-stretch/README.md" />
+    <node title="Slice (SLC)">
+      <node title="Scale from SLC8B" href="./app.html?init_song=%2Fexamples%2Fslc-scale%2Fscale.song&amp;init_play=1"
+            source="./examples/slc-scale/README.md" />
+      <node title="Beat-sliced break" href="./app.html?init_song=%2Fexamples%2Fslc-break%2Fbreak.song&amp;init_play=1"
+            source="./examples/slc-break/README.md" />
+    </node>
+  </node>
+</root>

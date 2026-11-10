@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turbo Tracker Effects</title>
+  <script src="./components.js" type="module"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .catalog { display: flex; height: 100%; }
+    .sidebar { box-sizing: border-box; flex: 0 0 240px; min-height: 0; display: flex; flex-direction: column; background: #f3f3f3; font: 14px system-ui, sans-serif; }
+    #navigation { display: block; flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+    #navigation h1 { font-size: 18px; margin-top: 0; }
+    #navigation ul { padding-left: 20px; }
+    #navigation .source { color: #666; font-size: 12px; margin-left: 4px; }
+    .terminal-settings { border-top: 1px solid #bbb; padding: 12px 16px 16px; }
+    .terminal-settings label { display: block; margin: 0 0 5px; font-weight: 600; }
+    .terminal-settings select, .terminal-settings input { box-sizing: border-box; width: 100%; margin: 0 0 10px; padding: 4px; font: inherit; }
+    .terminal-settings .numbers { display: flex; gap: 8px; }
+    .terminal-settings .numbers > div { min-width: 0; flex: 1; }
+    .terminal-settings .numbers input { margin-bottom: 0; }
+    #custom-font[hidden] { display: none; }
+    #example { border: 0; flex: 1; height: 100%; min-width: 0; }
+  </style>
+</head>
+<body>
+  <div class="catalog">
+    <aside class="sidebar">
+    <xml-ajax id="navigation" src="./navigation.xml">
+      <script type="text/xml">
+        <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+          <xsl:template match="root">
+            <h1>Effects</h1>
+            <ul><xsl:apply-templates select="node" /></ul>
+          </xsl:template>
+          <xsl:template match="node[not(@href)]">
+            <li><xsl:value-of select="@title" /><ul><xsl:apply-templates select="node" /></ul></li>
+          </xsl:template>
+          <xsl:template match="node[@href]">
+            <li>
+              <a target="example" href="{@href}"><xsl:value-of select="@title" /></a>
+              <a class="source" target="example" href="{@source}">(guide)</a>
+            </li>
+          </xsl:template>
+        </xsl:stylesheet>
+      </script>
+    </xml-ajax>
+    <div class="terminal-settings">
+      <label for="terminal-font">Terminal font</label>
+      <select id="terminal-font">
+        <option value="Menlo">Menlo</option>
+        <option value="Monaco">Monaco</option>
+        <option value="Consolas">Consolas</option>
+        <option value="Courier New">Courier New</option>
+        <option value="DejaVu Sans Mono">DejaVu Sans Mono</option>
+        <option value="Noto Sans Mono">Noto Sans Mono</option>
+        <option value="JetBrains Mono">JetBrains Mono</option>
+        <option value="monospace">Browser monospace</option>
+        <option value="custom">Custom font…</option>
+      </select>
+      <input id="custom-font" type="text" placeholder="Installed font name" aria-label="Custom font name" hidden>
+      <div class="numbers">
+        <div><label for="terminal-size">Size (px)</label><input id="terminal-size" type="number" min="8" max="32" step="1" value="14"></div>
+        <div><label for="terminal-line-height">Line height</label><input id="terminal-line-height" type="number" min="1" max="2" step="0.05" value="1"></div>
+      </div>
+    </div>
+    </aside>
+    <iframe name="example" id="example"
+      src="./app.html?init_song=%2Fexamples%2Ftime-stretch%2Ftime-stretch.song&amp;init_play=1"
+      title="Turbo Tracker effect"></iframe>
+  </div>
+  <script>
+    const navigation = document.getElementById('navigation');
+    const iframe = document.getElementById('example');
+    const font = document.getElementById('terminal-font');
+    const customFont = document.getElementById('custom-font');
+    const size = document.getElementById('terminal-size');
+    const lineHeight = document.getElementById('terminal-line-height');
+    const saved = JSON.parse(localStorage.getItem('turbo-tracker-terminal-settings') || '{}');
+    font.value = saved.font || 'Menlo';
+    customFont.value = saved.customFont || '';
+    size.value = saved.size || 14;
+    lineHeight.value = saved.lineHeight || 1;
+    function updateSettings() {
+      customFont.hidden = font.value !== 'custom';
+      const family = (font.value === 'custom' ? customFont.value.trim() : font.value) || 'monospace';
+      const settings = { font: font.value, customFont: customFont.value,
+        size: Math.max(8, Math.min(32, Number(size.value) || 14)),
+        lineHeight: Math.max(1, Math.min(2, Number(lineHeight.value) || 1)) };
+      localStorage.setItem('turbo-tracker-terminal-settings', JSON.stringify(settings));
+      iframe.contentWindow.postMessage({ type: 'f80-terminal-settings',
+        fontFamily: font.value === 'monospace' ? 'monospace' : `"${family.replaceAll('"', '')}", monospace`,
+        fontSize: settings.size, lineHeight: settings.lineHeight }, location.origin);
+    }
+    for (const control of [font, customFont, size, lineHeight]) control.addEventListener('input', updateSettings);
+    iframe.addEventListener('load', updateSettings);
+    updateSettings();
+    navigation.addEventListener('click', event => {
+      const link = event.target.closest('a');
+      if (link) history.replaceState({}, '', `#${link.getAttribute('href')}`);
+    });
+    const initialHref = location.hash.slice(1);
+    if (initialHref) iframe.src = initialHref;
+  </script>
+</body>
+</html>

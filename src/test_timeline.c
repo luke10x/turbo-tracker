@@ -9,6 +9,11 @@ static void count_header_click(F80Widget *button,void *user) {
 }
 
 int main(void) {
+    unsetenv("INIT_PLAY");
+    assert(!initial_play_requested());
+    assert(setenv("INIT_PLAY","1",1)==0 && initial_play_requested());
+    assert(setenv("INIT_PLAY","0",1)==0 && !initial_play_requested());
+    assert(unsetenv("INIT_PLAY")==0);
     TtSong demo;
     tt_song_make_demo(&demo);
     assert(demo.pattern_count==4 && demo.order_count==4);
@@ -208,6 +213,56 @@ int main(void) {
     handle_key(' ');
     assert(!tracker.playing);
 
+    memset(&tracker,0,sizeof(tracker));
+    assert(setenv("INIT_SONG","examples/time-stretch/time-stretch.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_count==1 && tracker.song.order_count==1 &&
+           tracker.song.pattern_rows==64 && tracker.song.bpm==110 &&
+           tracker.sample_count==4 && tracker.wave.pcm &&
+           tracker.song.pattern[0].cell[0][0].effect==TT_EFFECT_R &&
+           tracker.song.pattern[0].cell[0][0].value==0x80 &&
+           tracker.song.pattern[0].cell[8][0].effect==TT_EFFECT_R &&
+           tracker.song.pattern[0].cell[8][0].value==0x00 &&
+           tracker.song.pattern[0].cell[32][0].effect==TT_EFFECT_R &&
+           tracker.song.pattern[0].cell[32][0].value==0xff);
+    assert(setenv("INIT_SONG","examples/glide/glide.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_count==3 && tracker.song.order_count==3 &&
+           tracker.song.pattern_rows==32 && tracker.song.bpm==180 &&
+           tracker.song.order[0]==0 && tracker.song.order[1]==1 &&
+           tracker.song.order[2]==2 &&
+           tracker.sample_count==1 && tracker.wave.pcm &&
+           tracker.wave.frames==110239 && tracker.wave.rate==44100 &&
+           tracker.song.pattern[0].cell[0][0].note==60 &&
+           tracker.song.pattern[0].cell[0][0].effect==TT_EFFECT_NONE &&
+           tracker.song.pattern[0].cell[2][0].note==64 &&
+           tracker.song.pattern[0].cell[2][0].effect==TT_EFFECT_NONE &&
+           tracker.song.pattern[1].cell[0][0].note==60 &&
+           tracker.song.pattern[1].cell[2][0].note==64 &&
+           tracker.song.pattern[1].cell[2][0].effect==TT_EFFECT_G &&
+           tracker.song.pattern[1].cell[2][0].value==0x04 &&
+           tracker.song.pattern[2].cell[2][0].effect==TT_EFFECT_G &&
+           tracker.song.pattern[2].cell[2][0].value==0x08);
+    assert(setenv("INIT_SONG","examples/slc-scale/scale.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_count==1 && tracker.song.pattern_rows==16 &&
+           tracker.sample_count==1 && tracker.phrase.slice_note_offset[8]==12 &&
+           tracker.song.pattern[0].cell[0][0].note==72 &&
+           tracker.song.pattern[0].cell[0][0].effect==TT_EFFECT_S &&
+           tracker.song.pattern[0].cell[0][0].value==0x8b &&
+           tracker.song.pattern[0].cell[14][0].note==84);
+    assert(setenv("INIT_SONG","examples/slc-break/break.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_rows==64 && tracker.song.bpm==144 &&
+           tracker.song.order_count==1 && tracker.sample_count==1 &&
+           tracker.phrase.marker[1]-tracker.phrase.marker[0]==2294 &&
+           tracker.song.pattern[0].cell[0][0].value==0x01 &&
+           tracker.song.pattern[0].cell[14][0].value==0xef &&
+           tracker.song.pattern[0].cell[15][0].value==0x0f &&
+           tracker.song.pattern[0].cell[30][0].value==0xf0 &&
+           tracker.song.pattern[0].cell[45][0].value==0xfe &&
+           tracker.song.pattern[0].cell[59][0].value==0x10);
+    assert(unsetenv("INIT_SONG")==0);
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.sample_count==4 && tracker.song.pattern_count>0 &&

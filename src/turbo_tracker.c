@@ -3920,11 +3920,26 @@ static int frame(void *user) {
     return 1;
 }
 static int load_default_song(const char *executable) {
+    const char *initial_song=getenv("INIT_SONG");
 #ifdef __EMSCRIPTEN__
     (void)executable;
-    if(!load_song_at("/default.song"))return 0;
+    if(initial_song && initial_song[0]) {
+        char path[512];
+        const char *selected=initial_song;
+        if(initial_song[0]!='/') {
+            if(snprintf(path,sizeof(path),"/%s",initial_song)>=(int)sizeof(path)) {
+                tt_tracker_message("INIT_SONG path is too long");return 0;
+            }
+            selected=path;
+        }
+        if(!load_song_at(selected))return 0;
+    } else if(!load_song_at("/default.song"))return 0;
 #else
     char path[PATH_MAX],resolved[PATH_MAX],directory[PATH_MAX];
+    if(initial_song && initial_song[0]) {
+        if(!load_song_at(initial_song))return 0;
+        goto loaded;
+    }
     if(executable && realpath(executable,directory)) {
         char *slash=strrchr(directory,'/');
         if(slash) {
@@ -3952,6 +3967,10 @@ loaded:
         if(!wave->pcm) { tt_tracker_message("Default song has a missing WAV");return 0; }
     }
     return 1;
+}
+static int initial_play_requested(void) {
+    const char *value=getenv("INIT_PLAY");
+    return value && value[0] && strcmp(value,"0")!=0;
 }
 int main(int argc,char **argv) {
     setlocale(LC_ALL,"");
@@ -4061,6 +4080,7 @@ int main(int argc,char **argv) {
     tracker.console->window_role=F80_WINDOW_CONSOLE;
     tracker.console->visible=0;
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
+    if(initial_play_requested())send_play(TT_PLAY_START,0,0);
     f80_curses_run(frame,NULL,30);
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);

@@ -26,7 +26,7 @@ and live WAV loading in the browser.
   - `test_*.c` — unit tests
 - `include/` — F80 headers, the curses-key adapter, and the webcurses shim
   (`include/web_curses/curses.h`)
-- `samples/` — the four demo WAVs (`tgndshtn-part1..4.wav`)
+- `samples/` — four demo WAVs (`tgndshtn-part1..4.wav`) and a C-4 sine
 - `default.song` — the embedded demo song
 - `wasm/` — browser shell: `app.html`, `curses_terminal.js` (xterm.js wiring,
   keyboard/mouse/touch forwarding), vendored xterm.js files
@@ -111,6 +111,28 @@ The startup song is [`default.song`](default.song). It loads four `tgndshtn`
 WAVs, has 13 patterns and 28 play-order entries, and starts at BPM 157 with 16
 rows per pattern, 8 rows per beat, and 12 ticks per row. Its custom sample
 markers and slices are part of the song.
+
+`INIT_SONG` selects a different startup song; unset, the app uses
+`default.song`. `INIT_PLAY=1` starts playback automatically; playback is off
+by default. For example:
+
+```sh
+make native
+INIT_SONG=examples/glide/glide.song INIT_PLAY=1 build/macos/bin/turbo-tracker
+```
+
+The browser catalog passes the same settings through the app URL.
+
+### Feature catalog
+
+`make catalog` builds the **Effects** catalog as a self-contained website directory at
+`build/emscripten/catalog/`. Upload that directory as-is; its `index.html`
+opens the effect catalog. The navigation tree is in
+[`catalog/navigation.xml`](catalog/navigation.xml), and each feature has one
+focused song under [`examples/`](examples/README.md). `make catalog-wasm` is an
+explicit alias for the same build. Effect entries use `Name (CODE)` titles and
+are sorted alphabetically by code. Catalog links set `INIT_PLAY=1`; the regular
+app remains silent on startup. The four demo WAVs and C-4 sine are embedded.
 
 The tracker has six sample channels, 16 to 256 rows per pattern in steps of 16,
 up to 32 named patterns, and up to 128 play-order entries. A pattern may appear
