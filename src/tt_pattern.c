@@ -17,7 +17,9 @@ static const char *effect_alias(int effect) {
     case 'O':return "OUT";case 'P':return "PAN";
     case 'R':return "RRR";case 'r':return "RTG";case 'S':return "SLC";
     case 'T':return "TBL";case 'V':return "VIB";
-    case 'W':return "WBL";default:return NULL;
+    case 'W':return "WBL";case 'X':return "XJP";
+    case 'Y':return "YRJ";case 'Z':return "ZTM";
+    default:return NULL;
     }
 }
 void tt_pattern_effect_text(int command,int value,char text[6]) {
@@ -33,7 +35,8 @@ void tt_pattern_effect_text(int command,int value,char text[6]) {
 void tt_cell_text(const TtCell *cell,char text[11]) {
     static const char digits[]="0123456789ABCDEF";
     memcpy(text,"..........",11);
-    if(cell->note>=0) {
+    if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
+    else if(cell->note>=0) {
         char note[4];tt_note_name(cell->note,note);
         memcpy(text,note,3);
     }
@@ -52,16 +55,17 @@ void tt_cell_text(const TtCell *cell,char text[11]) {
     text[10]=0;
 }
 static int parse_note(const char *text) {
+    if(!memcmp(text,"OFF",3))return TT_NOTE_OFF;
     if(!memcmp(text,"...",3))return -1;
     for(int note=0;note<=127;++note) {
         char name[4];tt_note_name(note,name);
         if(!memcmp(text,name,3))return note;
     }
-    return -2;
+    return -3;
 }
 static int parse_cell(const char *text,TtCell *cell) {
     cell->note=parse_note(text);
-    if(cell->note == -2)return 0;
+    if(cell->note == -3)return 0;
     if(text[3]=='.' && text[4]=='.')cell->instrument=-1;
     else {
         int high=hex(text[3]),low=hex(text[4]);
@@ -78,7 +82,7 @@ static int parse_cell(const char *text,TtCell *cell) {
         else if(!memcmp(text+5,"~ST",3))cell->effect=TT_EFFECT_STRETCH;
         else {
             cell->effect=TT_EFFECT_NONE;
-            for(const char *commands="GIJKMNOPRSTVW";*commands;++commands) {
+            for(const char *commands="GIJKMNOPRSTVWXYZ";*commands;++commands) {
                 const char *alias=effect_alias(*commands);
                 if(!memcmp(text+5,alias,3)) { cell->effect=*commands;break; }
             }
@@ -95,7 +99,8 @@ static int parse_cell(const char *text,TtCell *cell) {
 }
 static void cell_row_text(const TtCell *cell,char text[20]) {
     static const char digits[]="0123456789ABCDEF";
-    if(cell->note>=0)tt_note_name(cell->note,text);
+    if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
+    else if(cell->note>=0)tt_note_name(cell->note,text);
     else memcpy(text,"...",3);
     if(cell->instrument>=0 && cell->instrument<=255) {
         text[3]=digits[cell->instrument>>4];text[4]=digits[cell->instrument&15];

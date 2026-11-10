@@ -8,11 +8,13 @@ enum { TT_MARKERS=16, TT_SLICES=15, TT_STEPS=16,
        TT_MAX_FRAMES=8000000 };
 enum { TT_SLICE_INHERIT=-1000 };
 enum { TT_PATTERN_EFFECTS=3 };
+enum { TT_NOTE_OFF=-2 };
 enum { TT_EFFECT_NONE=0, TT_EFFECT_G='G', TT_EFFECT_I='I',
        TT_EFFECT_J='J', TT_EFFECT_K='K', TT_EFFECT_M='M',
        TT_EFFECT_N='N', TT_EFFECT_O='O', TT_EFFECT_P='P',
        TT_EFFECT_R='R', TT_EFFECT_S='S', TT_EFFECT_T='T',
-       TT_EFFECT_V='V', TT_EFFECT_W='W',
+       TT_EFFECT_V='V', TT_EFFECT_W='W', TT_EFFECT_X='X',
+       TT_EFFECT_Y='Y', TT_EFFECT_Z='Z',
        TT_EFFECT_STRETCH='R', TT_EFFECT_LEGACY_RETRIGGER='r' };
 
 typedef struct { int command,value; } TtPatternEffect;

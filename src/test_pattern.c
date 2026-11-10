@@ -17,18 +17,25 @@ int main(void) {
     original.cell[9][2]=(TtCell){-1,-1,TT_EFFECT_M,0x80,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[10][3]=(TtCell){60,1,TT_EFFECT_S,0xff,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[11][3]=(TtCell){-1,-1,TT_EFFECT_S,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
-    const char *commands="GIJKMNOPRSTVW";
+    const char *commands="GIJKMNOPRSTVWXY";
     for(int row=0;commands[row];++row)
         original.cell[row+1][4]=(TtCell){-1,-1,commands[row],0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[14][4]=(TtCell){60,1,TT_EFFECT_STRETCH,0x40,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
-    original.cell[15][0].effect3=TT_EFFECT_P;
-    original.cell[15][0].value3=0x56;
+    original.cell[14][5]=(TtCell){-1,-1,TT_EFFECT_Z,0x30,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[15][0]=(TtCell){TT_NOTE_OFF,-1,TT_EFFECT_X,0x1f,
+                                    TT_EFFECT_Y,0x0f,TT_EFFECT_Z,0x30};
     char blank_value[11];
     tt_cell_text(&original.cell[11][3],blank_value);
     assert(!strcmp(blank_value,".....SLC.."));
     char reverse_alias[6];
     tt_pattern_effect_text(TT_EFFECT_R,0x40,reverse_alias);
     assert(!strcmp(reverse_alias,"RRR40"));
+    char jump_alias[6];
+    tt_pattern_effect_text(TT_EFFECT_X,0xa5,jump_alias);
+    assert(!strcmp(jump_alias,"XJPA5"));
+    char off_cell[11];
+    tt_cell_text(&original.cell[15][0],off_cell);
+    assert(!strcmp(off_cell,"OFF..XJP1F"));
     assert(tt_pattern_save(path,&original,error,sizeof(error)));
     FILE *file=fopen(path,"r");assert(file);
     char line[128];assert(fgets(line,sizeof(line),file));

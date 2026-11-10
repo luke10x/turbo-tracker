@@ -28,6 +28,8 @@ int main(void) {
     song.pattern[1].cell[5][2]=(TtCell){67,1,TT_EFFECT_V,0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     song.pattern[1].cell[6][2]=(TtCell){-1,-1,TT_EFFECT_P,0x80,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     song.pattern[1].cell[7][2]=(TtCell){72,1,TT_EFFECT_STRETCH,0x40,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    song.pattern[1].cell[8][2]=(TtCell){-1,-1,TT_EFFECT_X,1,TT_EFFECT_Y,0x0a,TT_EFFECT_Z,0x0c};
+    song.pattern[1].cell[9][2].note=TT_NOTE_OFF;
     song.pattern[1].cell[3][2].effect2=TT_EFFECT_J;
     song.pattern[1].cell[3][2].value2=0x12;
     song.pattern[1].cell[3][2].effect3=TT_EFFECT_N;
@@ -40,6 +42,8 @@ int main(void) {
     song.table[0].tick[0].effect[1]=(TtTableEffect){'S',0xaf};
     song.table[0].tick[0].effect[4]=(TtTableEffect){'U',0x05};
     song.table[0].tick[TT_TABLE_MAX_TICKS-1].effect[5]=(TtTableEffect){'X',0x01};
+    song.table[0].tick[TT_TABLE_MAX_TICKS-1].note=TT_NOTE_OFF;
+    song.table[0].tick[TT_TABLE_MAX_TICKS-1].effect[4]=(TtTableEffect){'Y',0xff};
     song.table[0].tick[2].effect[0]=(TtTableEffect){'S',-1};
     song.table[0].tick[3].effect[0]=(TtTableEffect){'W',0x4f};
     song.table[0].tick[3].effect[1]=(TtTableEffect){'N',0x38};

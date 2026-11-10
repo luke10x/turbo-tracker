@@ -194,8 +194,8 @@ value controls steps of 16 or 1, repeat, and clear.
 
 ### Tables
 
-**Song > Tables...** opens 16 tables, numbered `00`–`0F`. Each starts at 16
-ticks and can be resized to 256 ticks in steps of 16. Each table has an editable
+**Song > Tables...** opens 16 tables, numbered `00`–`0F`. Each starts at 6
+ticks and can be resized from 1 to 256 ticks, indexed `00`–`FF`. Each table has an editable
 name above its unframed blue grid. Horizontal and vertical scrollbars appear
 only when their content overflows; a swipe scrolls it, while a one-second hold
 starts a rectangular selection. Shift+arrows extends the selection; F5 copies,
@@ -215,7 +215,10 @@ explicit instrument number. The default is 12 table ticks per pattern row. The
 six effect slots are processed left to right on each tick. Playback handles the
 per-channel effects listed in the effect status, plus `U` note delay, `T`
 schedule the next table, `X` jump to a table, and `Y` jump to a tick in the
-current table. Song files save timing and pattern length in format version 5.
+current table. In patterns, `X` jumps to another pattern/order, `Y` jumps to a
+row, and `Z` sets ticks per row (`00` restores the song setting). Enter `OFF`
+in the note field with `O`; a new note or `OFF` exits a backward table Y loop.
+Song files save timing and pattern length in format version 6.
 Versions 1–3 load with 16 rows, 4 rows per beat, and 12 ticks per row; version 1
 loads empty 16-tick tables and version 2 gives tables default names. The
 built-in table `00` is available for editing and effect experiments, but the

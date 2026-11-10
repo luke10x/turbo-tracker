@@ -16,6 +16,8 @@ static void voice(void) {
     audio.glide_current[0]=1;
 }
 int main(void) {
+    voice();tt_audio_note_off(0);
+    assert(!tt_audio_active());
     voice();tt_audio_command(0,'P',0);
     assert(tt_audio_pan(0)==0);
     tt_audio_command(0,'P',255);

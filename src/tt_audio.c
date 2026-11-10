@@ -212,6 +212,12 @@ int tt_audio_play_channel(int channel,const TtWave *wave,int start,int end,
     SDL_UnlockAudioStream(audio.stream);
     return 1;
 }
+void tt_audio_note_off(int channel) {
+    if(channel<0 || channel>=TT_CHANNELS)return;
+    if(audio.stream)SDL_LockAudioStream(audio.stream);
+    audio.voice[channel].active=0;
+    if(audio.stream)SDL_UnlockAudioStream(audio.stream);
+}
 void tt_audio_set_stretch(int channel,int value) {
     if(channel<0 || channel>=TT_CHANNELS || value<0 || value>255)return;
     double ratio=pow(2.0,(128-value)/64.0);

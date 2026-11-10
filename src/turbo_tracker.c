@@ -978,7 +978,7 @@ static void adjust_value(int delta) {
         else if(pattern_effect_field()) {
             int slot=pattern_effect_slot();
             TtPatternEffect *fx=tt_cell_effect(cell,slot);
-            const char *effects="GIJKMNOPRSTVW";
+            const char *effects="GIJKMNOPRSTVWXYZ";
             const char *current=fx->command?strchr(effects,fx->command):NULL;
             int index=current?(int)(current-effects):-1;
             int next=clamp(index+(delta>0?1:-1),-1,(int)strlen(effects)-1);
@@ -1325,7 +1325,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                                 memcpy(shown,tracker.note_input,
                                        (size_t)tracker.note_input_length);
                                 shown[tracker.note_input_length]=0;
-                            } else if(tick->note>=0)tt_note_name(tick->note,shown);
+                            } else if(tick->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
+                            else if(tick->note>=0)tt_note_name(tick->note,shown);
                             else { memcpy(shown,"...",4);empty=1; }
                         } else if(column==1) {
                             if(tick->instrument>=0)
@@ -1365,9 +1366,10 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             } else if(inline_line && channel==tracker.inline_table_channel) {
                 const TtTableTick *tick=&tracker.song.table[tracker.inline_table_index].tick[table_tick];
                 if(field==0) {
-                    if(tick->note>=0)tt_note_name(tick->note,shown);
+                    if(tick->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
+                    else if(tick->note>=0)tt_note_name(tick->note,shown);
                     else memcpy(shown,"...",4);
-                    empty=tick->note<0;
+                    empty=tick->note==-1;
                 } else if(field==1) {
                     if(tick->instrument>=0)snprintf(shown,sizeof(shown),"%02X",tick->instrument);
                     else memcpy(shown,"..",3);
@@ -1387,9 +1389,10 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             } else if(field>7) {
                 memset(shown,' ',sizeof(shown));shown[visible]=0;empty=1;
             } else if(field==0) {
-                if(cell->note>=0)tt_note_name(cell->note,shown);
+                if(cell->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
+                else if(cell->note>=0)tt_note_name(cell->note,shown);
                 else memcpy(shown,"...",4);
-                empty=cell->note<0;
+                empty=cell->note==-1;
             } else if(field==1) {
                 if(cell->instrument>=0)snprintf(shown,sizeof(shown),"%02X",cell->instrument);
                 else memcpy(shown,"..",3);
@@ -1798,7 +1801,7 @@ static void apply_settings(F80Widget *button,void *user) {
        !setting_number(tracker.settings_input[3],1,TT_MAX_TICKS_PER_ROW,&ticks) ||
        !setting_number(tracker.settings_input[4],TT_TABLE_MIN_TICKS,
                        TT_TABLE_MAX_TICKS,&table_length)) {
-        tt_tracker_message("Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48, table 1-16");
+        tt_tracker_message("Use BPM 30-300, pattern 16-256 by 16, beat 1-16, ticks 1-48, table 1-256");
         return;
     }
     stop_playback(NULL,NULL);
@@ -1816,7 +1819,7 @@ static void show_settings(F80Widget *button,void *user) {
     (void)button;(void)user;
     static const char *labels[]={"BPM (30-300)","Pattern rows (16-256)",
                                  "Rows per beat (1-16)","Ticks per row (1-48)",
-                                 "Table ticks (1-16)"};
+                                 "Table ticks (1-256)"};
     int values[]={tracker.song.bpm,tracker.song.pattern_rows,
                   tracker.song.rows_per_beat,tracker.song.ticks_per_row,
                   tracker.song.table[0].length};
@@ -1881,7 +1884,8 @@ static void table_cell_text(void *user,int tick,int field,char *out,size_t size)
     (void)user;
     const TtTableTick *entry=&tracker.song.table[tracker.table_index].tick[tick];
     if(field==0) {
-        if(entry->note<0)snprintf(out,size,"...");
+        if(entry->note==TT_NOTE_OFF)snprintf(out,size,"OFF");
+        else if(entry->note<0)snprintf(out,size,"...");
         else { char note[4];tt_note_name(entry->note,note);snprintf(out,size,"%s",note); }
     } else if(field==1) {
         if(entry->instrument<0)snprintf(out,size,"..");
@@ -1967,7 +1971,8 @@ static void show_help(F80Widget *button,void *user) {
         "Wave: Ctrl+Left/Right selects markers; Shift+Left/Right moves one.",
         "Wave: F7/F8 or Down/Up zoom; Left/Right pans; 0-F selects.",
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
-        "FX: G I J K M N O P R S T V W; values 00-FF.",
+        "FX: G I J K M N O P R S T V W X Y Z; values 00-FF.",
+        "O in the note field enters OFF; X/Y jump pattern or row, Z sets ticks per row.",
         "Pattern/table notes: type C-4 or C#4; Space advances fields.",
         "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
@@ -2450,6 +2455,13 @@ static int typed_note_value(const char input[4]) {
     return note<=127?note:-1;
 }
 static void type_note_key(int key) {
+    if((key=='o' || key=='O') && tracker.note_input_length==0) {
+        TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+        edited.note=TT_NOTE_OFF;
+        edit_cell(tracker.step,tracker.channel,edited);
+        tt_tracker_message("Note off entered");
+        return;
+    }
     char character=(char)toupper((unsigned char)key);
     int length=tracker.note_input_length;
     int valid=length==0?strchr("CDEFGAB",character)!=NULL:
@@ -2581,6 +2593,14 @@ static void inline_table_clear_field(void) {
     inline_table_commit(tick);
 }
 static void type_inline_table_note_key(int key) {
+    if((key=='o' || key=='O') && tracker.note_input_length==0) {
+        TtTableTick edited=tracker.song.table[tracker.inline_table_index].tick[
+            tracker.inline_table_tick];
+        edited.note=TT_NOTE_OFF;
+        inline_table_commit(edited);
+        tt_tracker_message("Table note off entered");
+        return;
+    }
     char character=(char)toupper((unsigned char)key);
     int length=tracker.note_input_length;
     int valid=length==0?strchr("CDEFGAB",character)!=NULL:
@@ -2695,7 +2715,10 @@ static void handle_table_key(int key) {
         table_clear_area();
     else if(tracker.table_grid.field==0) {
         int note=piano_offset(key);
-        if(note>=0) {
+        if(key=='o' || key=='O') {
+            entry->note=TT_NOTE_OFF;
+            changed=1;
+        } else if(note>=0) {
             entry->note=clamp((tracker.entry_octave+1)*12+note,0,127);
             changed=1;
         }
@@ -2817,7 +2840,8 @@ static void update_labels(void) {
         const char *field_name=tracker.field==0?"NOTE":tracker.field==1?"INST":
             tracker.field%2==0?"FX":"VALUE";
         if(tracker.field==0) {
-            if(cell->note>=0)tt_note_name(cell->note,shown);
+            if(cell->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
+            else if(cell->note>=0)tt_note_name(cell->note,shown);
             else memcpy(shown,"...",4);
         } else if(tracker.field==1) {
             if(cell->instrument>=0)snprintf(shown,sizeof(shown),"%02X",cell->instrument);
@@ -3091,7 +3115,7 @@ static void handle_key(int key) {
             entry->instrument=digit;
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(pattern_effect_field() &&
-                  strchr("GIJKMNOPRSTVW",key>='a' && key<='z'?key-32:key)) {
+                  strchr("GIJKMNOPRSTVWXYZ",key>='a' && key<='z'?key-32:key)) {
             set_effect_slot(entry,pattern_effect_slot(),key>='a' && key<='z'?key-32:key);
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field>=3 && tracker.field%2==1 && digit>=0) {

@@ -16,6 +16,9 @@ static int apply_cell_set(TtEditDoc *doc,const TtEditCellSet *e) {
     if(e->row<0 || e->row>=TT_MAX_STEPS || e->channel<0 || e->channel>=TT_CHANNELS) {
         reject(doc,"Cell out of range");return 0;
     }
+    if(e->cell.note<TT_NOTE_OFF || e->cell.note>127) {
+        reject(doc,"Note out of range");return 0;
+    }
     doc->active->cell[e->row][e->channel]=e->cell;
     return 1;
 }
@@ -212,6 +215,9 @@ static int table_ok(TtEditDoc *doc,int table) {
 static int apply_table_tick_set(TtEditDoc *doc,const TtEditTableTickSet *e) {
     if(!table_ok(doc,e->table))return 0;
     if(e->tick<0 || e->tick>=TT_TABLE_MAX_TICKS) { reject(doc,"Tick out of range");return 0; }
+    if(e->value.note<TT_NOTE_OFF || e->value.note>127) {
+        reject(doc,"Table note out of range");return 0;
+    }
     doc->song->table[e->table].tick[e->tick]=e->value;
     return 1;
 }

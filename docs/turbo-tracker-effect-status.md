@@ -3,7 +3,7 @@
 This tracks the commands in [the effect specification](tracker-effects-and-tables.md).
 “Working” means the command can be entered, saved, loaded, and run by the sample
 tracker. “Partial” identifies a context or behavior still missing. The tracker
-has one effect slot per pattern cell and six slots per table tick.
+has three effect slots per pattern cell and six slots per table tick.
 
 | Command | Pattern | Table | Status / remaining work |
 | --- | --- | --- | --- |
@@ -24,9 +24,9 @@ has one effect slot per pattern cell and six slots per table tick.
 | `U` UDL | — | Working | Table note delay in ticks; pattern delay not implemented. |
 | `V` VIB | Working | Working | Sine vibrato; high nibble speed, low nibble depth. |
 | `W` WBL | Working | Working | Sine tremolo; high nibble speed, low nibble depth. |
-| `X` XJP | — | Working | Table jump works; pattern order jump not implemented. |
-| `Y` YRJ | — | Working | Table tick jump works; pattern row jump not implemented. |
-| `Z` ZTM | — | — | Tempo control not implemented. |
+| `X` XJP | Working | Working | Pattern mode jumps directly; Song mode jumps to the next active order referencing the target. Table mode jumps immediately to tick `00` of the target table. |
+| `Y` YRJ | Working | Working | Absolute row/tick jump. A backward table jump loops until a pattern note or `OFF` in that channel breaks it. |
+| `Z` ZTM | Working | — | Sets runtime ticks per row (`01`–`30` hex); `00` restores the song setting. |
 | `0`–`F` slots | — | — | Slot writers and `$N` readers not implemented. |
 
 For `N`, `V`, and `W`, the high nibble advances a sine phase by that many
@@ -38,7 +38,9 @@ the output range. `N` depth `F` moves up to half the stereo width from the
 fixed pan position. These commands keep their state until changed or
 playback stops. Their phase timing follows the PT2 nibble scale; this is a
 sample engine, so its pitch and gain calculations are not bit-exact Paula
-emulation. `J` and `K` pitch offset is limited to eight octaves.
+emulation. `J` and `K` pitch offset is limited to eight octaves. Tables have
+256 ticks (`00`–`FF`); backward `Y` jumps repeat until a pattern note or `OFF`
+breaks the loop.
 
 The native test suite covers command text round trips, tick modulation,
 glide, panning, retrigger timing, and reverse slice bounds. The WASM build

@@ -56,6 +56,6 @@
 - [x] Insert table ticks under the parent row in a separate spanning area; interrupt and resume pattern channel separators around it, and show compact note, instrument, and six effect/value columns with one space between columns.
 - [x] Support inline table cursor movement and edits through table edit events.
 - [x] Keep inline table width independent of pattern channel widths; Up/Down enters from the parent row and exits to adjacent pattern rows.
-- [x] Use one song-wide table length, defaulting to 6 ticks and capped at 16; keep the existing table file records.
+- [x] Use one song-wide table length, defaulting to 6 ticks and capped at 256 (`00`–`FF`); keep the existing table file records.
 - [x] Remove the Tables window from the Song menu and update the default demo to show an inline table.
 - [ ] Verify the inline layout and table length setting in the running native and web interfaces.

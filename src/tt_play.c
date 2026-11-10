@@ -20,7 +20,7 @@ static int pattern_is_empty(const TtPattern *pattern) {
     for(int row=0;row<tracker.song.pattern_rows;++row)
         for(int channel=0;channel<TT_CHANNELS;++channel) {
             const TtCell *cell=&pattern->cell[row][channel];
-            if(cell->note>=0 || cell->effect!=TT_EFFECT_NONE ||
+            if(cell->note!=-1 || cell->effect!=TT_EFFECT_NONE ||
                cell->effect2!=TT_EFFECT_NONE || cell->effect3!=TT_EFFECT_NONE)return 0;
         }
     return 1;
@@ -40,6 +40,8 @@ static void play_stop_now(F80Widget *button,void *user) {
     tracker.active_step=-1;
     tracker.active_pattern_index=tracker.active_order_index=-1;
     tracker.song_finished=tracker.frames_to_tick=0;
+    tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+    tracker.pending_flow=0;
     tracker.display_head=tracker.display_tail=0;
     tt_audio_stop();
     memset(tracker.table_voice,0,sizeof(tracker.table_voice));
@@ -136,7 +138,7 @@ void tt_play_play_row(int row) {
     }
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         const TtCell *cell=&pattern->cell[row][channel];
-        int glide=0;
+        int glide=0,table_started=0;
         TtCell sample=cell_sample_selection(cell);
         for(int slot=0;slot<3;++slot) {
             const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
@@ -144,14 +146,35 @@ void tt_play_play_row(int row) {
                 TableVoice *voice=&tracker.table_voice[channel];
                 voice->active=1;voice->table=fx->value;voice->tick=0;
                 voice->next_table=-1;voice->pending=0;
+                voice->table_loop_active=voice->table_loop_broken=0;
+                table_started=1;
             } else if(fx->command==TT_EFFECT_M && fx->value>=0)
                 tt_audio_set_volume(channel,fx->value);
             else if(fx->command==TT_EFFECT_G && fx->value>0)glide=fx->value;
             else if(fx->command==TT_EFFECT_STRETCH && fx->value>=0)
                 tt_audio_set_stretch(channel,fx->value);
+            else if(fx->command=='X' && fx->value>=0 &&
+                    fx->value<tracker.song.pattern_count)
+                tt_play_emit((TtPlayEvent){TT_PLAY_PATTERN_JUMP,fx->value,0,0});
+            else if(fx->command=='Y' && fx->value>=0 &&
+                    fx->value<tracker.song.pattern_rows)
+                tt_play_emit((TtPlayEvent){TT_PLAY_ROW_JUMP,fx->value,0,0});
+            else if(fx->command=='Z' && fx->value<=TT_MAX_TICKS_PER_ROW)
+                tt_play_emit((TtPlayEvent){TT_PLAY_SET_TICKS_PER_ROW,fx->value,0,0});
             else if(fx->command && fx->value>=0 && strchr("IJK NOPRVWr",fx->command) && fx->command!=' ')
                 tt_audio_command(channel,(char)fx->command,fx->value);
         }
+        TableVoice *table_voice=&tracker.table_voice[channel];
+        if(!table_started && cell->note>=0 &&
+           table_voice->table_loop_active)table_voice->table_loop_broken=1;
+        if(cell->note==TT_NOTE_OFF) {
+            if(!table_started && table_voice->table_loop_active)
+                table_voice->table_loop_broken=1;
+            table_voice->pending=0;
+            tt_audio_note_off(channel);
+            continue;
+        }
+        if(cell->note<0)continue;
         int first,last;
         const TtPhrase *phrase=NULL;
         const TtWave *wave=instrument_wave(cell,&phrase);
@@ -201,11 +224,14 @@ void tt_play_table_ticks(void) {
             if(voice->next_table>=0) {
                 voice->table=voice->next_table;voice->next_table=-1;
                 voice->tick=0;table=&tracker.song.table[voice->table];
+                voice->table_loop_active=voice->table_loop_broken=0;
             } else { voice->active=0;continue; }
         }
         const TtTableTick *entry=&table->tick[voice->tick++];
         TtCell note={entry->note,entry->instrument,TT_EFFECT_NONE,-1,
                      TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+        if(entry->note==TT_NOTE_OFF && voice->table_loop_active)
+            voice->table_loop_broken=1;
         int delay=0,glide_rate=0,jump_table=-1,jump_tick=-1;
         for(int fx=0;fx<TT_TABLE_EFFECTS;++fx) {
             const TtTableEffect *effect=&entry->effect[fx];
@@ -230,7 +256,10 @@ void tt_play_table_ticks(void) {
             default:break;
             }
         }
-        if(note.note>=0 && note.instrument>=0) {
+        if(note.note==TT_NOTE_OFF) {
+            voice->pending=0;
+            tt_audio_note_off(channel);
+        } else if(note.note>=0 && note.instrument>=0) {
             voice->pending=0;
             if(delay) {
                 voice->delayed_note=note;voice->delayed_glide=glide_rate;
@@ -239,7 +268,15 @@ void tt_play_table_ticks(void) {
         }
         if(jump_table>=0) {
             voice->table=jump_table;voice->tick=0;voice->next_table=-1;
-        } else if(jump_tick>=0 && jump_tick<table->length)voice->tick=jump_tick;
+            voice->table_loop_active=voice->table_loop_broken=0;
+        } else if(jump_tick>=0 && jump_tick<table->length) {
+            if(voice->table_loop_broken) {
+                voice->table_loop_active=voice->table_loop_broken=0;
+            } else {
+                if(jump_tick<voice->tick)voice->table_loop_active=1;
+                voice->tick=jump_tick;
+            }
+        }
     }
 }
 
@@ -282,6 +319,8 @@ static void play_start_now(F80Widget *button,void *user) {
     for(int channel=0;channel<TT_CHANNELS;++channel)
         tt_audio_set_volume(channel,255);
     tracker.playing=tracker.started=1;
+    tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+    tracker.pending_flow=0;
     tracker.audition_effect_active=0;
     memset(tracker.table_voice,0,sizeof(tracker.table_voice));
     tracker.tick_phase=tracker.tick_remainder=tracker.frames_to_tick=0;
@@ -327,19 +366,26 @@ int tt_play_next_tick_frames(int divisor) {
 
 static void advance_playback_now(void) {
     if(!tracker.playing)return;
-    int divisor=tracker.song.bpm*tracker.song.rows_per_beat*tracker.song.ticks_per_row;
     int buffered=tt_audio_song_buffered_frames();
     int needed=SONG_LOOKAHEAD_FRAMES-buffered;
     if(needed<0)needed=0;
     tracker.rendering_song=1;
     while(needed>0 && !tracker.song_finished) {
         if(!tracker.frames_to_tick) {
-            if(tracker.tick_phase==0)tt_play_play_row(tracker.play_step);
+            if(tracker.tick_phase==0) {
+                tt_play_play_row(tracker.play_step);
+                if(tracker.rendering_song)tt_play_flush();
+            }
             tt_play_table_ticks();
             tt_audio_tick();
-            if(++tracker.tick_phase>=tracker.song.ticks_per_row) {
+            int ticks_per_row=tracker.playback_ticks_per_row>0?
+                tracker.playback_ticks_per_row:tracker.song.ticks_per_row;
+            if(++tracker.tick_phase>=ticks_per_row) {
                 tracker.tick_phase=0;
-                if(++tracker.play_step>=tracker.song.pattern_rows) {
+                if(tracker.pending_flow) {
+                    if(tt_play_emit((TtPlayEvent){.type=TT_PLAY_APPLY_PENDING_FLOW}))
+                        tt_play_flush();
+                } else if(++tracker.play_step>=tracker.song.pattern_rows) {
                     tracker.play_step=0;
                     if(tracker.order_range_active) {
                         int first=tracker.order_range_anchor<tracker.order_range_end?
@@ -360,6 +406,9 @@ static void advance_playback_now(void) {
                     }
                 }
             }
+            int divisor=tracker.song.bpm*tracker.song.rows_per_beat*
+                (tracker.playback_ticks_per_row>0?
+                 tracker.playback_ticks_per_row:tracker.song.ticks_per_row);
             tracker.frames_to_tick=tt_play_next_tick_frames(divisor);
         }
         int frames=needed<tracker.frames_to_tick?needed:tracker.frames_to_tick;
@@ -424,6 +473,10 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_FINISHED:name="finished";break;
     case TT_PLAY_DOCUMENT_RESET:name="document reset";break;
     case TT_PLAY_AUDIO_RECOVER:name="recover audio device";break;
+    case TT_PLAY_PATTERN_JUMP:name="pattern jump";break;
+    case TT_PLAY_ROW_JUMP:name="row jump";break;
+    case TT_PLAY_SET_TICKS_PER_ROW:name="set playback ticks per row";break;
+    case TT_PLAY_APPLY_PENDING_FLOW:name="apply flow jump";break;
     }
     char detail[96];
     if(event.type==TT_PLAY_ROW_PLAYED && event.c>=0)
@@ -436,12 +489,38 @@ int tt_play_emit(TtPlayEvent event) {
         snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
     else if(event.type==TT_PLAY_SELECT_PATTERN)
         snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else if(event.type==TT_PLAY_PATTERN_JUMP)
+        snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else if(event.type==TT_PLAY_ROW_JUMP)
+        snprintf(detail,sizeof(detail),"%s %02X",name,event.a);
+    else if(event.type==TT_PLAY_SET_TICKS_PER_ROW)
+        snprintf(detail,sizeof(detail),"%s %d",name,event.a?event.a:tracker.song.ticks_per_row);
     else if(event.type==TT_PLAY_SET_ORDER_RANGE)
         snprintf(detail,sizeof(detail),"%s %02X-%02X",name,event.a,event.b);
     else snprintf(detail,sizeof(detail),"%s",name);
     if(event.type!=TT_PLAY_ROW_PLAYED || event.a==0)
         tt_tracker_log_event("PLAY",detail);
     return 1;
+}
+static int pattern_jump_order(int pattern) {
+    if(tracker.song.order_count<=0)return -1;
+    int first=0,last=tracker.song.order_count-1;
+    if(tracker.order_range_active) {
+        first=tracker.order_range_anchor<tracker.order_range_end?
+            tracker.order_range_anchor:tracker.order_range_end;
+        last=tracker.order_range_anchor>tracker.order_range_end?
+            tracker.order_range_anchor:tracker.order_range_end;
+    }
+    int count=last-first+1;
+    int current=tracker.play_order;
+    if(current<first || current>last)current=first-1;
+    for(int offset=1;offset<=count;++offset) {
+        int at=first+(current-first+offset)%count;
+        if(tracker.song.order[at]==pattern &&
+           (tracker.order_range_active || tracker.song.order_active[at]))
+            return at;
+    }
+    return -1;
 }
 void tt_play_flush(void) {
     while(play_queue_count) {
@@ -507,6 +586,40 @@ void tt_play_flush(void) {
             snprintf(status,sizeof(status),"Looping pattern %02X",at);
             tt_tracker_message(status);break;
         }
+        case TT_PLAY_PATTERN_JUMP: {
+            if(event.a<0 || event.a>=tracker.song.pattern_count)break;
+            int order=-1;
+            if(tracker.play_mode==PLAY_SONG || tracker.order_range_active) {
+                order=pattern_jump_order(event.a);
+                if(order<0)break;
+            }
+            tracker.pending_flow=TT_PLAY_PATTERN_JUMP;
+            tracker.pending_pattern=event.a;
+            tracker.pending_order=order;
+            tracker.pending_row=0;
+            break;
+        }
+        case TT_PLAY_ROW_JUMP:
+            if(event.a<0 || event.a>=tracker.song.pattern_rows)break;
+            tracker.pending_flow=TT_PLAY_ROW_JUMP;
+            tracker.pending_order=-1;
+            tracker.pending_row=event.a;
+            break;
+        case TT_PLAY_SET_TICKS_PER_ROW:
+            if(event.a<0 || event.a>TT_MAX_TICKS_PER_ROW)break;
+            tracker.playback_ticks_per_row=event.a?
+                event.a:tracker.song.ticks_per_row;
+            break;
+        case TT_PLAY_APPLY_PENDING_FLOW:
+            if(tracker.pending_flow==TT_PLAY_PATTERN_JUMP) {
+                if(tracker.pending_order>=0)tracker.play_order=tracker.pending_order;
+                if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
+                    tracker.loop_pattern_index=tracker.pending_pattern;
+                tracker.play_step=0;
+            } else if(tracker.pending_flow==TT_PLAY_ROW_JUMP)
+                tracker.play_step=tracker.pending_row;
+            tracker.pending_flow=0;
+            break;
         case TT_PLAY_SET_ORDER_RANGE: {
             if(event.a<0 || event.a>=tracker.song.order_count ||
                event.b<0 || event.b>=tracker.song.order_count)break;

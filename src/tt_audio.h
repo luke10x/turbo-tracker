@@ -16,6 +16,7 @@ void tt_audio_end_song(void);
 int tt_audio_play(const TtWave *wave,int start,int end,int note,int reference_note);
 int tt_audio_play_channel(int channel,const TtWave *wave,int start,int end,
                               int note,int reference_note);
+void tt_audio_note_off(int channel);
 void tt_audio_set_volume(int channel,int value);
 void tt_audio_set_stretch(int channel,int value);
 double tt_audio_stretch(int channel);
