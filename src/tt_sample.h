@@ -45,6 +45,12 @@ static inline TtPatternEffect *tt_cell_effect(TtCell *cell,int slot) {
 static inline const TtPatternEffect *tt_cell_effect_const(const TtCell *cell,int slot) {
     return tt_cell_effect((TtCell *)cell,slot);
 }
+static inline int tt_cell_table_effect_count(const TtCell *cell) {
+    int count=0;
+    for(int slot=0;slot<3;++slot)
+        count+=tt_cell_effect_const(cell,slot)->command==TT_EFFECT_T;
+    return count;
+}
 static inline TtCell tt_cell_empty(void) {
     return (TtCell){-1,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
 }

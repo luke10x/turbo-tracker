@@ -44,6 +44,13 @@ int main(void) {
     memset(&loaded,0,sizeof(loaded));
     assert(tt_pattern_load(path,&loaded,error,sizeof(error)));
     assert(!memcmp(&original,&loaded,sizeof(original)));
+    TtPattern duplicate_table;tt_pattern_init(&duplicate_table);
+    duplicate_table.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0,
+                                        TT_EFFECT_T,1,TT_EFFECT_NONE,-1};
+    char duplicate_row[126];
+    tt_pattern_row_text(&duplicate_table,0,duplicate_row);
+    TtPattern rejected;tt_pattern_init(&rejected);
+    assert(!tt_pattern_parse_row(duplicate_row,&rejected,0));
     char legacy_row[66];
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         if(channel)legacy_row[channel*11-1]='|';

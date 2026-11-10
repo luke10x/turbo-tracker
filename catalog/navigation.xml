@@ -10,5 +10,7 @@
       <node title="Beat-sliced break" href="./app.html?init_song=%2Fexamples%2Fslc-break%2Fbreak.song&amp;init_play=1"
             source="./examples/slc-break/README.md" />
     </node>
+    <node title="Table note-off (TBL)" href="./app.html?init_song=%2Fexamples%2Ftbl-note-off%2Ftbl-note-off.song&amp;init_play=1"
+          source="./examples/tbl-note-off/README.md" />
   </node>
 </root>

@@ -44,6 +44,10 @@ int main(void) {
     assert(apply(e) && active.cell[2][1].note==60);
     e.cell_set.row=TT_MAX_STEPS;
     assert(!apply(e) && message[0]);
+    e.cell_set.row=3;
+    e.cell_set.cell=(TtCell){-1,-1,TT_EFFECT_T,0,TT_EFFECT_NONE,-1,
+                              TT_EFFECT_T,1};
+    assert(!apply(e) && strstr(message,"only one table"));
     TtCell paste[1]={{72,2,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1,
                        TT_EFFECT_NONE,-1}};
     e=(TtEditEvent){.type=TT_EDIT_CELLS_BULK};
@@ -55,6 +59,10 @@ int main(void) {
     assert(apply(e) && active.cell[2][1].note==-1);
     e.cells.left=-1;assert(!apply(e));
     e.cells.left=1;e.cells.op=(TtBulkOp)99;assert(!apply(e));
+    TtCell duplicate_table_cell={-1,-1,TT_EFFECT_T,0,TT_EFFECT_T,1,
+                                  TT_EFFECT_NONE,-1};
+    e.cells=(TtEditCellsBulk){TT_BULK_PASTE,3,1,3,1,0,&duplicate_table_cell,1};
+    assert(!apply(e) && strstr(message,"only one table"));
 
     int old_count=song.pattern_count;
     e=(TtEditEvent){.type=TT_EDIT_PATTERN_NEW};

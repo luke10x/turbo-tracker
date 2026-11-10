@@ -265,6 +265,16 @@ int main(void) {
            tracker.song.pattern[0].cell[50][0].value==0xfd &&
            tracker.song.pattern[0].cell[55][0].value==0xed &&
            tracker.song.pattern[0].cell[59][0].value==0x10);
+    assert(setenv("INIT_SONG","examples/tbl-note-off/tbl-note-off.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_rows==16 && tracker.song.ticks_per_row==1 &&
+           tracker.song.pattern[0].cell[0][0].effect==TT_EFFECT_T &&
+           tracker.song.pattern[0].cell[0][0].value==0 &&
+           tracker.song.table[0].tick[3].note==TT_NOTE_OFF &&
+           tracker.song.table[0].tick[9].note==TT_NOTE_OFF &&
+           tracker.song.table[0].tick[14].note==TT_NOTE_OFF &&
+           tracker.song.table[0].tick[0].note==60 &&
+           tracker.song.table[0].tick[6].note==67);
     assert(unsetenv("INIT_SONG")==0);
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
@@ -605,9 +615,16 @@ int main(void) {
     tt_play_table_ticks();
     assert(tracker.table_voice[0].table_loop_active && tracker.table_voice[0].tick==0);
     tt_play_play_row(3);
-    assert(tracker.table_voice[0].table_loop_broken);
+    assert(!tracker.table_voice[0].active && !tracker.table_voice[0].table_loop_active);
     tt_play_table_ticks();
     assert(!tracker.table_voice[0].table_loop_active);
+    tracker.pattern.cell[2][0]=(TtCell){60,1,TT_EFFECT_NONE,-1,
+                                        TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.table_voice[0]=(TableVoice){.active=1,.table=0,.tick=1,
+                                        .pending=1,.delay=3,.next_table=2};
+    tt_play_play_row(2);
+    assert(!tracker.table_voice[0].active && !tracker.table_voice[0].pending &&
+           tracker.table_voice[0].next_table==-1);
     tracker.song.table[0]=saved_loop_table;
     const int fields[]={3,2,3,3,3,3,3,3};
     f80_grid_init(&tracker.table_grid,16,8,fields,NULL);

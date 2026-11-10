@@ -150,6 +150,7 @@ int tt_pattern_parse_row(const char *text,TtPattern *pattern,int row) {
             if(!parse_cell(token,&fx))return 0;
             TtPatternEffect *dst=tt_cell_effect(cell,slot);*dst=*tt_cell_effect(&fx,0);
         }
+        if(tt_cell_table_effect_count(cell)>1)return 0;
     }
     return 1;
 }

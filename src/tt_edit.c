@@ -19,6 +19,9 @@ static int apply_cell_set(TtEditDoc *doc,const TtEditCellSet *e) {
     if(e->cell.note<TT_NOTE_OFF || e->cell.note>127) {
         reject(doc,"Note out of range");return 0;
     }
+    if(tt_cell_table_effect_count(&e->cell)>1) {
+        reject(doc,"A row cell can reference only one table");return 0;
+    }
     doc->active->cell[e->row][e->channel]=e->cell;
     return 1;
 }
@@ -35,6 +38,14 @@ static int apply_cells_bulk(TtEditDoc *doc,const TtEditCellsBulk *e) {
     if(e->op==TT_BULK_PASTE && (!e->data || e->data_cols<e->right-e->left+1)) {
         reject(doc,"Nothing to paste");return 0;
     }
+    if(e->op==TT_BULK_PASTE)
+        for(int row=e->top;row<=e->bottom;++row)
+            for(int channel=e->left;channel<=e->right;++channel) {
+                int r=row-e->top,c=channel-e->left;
+                if(tt_cell_table_effect_count(&e->data[r*e->data_cols+c])>1) {
+                    reject(doc,"A row cell can reference only one table");return 0;
+                }
+            }
     for(int row=e->top;row<=e->bottom;++row)
         for(int channel=e->left;channel<=e->right;++channel) {
             TtCell *cell=&doc->active->cell[row][channel];

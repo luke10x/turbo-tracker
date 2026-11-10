@@ -165,11 +165,14 @@ void tt_play_play_row(int row) {
                 tt_audio_command(channel,(char)fx->command,fx->value);
         }
         TableVoice *table_voice=&tracker.table_voice[channel];
-        if(!table_started && cell->note>=0 &&
-           table_voice->table_loop_active)table_voice->table_loop_broken=1;
+        if(!table_started && ((cell->note>=0 && cell->instrument>=0) ||
+                              cell->note==TT_NOTE_OFF) &&
+           table_voice->active) {
+            table_voice->active=0;table_voice->pending=0;
+            table_voice->next_table=-1;
+            table_voice->table_loop_active=table_voice->table_loop_broken=0;
+        }
         if(cell->note==TT_NOTE_OFF) {
-            if(!table_started && table_voice->table_loop_active)
-                table_voice->table_loop_broken=1;
             table_voice->pending=0;
             tt_audio_note_off(channel);
             continue;
