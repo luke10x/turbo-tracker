@@ -159,10 +159,8 @@ static int estimate_note(const TtWave *wave,int first,int last) {
     int note=(int)lrint(69.0+12.0*log2(hz/440.0));
     return note>=0 && note<=127?note:-1;
 }
-int tt_detect_slices_and_notes(const TtWave *wave,const TtPhrase *phrase,
-                               int markers[TT_MARKERS],int notes[TT_SLICES]) {
-    if(!wave || !wave->pcm || wave->frames<2 || wave->rate<1000 || !phrase ||
-       !markers || !notes)return 0;
+int tt_detect_beats(const TtWave *wave,int markers[TT_MARKERS]) {
+    if(!wave || !wave->pcm || wave->frames<2 || wave->rate<1000 || !markers)return 0;
     markers[0]=0;markers[TT_MARKERS-1]=wave->frames;
     int slot=wave->frames/TT_SLICES;
     int window=wave->rate/100; /* 10 ms energy window */
@@ -184,8 +182,15 @@ int tt_detect_slices_and_notes(const TtWave *wave,const TtPhrase *phrase,
         if(best<=markers[marker-1])best=markers[marker-1]+1;
         markers[marker]=best;
     }
+    return 1;
+}
+int tt_detect_tones(const TtWave *wave,const TtPhrase *phrase,
+                    int notes[TT_SLICES]) {
+    if(!wave || !wave->pcm || wave->frames<2 || wave->rate<1000 || !phrase || !notes)
+        return 0;
     for(int slice=0;slice<TT_SLICES;++slice) {
-        int first=markers[slice],last=markers[slice+1];
+        int first=phrase->marker[slice],last=phrase->marker[slice+1];
+        if(first<0 || last>wave->frames || first>=last)return 0;
         notes[slice]=estimate_note(wave,first,last);
     }
     return 1;

@@ -361,15 +361,25 @@ static int apply_slice(TtEditDoc *doc,const TtEditSlice *e) {
     tt_slice_set_note(doc->active_phrase,e->slice,e->note);
     return 1;
 }
-static int apply_slices_autodetect(TtEditDoc *doc) {
+static int apply_beats_autodetect(TtEditDoc *doc) {
     if(!doc->active_phrase || !doc->active_wave || !doc->active_wave->pcm) {
-        reject(doc,"Load a sample before auto-detecting slices");return 0;
+        reject(doc,"Load a sample before detecting beats");return 0;
     }
-    int markers[TT_MARKERS],notes[TT_SLICES];
-    if(!tt_detect_slices_and_notes(doc->active_wave,doc->active_phrase,markers,notes)) {
-        reject(doc,"Could not analyze this sample");return 0;
+    int markers[TT_MARKERS];
+    if(!tt_detect_beats(doc->active_wave,markers)) {
+        reject(doc,"Could not detect beats in this sample");return 0;
     }
     memcpy(doc->active_phrase->marker,markers,sizeof(markers));
+    return 1;
+}
+static int apply_tones_autodetect(TtEditDoc *doc) {
+    if(!doc->active_phrase || !doc->active_wave || !doc->active_wave->pcm) {
+        reject(doc,"Load a sample before detecting tones");return 0;
+    }
+    int notes[TT_SLICES];
+    if(!tt_detect_tones(doc->active_wave,doc->active_phrase,notes)) {
+        reject(doc,"Could not analyze the current slices");return 0;
+    }
     for(int slice=0;slice<TT_SLICES;++slice)
         if(notes[slice]>=0)tt_slice_set_note(doc->active_phrase,slice,notes[slice]);
     return 1;
@@ -491,8 +501,10 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_marker(doc,&event->marker);
     case TT_EDIT_SLICE_NOTE:
         return apply_slice(doc,&event->slice);
-    case TT_EDIT_SLICES_AUTODETECT:
-        return apply_slices_autodetect(doc);
+    case TT_EDIT_BEATS_AUTODETECT:
+        return apply_beats_autodetect(doc);
+    case TT_EDIT_TONES_AUTODETECT:
+        return apply_tones_autodetect(doc);
     case TT_EDIT_SAMPLE_SELECT:
         return apply_sample_select(doc,&event->sample);
     case TT_EDIT_SAMPLE_APPEND:

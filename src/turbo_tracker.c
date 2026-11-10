@@ -134,7 +134,8 @@ static const char *edit_event_name(TtEditType type) {
         [TT_EDIT_SAMPLE_SELECT]="sample select",[TT_EDIT_SAMPLE_APPEND]="sample append",
         [TT_EDIT_SAMPLE_RECOVER]="sample recover",
         [TT_EDIT_MARKER_MOVE]="marker move",[TT_EDIT_SLICE_NOTE]="slice note",
-        [TT_EDIT_SLICES_AUTODETECT]="slices auto-detect",
+        [TT_EDIT_BEATS_AUTODETECT]="beats auto-detect",
+        [TT_EDIT_TONES_AUTODETECT]="tones auto-detect",
         [TT_EDIT_DOCUMENT_REPLACE]="document replace"
     };
     return type>TT_EDIT_NONE && type<TT_EDIT_COUNT && names[type]?names[type]:"unknown";
@@ -1667,12 +1668,19 @@ static void slices_step(F80Widget *button,void *user) {
     edit_slice(index,clamp(tt_slice_base_note(&tracker.phrase,index)+(int)(long)user,0,127));
     slices_selected(tracker.slices_list,NULL);tt_tracker_message("Slice base note changed");
 }
-static void slices_autodetect(F80Widget *button,void *user) {
+static void slices_detect_beats(F80Widget *button,void *user) {
     (void)button;(void)user;
-    TtEditEvent event={.type=TT_EDIT_SLICES_AUTODETECT};
+    TtEditEvent event={.type=TT_EDIT_BEATS_AUTODETECT};
     if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     slices_selected(tracker.slices_list,NULL);
-    tt_tracker_message("Slice points updated; pitched slice notes estimated");
+    tt_tracker_message("Slice markers aligned to detected beats");
+}
+static void slices_detect_tones(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    TtEditEvent event={.type=TT_EDIT_TONES_AUTODETECT};
+    if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
+    slices_selected(tracker.slices_list,NULL);
+    tt_tracker_message("Slice reference notes estimated from current markers");
 }
 static void close_slices(F80Widget *button,void *user) {
     (void)button;(void)user;f80_hide_modal(&tracker.app);
@@ -1695,7 +1703,8 @@ static void show_slices(F80Widget *button,void *user) {
     f80_add(dialog,f80_button("~I~nherit",slices_inherit,NULL));
     f80_add(dialog,f80_button("Note ~-~",slices_step,(void *)(long)-1));
     f80_add(dialog,f80_button("Note ~+~",slices_step,(void *)(long)1));
-    f80_add(dialog,f80_button("~A~uto-detect",slices_autodetect,NULL));
+    f80_add(dialog,f80_button("Detect ~B~eats",slices_detect_beats,NULL));
+    f80_add(dialog,f80_button("Detect ~T~ones",slices_detect_tones,NULL));
     f80_add(dialog,f80_button("~C~lose",close_slices,NULL));
     slices_selected(tracker.slices_list,NULL);
     f80_show_modal(&tracker.app,dialog);

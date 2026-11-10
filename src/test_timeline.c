@@ -260,7 +260,10 @@ int main(void) {
            tracker.song.pattern[0].cell[14][0].value==0xef &&
            tracker.song.pattern[0].cell[15][0].value==0x0f &&
            tracker.song.pattern[0].cell[30][0].value==0xf0 &&
-           tracker.song.pattern[0].cell[45][0].value==0xfe &&
+           tracker.song.pattern[0].cell[45][0].value==0xcb &&
+           tracker.song.pattern[0].cell[46][0].value==0x23 &&
+           tracker.song.pattern[0].cell[50][0].value==0xfd &&
+           tracker.song.pattern[0].cell[55][0].value==0xed &&
            tracker.song.pattern[0].cell[59][0].value==0x10);
     assert(unsetenv("INIT_SONG")==0);
     memset(&tracker,0,sizeof(tracker));

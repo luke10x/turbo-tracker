@@ -62,8 +62,9 @@ void tt_move_marker(TtPhrase *phrase,int frames,int marker,int frame);
 int tt_slice_base_note(const TtPhrase *phrase,int slice);
 void tt_slice_set_note(TtPhrase *phrase,int slice,int note);
 void tt_phrase_set_reference_note(TtPhrase *phrase,int note);
-int tt_detect_slices_and_notes(const TtWave *wave,const TtPhrase *phrase,
-                               int markers[TT_MARKERS],int notes[TT_SLICES]);
+int tt_detect_beats(const TtWave *wave,int markers[TT_MARKERS]);
+int tt_detect_tones(const TtWave *wave,const TtPhrase *phrase,
+                    int notes[TT_SLICES]);
 int tt_cell_range(const TtPhrase *phrase,const TtCell *cell,int frames,
                       int *start,int *end);
 void tt_note_name(int note,char out[4]);
