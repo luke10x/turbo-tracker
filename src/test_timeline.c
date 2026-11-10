@@ -306,6 +306,30 @@ int main(void) {
            tracker.song.table[0].tick[0].effect[0].command=='Z' &&
            tracker.song.table[0].tick[0].effect[0].value==3 &&
            tracker.song.table[0].tick[8].effect[0].value==12);
+    const char *effect_examples[]={
+        "examples/iin-fade-in/iin.song",
+        "examples/pitch-bends/pitch-bends.song",
+        "examples/mvl-volume/mvl.song",
+        "examples/npn-auto-pan/npn.song",
+        "examples/out-fade-out/out.song",
+        "examples/pan-position/pan.song",
+        "examples/vib-vibrato/vib.song",
+        "examples/wbl-tremolo/wbl.song",
+        "examples/xjp-pattern-jump/xjp.song",
+        "examples/yrj-pattern-row-jump/yrj.song"
+    };
+    for(size_t i=0;i<sizeof(effect_examples)/sizeof(effect_examples[0]);++i) {
+        assert(setenv("INIT_SONG",effect_examples[i],1)==0);
+        assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    }
+    assert(tracker.song.pattern[0].cell[1][0].effect==TT_EFFECT_Y &&
+           tracker.song.pattern[0].cell[1][0].value==8 &&
+           tracker.song.pattern[0].cell[8][0].note==64);
+    assert(setenv("INIT_SONG","examples/xjp-pattern-jump/xjp.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern_count==3 && tracker.song.order_count==3 &&
+           tracker.song.pattern[0].cell[4][0].effect==TT_EFFECT_X &&
+           tracker.song.pattern[0].cell[4][0].value==2);
     assert(unsetenv("INIT_SONG")==0);
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
