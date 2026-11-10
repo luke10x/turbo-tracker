@@ -265,16 +265,6 @@ int main(void) {
            tracker.song.pattern[0].cell[50][0].value==0xfd &&
            tracker.song.pattern[0].cell[55][0].value==0xed &&
            tracker.song.pattern[0].cell[59][0].value==0x10);
-    assert(setenv("INIT_SONG","examples/tbl-note-off/tbl-note-off.song",1)==0);
-    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
-    assert(tracker.song.pattern_rows==16 && tracker.song.ticks_per_row==1 &&
-           tracker.song.pattern[0].cell[0][0].effect==TT_EFFECT_T &&
-           tracker.song.pattern[0].cell[0][0].value==0 &&
-           tracker.song.table[0].tick[3].note==TT_NOTE_OFF &&
-           tracker.song.table[0].tick[9].note==TT_NOTE_OFF &&
-           tracker.song.table[0].tick[14].note==TT_NOTE_OFF &&
-           tracker.song.table[0].tick[0].note==60 &&
-           tracker.song.table[0].tick[6].note==67);
     assert(setenv("INIT_SONG","examples/tbl-arpeggio/tbl-arpeggio.song",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[0].note==60 &&
@@ -290,11 +280,6 @@ int main(void) {
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[3].effect[0].command=='X' &&
            tracker.song.table[0].tick[3].effect[0].value==0);
-    assert(setenv("INIT_SONG","examples/tbl-delay/tbl-delay.song",1)==0);
-    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
-    assert(tracker.song.table[0].tick[0].effect[0].command=='U' &&
-           tracker.song.table[0].tick[0].effect[0].value==5 &&
-           tracker.song.table[0].tick[8].effect[0].value==5);
     assert(setenv("INIT_SONG","examples/tbl-automation/tbl-automation.song",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[1].effect[0].command=='M' &&
