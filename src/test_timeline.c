@@ -275,6 +275,33 @@ int main(void) {
            tracker.song.table[0].tick[14].note==TT_NOTE_OFF &&
            tracker.song.table[0].tick[0].note==60 &&
            tracker.song.table[0].tick[6].note==67);
+    assert(setenv("INIT_SONG","examples/tbl-arpeggio/tbl-arpeggio.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[0].note==60 &&
+           tracker.song.table[0].tick[4].note==64 &&
+           tracker.song.table[0].tick[8].note==67 &&
+           tracker.song.table[0].tick[12].note==72);
+    assert(setenv("INIT_SONG","examples/tbl-loop/tbl-loop.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[11].effect[0].command=='Y' &&
+           tracker.song.table[0].tick[11].effect[0].value==4 &&
+           tracker.song.pattern[0].cell[8][0].note==TT_NOTE_OFF);
+    assert(setenv("INIT_SONG","examples/tbl-retrigger/tbl-retrigger.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[3].effect[0].command=='X' &&
+           tracker.song.table[0].tick[3].effect[0].value==0);
+    assert(setenv("INIT_SONG","examples/tbl-delay/tbl-delay.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[0].effect[0].command=='U' &&
+           tracker.song.table[0].tick[0].effect[0].value==5 &&
+           tracker.song.table[0].tick[8].effect[0].value==5);
+    assert(setenv("INIT_SONG","examples/tbl-automation/tbl-automation.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[1].effect[0].command=='M' &&
+           tracker.song.table[0].tick[1].effect[1].command=='P' &&
+           tracker.song.table[0].tick[1].effect[2].command=='V' &&
+           tracker.song.table[0].tick[4].effect[3].command=='S' &&
+           tracker.song.table[0].tick[4].effect[3].value==0x5a);
     assert(unsetenv("INIT_SONG")==0);
     memset(&tracker,0,sizeof(tracker));
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));

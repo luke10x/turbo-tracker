@@ -10,7 +10,19 @@
       <node title="Beat-sliced break" href="./app.html?init_song=%2Fexamples%2Fslc-break%2Fbreak.song&amp;init_play=1"
             source="./examples/slc-break/README.md" />
     </node>
-    <node title="Table note-off (TBL)" href="./app.html?init_song=%2Fexamples%2Ftbl-note-off%2Ftbl-note-off.song&amp;init_play=1"
-          source="./examples/tbl-note-off/README.md" />
+    <node title="Tables (TBL)">
+      <node title="Arpeggio" href="./app.html?init_song=%2Fexamples%2Ftbl-arpeggio%2Ftbl-arpeggio.song&amp;init_play=1"
+            source="./examples/tbl-arpeggio/README.md" />
+      <node title="Backward loop (YRJ)" href="./app.html?init_song=%2Fexamples%2Ftbl-loop%2Ftbl-loop.song&amp;init_play=1"
+            source="./examples/tbl-loop/README.md" />
+      <node title="Delayed notes (U)" href="./app.html?init_song=%2Fexamples%2Ftbl-delay%2Ftbl-delay.song&amp;init_play=1"
+            source="./examples/tbl-delay/README.md" />
+      <node title="Note off" href="./app.html?init_song=%2Fexamples%2Ftbl-note-off%2Ftbl-note-off.song&amp;init_play=1"
+            source="./examples/tbl-note-off/README.md" />
+      <node title="Retrigger (X)" href="./app.html?init_song=%2Fexamples%2Ftbl-retrigger%2Ftbl-retrigger.song&amp;init_play=1"
+            source="./examples/tbl-retrigger/README.md" />
+      <node title="Tick automation" href="./app.html?init_song=%2Fexamples%2Ftbl-automation%2Ftbl-automation.song&amp;init_play=1"
+            source="./examples/tbl-automation/README.md" />
+    </node>
   </node>
 </root>
