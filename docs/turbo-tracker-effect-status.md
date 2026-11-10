@@ -27,7 +27,7 @@ has three effect slots per pattern cell and six slots per table tick.
 | `X` XJP | Working | Working | Pattern mode jumps directly; Song mode jumps to the next active order referencing the target. Table mode jumps immediately to tick `00` of the target table. |
 | `Y` YRJ | Working | Working | Absolute row/tick jump. A backward table jump loops until a pattern note or `OFF` in that channel breaks it. |
 | `Z` ZTM | Working | Working | In patterns, sets runtime BPM (`xx` is hexadecimal BPM; `00` restores the song BPM). In tables, sets ticks per row (`01`–`30` hex; `00` restores the song setting). |
-| `0`–`F` slots | — | — | Slot writers and `$N` readers not implemented. |
+| `0`–`F` registers | Working | Working | Pattern writers are `0RGxx`–`FRGxx`; table slots use register digit `0`–`F` with value `xx`. Any effect may read a register with `$x`. Values resolve during playback; the register bank is shared across channels and contexts and resets to `00` on playback start. |
 
 For `N`, `V`, and `W`, the high nibble advances a sine phase by that many
 sixty-fourths of a cycle per tick. `V` depth `F` is approximately ±1.25

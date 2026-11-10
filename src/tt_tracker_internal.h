@@ -39,6 +39,7 @@ typedef struct {
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
     int playback_bpm,playback_ticks_per_row;
+    int effect_registers[TT_EFFECT_REGISTER_COUNT];
     int pending_flow,pending_pattern,pending_order,pending_row;
     int audio_recovery_result;
     int pattern_lock;

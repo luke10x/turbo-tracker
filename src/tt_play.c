@@ -36,6 +36,12 @@ static int next_active_order(int at,int direction) {
 static int playback_bpm(void) {
     return tracker.playback_bpm>0?tracker.playback_bpm:tracker.song.bpm;
 }
+static int resolve_effect_value(int value) {
+    if(!tt_effect_is_register(value))return value;
+    int reg=tt_effect_value_register(value);
+    return reg>=0 && reg<TT_EFFECT_REGISTER_COUNT?
+           tracker.effect_registers[reg]:-1;
+}
 static int row_duration_frames(void) {
     int divisor=playback_bpm()*tracker.song.rows_per_beat;
     return divisor>0?TT_AUDIO_OUTPUT_RATE*60/divisor:0;
@@ -62,6 +68,7 @@ static void play_stop_now(F80Widget *button,void *user) {
     tracker.song_finished=tracker.frames_to_tick=0;
     tracker.playback_bpm=tracker.song.bpm;
     tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+    memset(tracker.effect_registers,0,sizeof(tracker.effect_registers));
     tracker.pending_flow=0;
     tracker.display_head=tracker.display_tail=0;
     tt_audio_stop();
@@ -81,8 +88,9 @@ static TtCell cell_sample_selection(const TtCell *cell) {
     TtCell selected=*cell;
     for(int slot=0;slot<3;++slot) {
         const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
-        if(fx->command==TT_EFFECT_S && fx->value>=0) {
-            selected.effect=TT_EFFECT_S;selected.value=fx->value;
+        int value=resolve_effect_value(fx->value);
+        if(fx->command==TT_EFFECT_S && value>=0 && value<=255) {
+            selected.effect=TT_EFFECT_S;selected.value=value;
         }
     }
     return selected;
@@ -97,6 +105,15 @@ static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
 static void play_audition_cell_now(int step,int channel) {
     int first,last;
     TtCell *cell=&tracker.pattern.cell[step][channel];
+    for(int slot=0;slot<3;++slot) {
+        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        int reg=tt_effect_register_index(fx->command);
+        int value=resolve_effect_value(fx->value);
+        if(reg>=0 && value>=0 && value<=255) {
+            tt_play_emit((TtPlayEvent){TT_PLAY_SET_EFFECT_REGISTER,reg,value,0});
+            tt_play_flush();
+        }
+    }
     TtCell sample=cell_sample_selection(cell);
     const TtPhrase *phrase=NULL;
     const TtWave *wave=instrument_wave(cell,&phrase);
@@ -107,8 +124,10 @@ static void play_audition_cell_now(int step,int channel) {
     }
     int base=cell_reference_note(phrase,&sample),glide=0;
     for(int slot=0;slot<3;++slot) {
-        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
-        if(fx->command==TT_EFFECT_G && fx->value>0)glide=fx->value;
+        TtPatternEffect resolved=*tt_cell_effect_const(cell,slot);
+        if(tt_effect_register_command(resolved.command))continue;
+        resolved.value=resolve_effect_value(resolved.value);
+        if(resolved.command==TT_EFFECT_G && resolved.value>0)glide=resolved.value;
     }
     int glided=glide>0 && tt_audio_glide_to(0,cell->note,base,glide);
     if(!glided && !tt_audio_play(wave,first,last,cell->note,base)) {
@@ -117,7 +136,10 @@ static void play_audition_cell_now(int step,int channel) {
     }
     tracker.audition_effect_active=0;
     for(int slot=0;slot<3;++slot) {
-        const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
+        TtPatternEffect resolved=*tt_cell_effect_const(cell,slot);
+        const TtPatternEffect *fx=&resolved;
+        if(tt_effect_register_command(fx->command))continue;
+        resolved.value=resolve_effect_value(resolved.value);
         if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
             TableVoice *voice=&tracker.table_voice[channel];
             voice->active=1;voice->table=fx->value;voice->tick=0;
@@ -160,10 +182,24 @@ void tt_play_play_row(int row) {
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         const TtCell *cell=&pattern->cell[row][channel];
         int glide=0,udl=-1,table_started=0;
-        TtCell sample=cell_sample_selection(cell);
+        TtCell sample=*cell;
         for(int slot=0;slot<3;++slot) {
-            const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
-            if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
+            TtPatternEffect resolved=*tt_cell_effect_const(cell,slot);
+            const TtPatternEffect *fx=&resolved;
+            int register_index=tt_effect_register_index(fx->command);
+            if(register_index>=0) {
+                int value=resolve_effect_value(fx->value);
+                if(value>=0 && value<=255) {
+                    tt_play_emit((TtPlayEvent){TT_PLAY_SET_EFFECT_REGISTER,
+                                               register_index,value,0});
+                    tt_play_flush();
+                }
+                continue;
+            }
+            resolved.value=resolve_effect_value(resolved.value);
+            if(fx->command==TT_EFFECT_S && fx->value>=0 && fx->value<=255) {
+                sample.effect=TT_EFFECT_S;sample.value=fx->value;
+            } else if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
                 TableVoice *voice=&tracker.table_voice[channel];
                 voice->active=1;voice->table=fx->value;voice->tick=0;
                 voice->next_table=-1;voice->pending=0;
@@ -266,7 +302,19 @@ void tt_play_table_ticks(void) {
             voice->table_loop_broken=1;
         int delay=-1,glide_rate=0,jump_table=-1,jump_tick=-1;
         for(int fx=0;fx<TT_TABLE_EFFECTS;++fx) {
-            const TtTableEffect *effect=&entry->effect[fx];
+            TtTableEffect resolved=entry->effect[fx];
+            const TtTableEffect *effect=&resolved;
+            int register_index=tt_effect_register_index(effect->command);
+            if(register_index>=0) {
+                int value=resolve_effect_value(effect->value);
+                if(value>=0 && value<=255) {
+                    tt_play_emit((TtPlayEvent){TT_PLAY_SET_EFFECT_REGISTER,
+                                               register_index,value,0});
+                    tt_play_flush();
+                }
+                continue;
+            }
+            resolved.value=resolve_effect_value(resolved.value);
             if(!effect->command || effect->value<0)continue;
             switch(effect->command) {
             case 'M':tt_audio_set_volume(channel,effect->value);break;
@@ -359,6 +407,7 @@ static void play_start_now(F80Widget *button,void *user) {
     tracker.playing=tracker.started=1;
     tracker.playback_bpm=tracker.song.bpm;
     tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+    memset(tracker.effect_registers,0,sizeof(tracker.effect_registers));
     tracker.pending_flow=0;
     tracker.audition_effect_active=0;
     memset(tracker.table_voice,0,sizeof(tracker.table_voice));
@@ -516,6 +565,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_ROW_JUMP:name="row jump";break;
     case TT_PLAY_SET_TICKS_PER_ROW:name="set playback ticks per row";break;
     case TT_PLAY_SET_BPM:name="set playback BPM";break;
+    case TT_PLAY_SET_EFFECT_REGISTER:name="set effect register";break;
     case TT_PLAY_APPLY_PENDING_FLOW:name="apply flow jump";break;
     }
     char detail[96];
@@ -537,6 +587,8 @@ int tt_play_emit(TtPlayEvent event) {
         snprintf(detail,sizeof(detail),"%s %d",name,event.a?event.a:tracker.song.ticks_per_row);
     else if(event.type==TT_PLAY_SET_BPM)
         snprintf(detail,sizeof(detail),"%s %d",name,event.a?event.a:tracker.song.bpm);
+    else if(event.type==TT_PLAY_SET_EFFECT_REGISTER)
+        snprintf(detail,sizeof(detail),"%s %X=%02X",name,event.a,event.b);
     else if(event.type==TT_PLAY_SET_ORDER_RANGE)
         snprintf(detail,sizeof(detail),"%s %02X-%02X",name,event.a,event.b);
     else snprintf(detail,sizeof(detail),"%s",name);
@@ -663,6 +715,11 @@ void tt_play_flush(void) {
                 tracker.playback_bpm=value;
             }
             break;
+        case TT_PLAY_SET_EFFECT_REGISTER:
+            if(event.a<0 || event.a>=TT_EFFECT_REGISTER_COUNT ||
+               event.b<0 || event.b>255)break;
+            tracker.effect_registers[event.a]=event.b;
+            break;
         case TT_PLAY_APPLY_PENDING_FLOW:
             if(tracker.pending_flow==TT_PLAY_PATTERN_JUMP) {
                 if(tracker.pending_order>=0)tracker.play_order=tracker.pending_order;
@@ -710,6 +767,7 @@ void tt_play_flush(void) {
             tracker.play_order=tracker.play_step=0;
             tracker.playback_bpm=tracker.song.bpm;
             tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+            memset(tracker.effect_registers,0,sizeof(tracker.effect_registers));
             break;
         case TT_PLAY_AUDIO_RECOVER:
             tracker.audio_recovery_result=tt_audio_recover();

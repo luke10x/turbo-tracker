@@ -980,7 +980,7 @@ static void adjust_value(int delta) {
         else if(pattern_effect_field()) {
             int slot=pattern_effect_slot();
             TtPatternEffect *fx=tt_cell_effect(cell,slot);
-            const char *effects="GIJKMNOPRSTUVWXYZ";
+            const char *effects="0123456789ABCDEF" "GIJKMNOPRSTUVWXYZ";
             const char *current=fx->command?strchr(effects,fx->command):NULL;
             int index=current?(int)(current-effects):-1;
             int next=clamp(index+(delta>0?1:-1),-1,(int)strlen(effects)-1);
@@ -1384,8 +1384,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                     } else { memcpy(shown,".  ",4);empty=1; }
                 } else {
                     int fx=(field-3)/2;
-                    if(fx<TT_TABLE_EFFECTS && tick->effect[fx].value>=0)
-                        snprintf(shown,sizeof(shown),"%02X",tick->effect[fx].value);
+                    if(fx<TT_TABLE_EFFECTS)
+                        tt_effect_value_text(tick->effect[fx].value,shown);
                     else { memcpy(shown,"..",3);empty=1; }
                 }
             } else if(field>7) {
@@ -1911,8 +1911,10 @@ static void table_cell_text(void *user,int tick,int field,char *out,size_t size)
     } else {
         const TtTableEffect *fx=&entry->effect[field-2];
         if(!fx->command)snprintf(out,size,"...");
-        else if(fx->value<0)snprintf(out,size,"%c..",fx->command);
-        else snprintf(out,size,"%c%02X",fx->command,fx->value);
+        else {
+            char value[3];tt_effect_value_text(fx->value,value);
+            snprintf(out,size,"%c%s",fx->command,value);
+        }
     }
 }
 static void paint_table(F80Widget *canvas,void *user) {
@@ -2681,16 +2683,29 @@ static void inline_table_key(int key) {
     } else if(field%2==0) {
         int fx=(field-2)/2;
         if(key>='a' && key<='z')key-=32;
-        if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXY",key)) {
+        if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXYZ",key)) {
             if(edited.effect[fx].command!=key) {
                 edited.effect[fx]=(TtTableEffect){(char)key,-1};changed=1;
             }
+        } else if(digit>=0) {
+            int command=digit<10?'0'+digit:'A'+digit-10;
+            if(edited.effect[fx].command!=command) {
+                edited.effect[fx]=(TtTableEffect){(char)command,-1};changed=1;
+            }
+        }
+    } else if(key=='$') {
+        int fx=(field-3)/2;
+        if(edited.effect[fx].command) {
+            edited.effect[fx].value=TT_EFFECT_VALUE_REGISTER_PREFIX;
+            changed=1;
         }
     } else if(digit>=0) {
         int fx=(field-3)/2;
         if(edited.effect[fx].command) {
-            edited.effect[fx].value=((edited.effect[fx].value<0?0:
-                edited.effect[fx].value)<<4 & 0xf0)|digit;
+            edited.effect[fx].value=
+                edited.effect[fx].value==TT_EFFECT_VALUE_REGISTER_PREFIX?
+                tt_effect_register_value(digit):
+                ((edited.effect[fx].value<0?0:edited.effect[fx].value)<<4 & 0xf0)|digit;
             changed=1;
         }
     }
@@ -2750,11 +2765,18 @@ static void handle_table_key(int key) {
         TtTableEffect *fx=&entry->effect[tracker.table_grid.field-2];
         int digit=hex_digit(key);
         if(key>='g' && key<='z')key-=32;
-        if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXY",key)) {
+        if(key>='G' && key<='Z' && strchr("GIJKMNOPRSTUVWXYZ",key)) {
             if(fx->command!=key) { fx->command=(char)key;fx->value=-1;changed=1; }
+        } else if(digit>=0 && !fx->command) {
+            fx->command=(char)(digit<10?'0'+digit:'A'+digit-10);
+            fx->value=-1;changed=1;
+        } else if(key=='$' && fx->command) {
+            fx->value=TT_EFFECT_VALUE_REGISTER_PREFIX;changed=1;
         }
         else if(digit>=0 && fx->command) {
-            fx->value=((fx->value<0?0:fx->value)<<4 & 0xf0)|digit;
+            fx->value=fx->value==TT_EFFECT_VALUE_REGISTER_PREFIX?
+                tt_effect_register_value(digit):
+                ((fx->value<0?0:fx->value)<<4 & 0xf0)|digit;
             changed=1;
         }
     }
@@ -3135,14 +3157,23 @@ static void handle_key(int key) {
             entry->instrument=digit;
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(pattern_effect_field() &&
-                  strchr("GIJKMNOPRSTUVWXYZ",key>='a' && key<='z'?key-32:key)) {
+                  strchr("0123456789ABCDEF" "GIJKMNOPRSTUVWXYZ",
+                         key>='a' && key<='z'?key-32:key)) {
             set_effect_slot(entry,pattern_effect_slot(),key>='a' && key<='z'?key-32:key);
+            edit_cell(tracker.step,tracker.channel,edited);
+        } else if(tracker.field>=3 && tracker.field%2==1 && key=='$') {
+            TtPatternEffect *fx=tt_cell_effect(entry,pattern_effect_slot());
+            if(fx->command==TT_EFFECT_NONE)set_effect_slot(entry,pattern_effect_slot(),TT_EFFECT_S);
+            fx=tt_cell_effect(entry,pattern_effect_slot());
+            fx->value=TT_EFFECT_VALUE_REGISTER_PREFIX;
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field>=3 && tracker.field%2==1 && digit>=0) {
             TtPatternEffect *fx=tt_cell_effect(entry,pattern_effect_slot());
             if(fx->command==TT_EFFECT_NONE)set_effect_slot(entry,pattern_effect_slot(),TT_EFFECT_S);
             fx=tt_cell_effect(entry,pattern_effect_slot());
-            fx->value=(((fx->value<0?0:fx->value)<<4)&0xf0)|digit;
+            fx->value=fx->value==TT_EFFECT_VALUE_REGISTER_PREFIX?
+                tt_effect_register_value(digit):
+                (((fx->value<0?0:fx->value)<<4)&0xf0)|digit;
             edit_cell(tracker.step,tracker.channel,edited);
         }
         else if(tracker.field==0) {

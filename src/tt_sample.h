@@ -16,6 +16,41 @@ enum { TT_EFFECT_NONE=0, TT_EFFECT_G='G', TT_EFFECT_I='I',
        TT_EFFECT_U='U', TT_EFFECT_V='V', TT_EFFECT_W='W', TT_EFFECT_X='X',
        TT_EFFECT_Y='Y', TT_EFFECT_Z='Z',
        TT_EFFECT_STRETCH='R', TT_EFFECT_LEGACY_RETRIGGER='r' };
+enum { TT_EFFECT_REGISTER_COUNT=16, TT_EFFECT_VALUE_UNSET=-1,
+       TT_EFFECT_VALUE_REGISTER_PREFIX=-2,
+       TT_EFFECT_VALUE_REGISTER_BASE=-3 };
+
+static inline int tt_effect_register_index(int command) {
+    if(command>='0' && command<='9')return command-'0';
+    if(command>='A' && command<='F')return command-'A'+10;
+    return -1;
+}
+static inline int tt_effect_is_register(int value) {
+    return value<=TT_EFFECT_VALUE_REGISTER_BASE &&
+           value>TT_EFFECT_VALUE_REGISTER_BASE-TT_EFFECT_REGISTER_COUNT;
+}
+static inline int tt_effect_register_value(int index) {
+    return TT_EFFECT_VALUE_REGISTER_BASE-index;
+}
+static inline int tt_effect_value_register(int value) {
+    return TT_EFFECT_VALUE_REGISTER_BASE-value;
+}
+static inline void tt_effect_value_text(int value,char text[3]) {
+    static const char hex[]="0123456789ABCDEF";
+    if(tt_effect_is_register(value)) {
+        text[0]='$';text[1]=hex[tt_effect_value_register(value)];
+    } else if(value==TT_EFFECT_VALUE_REGISTER_PREFIX) {
+        text[0]='$';text[1]='.';
+    } else if(value>=0 && value<=255) {
+        text[0]=hex[value>>4];text[1]=hex[value&15];
+    } else {
+        text[0]=text[1]='.';
+    }
+    text[2]=0;
+}
+static inline int tt_effect_register_command(int command) {
+    return tt_effect_register_index(command)>=0;
+}
 
 typedef struct { int command,value; } TtPatternEffect;
 

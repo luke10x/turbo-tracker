@@ -252,11 +252,18 @@ int tt_song_save(const char *path,const TtSong *song,
                 const TtTableEffect *fx=&entry->effect[effect];
                 if(!fx->command)fputs("\t...",file);
                 else {
-                    if((fx->command<'G' || fx->command>'Z') && fx->command!='r')
+                    if((fx->command<'G' || fx->command>'Z') && fx->command!='r' &&
+                       !tt_effect_register_command(fx->command))
                         valid=0;
-                    if(fx->value>255 || fx->value< -1)
+                    if(fx->value>255 ||
+                       (fx->value<TT_EFFECT_VALUE_REGISTER_BASE-TT_EFFECT_REGISTER_COUNT+1 &&
+                        fx->value!=TT_EFFECT_VALUE_REGISTER_PREFIX))
                         valid=0;
-                    if(fx->value<0)fprintf(file,"\t%c..",fx->command);
+                    if(tt_effect_is_register(fx->value) ||
+                       fx->value==TT_EFFECT_VALUE_REGISTER_PREFIX) {
+                        char reference[3];tt_effect_value_text(fx->value,reference);
+                        fprintf(file,"\t%c%s",fx->command,reference);
+                    } else if(fx->value<0)fprintf(file,"\t%c..",fx->command);
                     else fprintf(file,"\t%c%02X",fx->command,fx->value);
                 }
             }
@@ -405,13 +412,18 @@ int tt_song_load(const char *path,TtSong *song,
                     if(!strcmp(token,"..."))continue;
                     if(strlen(token)!=3 ||
                        ((token[0]<'G' || token[0]>'Z') &&
+                        !tt_effect_register_command(token[0]) &&
                         !(version<=4 && token[0]=='~') &&
                         !(version>=5 && token[0]=='r'))) {
                         valid=0;break;
                     }
                     fx->command=version<=4 && token[0]=='R'?'r':
                                 version<=4 && token[0]=='~'?'R':token[0];
-                    if(token[1]=='.' && token[2]=='.')fx->value=-1;
+                    if(token[1]=='$' && token[2]=='.')
+                        fx->value=TT_EFFECT_VALUE_REGISTER_PREFIX;
+                    else if(token[1]=='$' && hex(token[2])>=0)
+                        fx->value=tt_effect_register_value(hex(token[2]));
+                    else if(token[1]=='.' && token[2]=='.')fx->value=-1;
                     else {
                         int hi=hex(token[1]),lo=hex(token[2]);
                         if(hi<0 || lo<0) { valid=0;break; }

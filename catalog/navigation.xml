@@ -1,5 +1,7 @@
 <root>
   <node title="Effects">
+    <node title="Effect registers (0RG–FRG)" href="./app.html?init_song=%2Fexamples%2Fregister-reference%2Fregister.song&amp;init_play=1"
+          source="./examples/register-reference/README.md" />
     <node title="Glide (GLD)" href="./app.html?init_song=%2Fexamples%2Fglide%2Fglide.song&amp;init_play=1"
           source="./examples/glide/README.md" />
     <node title="Fade in (IIN)" href="./app.html?init_song=%2Fexamples%2Fiin-fade-in%2Fiin.song&amp;init_play=1"

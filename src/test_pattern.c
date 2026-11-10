@@ -17,6 +17,8 @@ int main(void) {
     original.cell[9][2]=(TtCell){-1,-1,TT_EFFECT_M,0x80,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[10][3]=(TtCell){60,1,TT_EFFECT_S,0xff,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[11][3]=(TtCell){-1,-1,TT_EFFECT_S,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    original.cell[12][3]=(TtCell){-1,-1,'0',0x30,TT_EFFECT_M,
+                                  tt_effect_register_value(0),TT_EFFECT_NONE,-1};
     const char *commands="GIJKMNOPRSTUVWXY";
     for(int row=0;commands[row] && row+1<TT_STEPS;++row)
         original.cell[row+1][4]=(TtCell){-1,-1,commands[row],0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
@@ -36,6 +38,14 @@ int main(void) {
     char delay_alias[6];
     tt_pattern_effect_text(TT_EFFECT_U,0x80,delay_alias);
     assert(!strcmp(delay_alias,"UDL80"));
+    char register_alias[6];
+    tt_pattern_effect_text('F',0xff,register_alias);
+    assert(!strcmp(register_alias,"FRGFF"));
+    char register_value[6];
+    tt_pattern_effect_text(TT_EFFECT_M,tt_effect_register_value(0),register_value);
+    assert(!strcmp(register_value,"MVL$0"));
+    char register_cell[11];tt_cell_text(&original.cell[12][3],register_cell);
+    assert(!strcmp(register_cell,".....0RG30"));
     char off_cell[11];
     tt_cell_text(&original.cell[15][0],off_cell);
     assert(!strcmp(off_cell,"OFF..XJP1F"));
@@ -47,6 +57,8 @@ int main(void) {
     memset(&loaded,0,sizeof(loaded));
     assert(tt_pattern_load(path,&loaded,error,sizeof(error)));
     assert(!memcmp(&original,&loaded,sizeof(original)));
+    char register_row[126];tt_pattern_row_text(&original,12,register_row);
+    assert(strstr(register_row,".....0RG30MVL$0")!=NULL);
     TtPattern duplicate_table;tt_pattern_init(&duplicate_table);
     duplicate_table.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0,
                                         TT_EFFECT_T,1,TT_EFFECT_NONE,-1};

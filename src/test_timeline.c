@@ -306,6 +306,16 @@ int main(void) {
            tracker.song.table[0].tick[0].effect[0].command=='Z' &&
            tracker.song.table[0].tick[0].effect[0].value==3 &&
            tracker.song.table[0].tick[8].effect[0].value==12);
+    assert(setenv("INIT_SONG","examples/register-reference/register.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern[0].cell[0][0].effect=='0' &&
+           tracker.song.pattern[0].cell[0][0].value==0x30 &&
+           tracker.song.pattern[0].cell[0][0].effect2==TT_EFFECT_M &&
+           tracker.song.pattern[0].cell[0][0].value2==
+               tt_effect_register_value(0) &&
+           tracker.song.pattern[0].cell[4][0].value==0x80 &&
+           tracker.song.pattern[0].cell[4][0].value2==
+               tt_effect_register_value(0));
     const char *effect_examples[]={
         "examples/iin-fade-in/iin.song",
         "examples/pitch-bends/pitch-bends.song",
@@ -419,6 +429,15 @@ int main(void) {
     assert(effect_entry->effect==TT_EFFECT_S && effect_entry->value==-1);
     handle_key(' ');handle_key('4');
     assert(effect_entry->value==4);
+    tracker.step=1;tracker.field=2;
+    TtCell *register_input=&tracker.pattern.cell[1][2];
+    handle_key('0');
+    tracker.field=3;handle_key('3');handle_key('0');
+    tracker.field=4;handle_key('m');
+    tracker.field=5;handle_key('$');handle_key('0');
+    assert(register_input->effect=='0' && register_input->value==0x30 &&
+           register_input->effect2==TT_EFFECT_M &&
+           register_input->value2==tt_effect_register_value(0));
     tracker.follow=1;
     tracker.play_mode=PLAY_SONG;
     tracker.loop=0;
@@ -651,6 +670,33 @@ int main(void) {
     assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_SET_TICKS_PER_ROW,.a=0}));
     tt_play_flush();
     assert(tracker.playback_ticks_per_row==tracker.song.ticks_per_row);
+    assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_SET_EFFECT_REGISTER,
+                                      .a=0,.b=0}));
+    tt_play_flush();
+    assert(tt_play_emit((TtPlayEvent){.type=TT_PLAY_SET_EFFECT_REGISTER,
+                                      .a=TT_EFFECT_REGISTER_COUNT,.b=0xff}));
+    tt_play_flush();
+    assert(tracker.effect_registers[0]==0);
+    tracker.pattern=tracker.song.pattern[2];
+    tracker.pattern_index=tracker.loop_pattern_index=2;
+    tracker.play_mode=PLAY_PATTERN;
+    tracker.pattern.cell[4][0]=(TtCell){-1,-1,'0',1,TT_EFFECT_T,
+                                        tt_effect_register_value(0),TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[5][0]=(TtCell){-1,-1,'0',2,TT_EFFECT_T,
+                                        tt_effect_register_value(0),TT_EFFECT_NONE,-1};
+    tt_play_play_row(4);
+    assert(tracker.effect_registers[0]==1 && tracker.table_voice[0].active &&
+           tracker.table_voice[0].table==1);
+    tt_play_play_row(5);
+    assert(tracker.effect_registers[0]==2 && tracker.table_voice[0].active &&
+           tracker.table_voice[0].table==2);
+    tracker.song.table[0].tick[0].effect[0]=(TtTableEffect){'F',3};
+    tracker.song.table[0].tick[0].effect[1]=(TtTableEffect){'X',
+                                         tt_effect_register_value(15)};
+    tracker.table_voice[0]=(TableVoice){.active=1,.table=0,.tick=0,
+                                        .next_table=-1};
+    tt_play_table_ticks();
+    assert(tracker.effect_registers[15]==3 && tracker.table_voice[0].table==3);
     tracker.play_mode=PLAY_SONG;
     tracker.song.order_count=3;
     tracker.song.order[0]=0;tracker.song.order[1]=1;tracker.song.order[2]=2;
@@ -708,6 +754,15 @@ int main(void) {
     assert(tracker.song.table[0].tick[5].effect[0].command=='R');
     handle_table_key('8');handle_table_key('0');
     assert(tracker.song.table[0].tick[5].effect[0].value==0x80);
+    tracker.table_grid.row=6;
+    handle_table_key('0');handle_table_key('3');handle_table_key('0');
+    assert(tracker.song.table[0].tick[6].effect[0].command=='0' &&
+           tracker.song.table[0].tick[6].effect[0].value==0x30);
+    tracker.table_grid.row=7;
+    handle_table_key('m');handle_table_key('$');handle_table_key('0');
+    assert(tracker.song.table[0].tick[7].effect[0].command=='M' &&
+           tracker.song.table[0].tick[7].effect[0].value==
+               tt_effect_register_value(0));
     tracker.table_grid.row=0;
     tracker.table_grid.field=2;
     f80_grid_hold(&tracker.table_grid);

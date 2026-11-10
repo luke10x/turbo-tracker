@@ -10,6 +10,11 @@ static int hex(char digit) {
     return digit>='A' && digit<='F'?digit-'A'+10:-1;
 }
 static const char *effect_alias(int effect) {
+    static const char *const register_alias[TT_EFFECT_REGISTER_COUNT]={
+        "0RG","1RG","2RG","3RG","4RG","5RG","6RG","7RG",
+        "8RG","9RG","ARG","BRG","CRG","DRG","ERG","FRG"};
+    int register_index=tt_effect_register_index(effect);
+    if(register_index>=0)return register_alias[register_index];
     switch(effect) {
     case 'G':return "GLD";case 'I':return "IIN";
     case 'J':return "JDN";case 'K':return "KUP";
@@ -27,7 +32,11 @@ void tt_pattern_effect_text(int command,int value,char text[6]) {
     const char *alias=effect_alias(command);
     if(!alias)alias="...";
     memcpy(text,alias,3);
-    if(value>=0 && value<=255) {
+    if(tt_effect_is_register(value) ||
+       value==TT_EFFECT_VALUE_REGISTER_PREFIX) {
+        char reference[3];tt_effect_value_text(value,reference);
+        memcpy(text+3,reference,2);
+    } else if(value>=0 && value<=255) {
         text[3]=digits[value>>4];text[4]=digits[value&15];
     } else memcpy(text+3,"..",2);
     text[5]=0;
@@ -48,7 +57,11 @@ void tt_cell_text(const TtCell *cell,char text[11]) {
         const char *alias=effect_alias(cell->effect);
         if(!alias)alias="...";
         memcpy(text+5,alias,3);
-        if(cell->value>=0 && cell->value<=255) {
+        if(tt_effect_is_register(cell->value) ||
+           cell->value==TT_EFFECT_VALUE_REGISTER_PREFIX) {
+            char reference[3];tt_effect_value_text(cell->value,reference);
+            memcpy(text+8,reference,2);
+        } else if(cell->value>=0 && cell->value<=255) {
             text[8]=digits[cell->value>>4];text[9]=digits[cell->value&15];
         }
     }
@@ -76,7 +89,16 @@ static int parse_cell(const char *text,TtCell *cell) {
         cell->effect=TT_EFFECT_NONE;cell->value=-1;
     }
     else {
-        if(!memcmp(text+5,"SLI",3))cell->effect=TT_EFFECT_S;
+        int register_index=-1;
+        for(int reg=0;reg<TT_EFFECT_REGISTER_COUNT;++reg) {
+            int command=reg<10?'0'+reg:'A'+reg-10;
+            if(text[5]==command && text[6]=='R' && text[7]=='G') {
+                register_index=reg;break;
+            }
+        }
+        if(register_index>=0)cell->effect=register_index<10?'0'+register_index:
+                                                     'A'+register_index-10;
+        else if(!memcmp(text+5,"SLI",3))cell->effect=TT_EFFECT_S;
         else if(!memcmp(text+5,"VOL",3))cell->effect=TT_EFFECT_M;
         else if(!memcmp(text+5,"RTG",3))cell->effect=TT_EFFECT_LEGACY_RETRIGGER;
         else if(!memcmp(text+5,"~ST",3))cell->effect=TT_EFFECT_STRETCH;
@@ -88,7 +110,11 @@ static int parse_cell(const char *text,TtCell *cell) {
             }
             if(cell->effect==TT_EFFECT_NONE)return 0;
         }
-        if(text[8]=='.' && text[9]=='.')cell->value=-1;
+        if(text[8]=='$' && text[9]=='.')
+            cell->value=TT_EFFECT_VALUE_REGISTER_PREFIX;
+        else if(text[8]=='$' && hex(text[9])>=0)
+            cell->value=tt_effect_register_value(hex(text[9]));
+        else if(text[8]=='.' && text[9]=='.')cell->value=-1;
         else {
             int high=hex(text[8]),low=hex(text[9]);
             if(high<0 || low<0)return 0;
@@ -111,7 +137,11 @@ static void cell_row_text(const TtCell *cell,char text[20]) {
         if(!alias)memcpy(text+5+slot*5,".....",5);
         else {
             memcpy(text+5+slot*5,alias,3);
-            if(fx->value>=0 && fx->value<=255) {
+            if(tt_effect_is_register(fx->value) ||
+               fx->value==TT_EFFECT_VALUE_REGISTER_PREFIX) {
+                char value[3];tt_effect_value_text(fx->value,value);
+                memcpy(text+8+slot*5,value,2);
+            } else if(fx->value>=0 && fx->value<=255) {
                 text[8+slot*5]=digits[fx->value>>4];text[9+slot*5]=digits[fx->value&15];
             } else memcpy(text+8+slot*5,"..",2);
         }

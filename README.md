@@ -187,6 +187,13 @@ should use a table note and a table jump. For example, put the note at tick `00`
 and `X00` at tick `03` to replay the note every four ticks. `SFA` plays backward
 from marker `F` to marker `A`.
 
+Effect values may be literal hex bytes or register references such as `$0`.
+Pattern commands `0RGxx` through `FRGxx` write `xx` to registers `0` through
+`F`; in table slots, the register digit is the command and `xx` its value.
+Other effects can read a register with `$x`, for example `MVL$0`. Registers are
+shared across channels and pattern/table playback, start at `00` when playback
+starts, and can be changed elsewhere in the sequence.
+
 Sixteen ordered markers (`0`–`F`) define fifteen slices. Each slice may inherit
 the sample reference note or override it. **Sampler > Slices...** shows the
 frame range and duration of each interval and edits its base note. Changing the
@@ -203,10 +210,12 @@ moves through note, instrument, effect, and value fields and into adjacent
 channels. On narrow screens, the grid scrolls by field. Type notes as `C-4` or
 `C#4`; after a complete note, Space advances through instrument, effect, and
 value fields (then to the next channel). Type `S` or `M` in the effect field to
-select `SLC` or `MVL`. The same field accepts
-`G I J K N O P R V W`; their current status and byte meanings are in
+select `SLC` or `MVL`. The same field accepts register digits `0`–`9`, register
+letters `A`–`F`, and effect keys `G I J K M N O P R S T U V W X Y Z`; their
+current status and byte meanings are in
 [the effect status](docs/turbo-tracker-effect-status.md). The value stays `..`
-until entered in the value field. F3/F4 change a selected value by 16, and
+until entered in the value field. Type `$` then a hex digit for a register
+reference such as `$0`. F3/F4 change a selected value by 16, and
 F5/F6 by 1. Delete clears a field. Enter auditions the selected cell. Outside
 the pattern grid, Space controls playback. F9 opens the menu and F10 exits. Pattern F1/F2 select the
 previous/next pattern. F3–F8 depend on the selected field: note controls
@@ -223,11 +232,12 @@ only when their content overflows; a swipe scrolls it, while a one-second hold
 starts a rectangular selection. Shift+arrows extends the selection; F5 copies,
 F6 cuts, F7 pastes into an equally sized selection of the same fields, and F8
 clears it. A table has one note, one instrument, and six three-character effect
-slots per tick, for example `C-4 01 M33 SAF ... ... U05 ...`. Left/Right selects
+slots per tick, for example `C-4 01 M33 SAF ... ... U80 ...`. Left/Right selects
 a field; Up/Down selects a tick. Tab switches between the table name and grid.
 Use the note keyboard in the note field, hex digits for the instrument, and a
-command letter followed by hex digits in an effect slot. A new command shows
-`..` until its value is entered. Delete clears a field. The table buttons switch
+command letter or register digit followed by hex digits in an effect slot.
+Type `$` then a hex digit to read a register. A new command shows `..` until
+its value is entered. Delete clears a field. The table buttons switch
 tables, change length, and close the editor; `[`/`]` and `-`/`+` do the same
 from the keyboard.
 
