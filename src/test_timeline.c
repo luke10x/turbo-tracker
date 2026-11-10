@@ -271,6 +271,15 @@ int main(void) {
            tracker.song.table[0].tick[4].note==64 &&
            tracker.song.table[0].tick[8].note==67 &&
            tracker.song.table[0].tick[12].note==72);
+    assert(setenv("INIT_SONG","examples/tbl-relative-notes/tbl-relative-notes.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.table[0].tick[0].note==tt_note_relative(1,0) &&
+           tracker.song.table[0].tick[4].note==tt_note_relative(1,4) &&
+           tracker.song.pattern[0].cell[4][0].note==62);
+    assert(setenv("INIT_SONG","examples/chord-voicings/chord-voicings.song",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern[0].cell[0][1].note==tt_note_relative(1,4) &&
+           tracker.song.pattern[0].cell[0][2].note==tt_note_relative(1,3));
     assert(setenv("INIT_SONG","examples/tbl-loop/tbl-loop.song",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[11].effect[0].command=='Y' &&

@@ -40,6 +40,8 @@ int main(void) {
     snprintf(song.table[0].name,TT_SONG_NAME,"Chop %% Table");
     song.table[0].tick[0].note=60;
     song.table[0].tick[0].instrument=1;
+    song.table[0].tick[6].note=tt_note_relative(1,7);
+    song.table[0].tick[6].instrument=1;
     song.table[0].tick[0].effect[0]=(TtTableEffect){'M',0x33};
     song.table[0].tick[0].effect[1]=(TtTableEffect){'S',0xaf};
     song.table[0].tick[0].effect[4]=(TtTableEffect){'U',0x05};

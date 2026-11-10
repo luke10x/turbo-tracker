@@ -11,7 +11,7 @@ enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
 enum { TT_HISTORY_MAX=8 };
 enum { SONG_LOOKAHEAD_FRAMES=16384, SONG_DISPLAY_ROWS=64 };
 typedef struct {
-    int active,table,tick,next_table,pending;
+    int active,table,tick,next_table,pending,root_note;
     int table_loop_active,table_loop_broken;
 } TableVoice;
 typedef struct {

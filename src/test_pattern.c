@@ -26,6 +26,7 @@ int main(void) {
     original.cell[14][5]=(TtCell){-1,-1,TT_EFFECT_Z,0x30,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[15][0]=(TtCell){TT_NOTE_OFF,-1,TT_EFFECT_X,0x1f,
                                     TT_EFFECT_Y,0x0f,TT_EFFECT_Z,0x30};
+    original.cell[13][5].note=tt_note_relative(1,4);
     char blank_value[11];
     tt_cell_text(&original.cell[11][3],blank_value);
     assert(!strcmp(blank_value,".....SLC.."));
@@ -49,6 +50,8 @@ int main(void) {
     char off_cell[11];
     tt_cell_text(&original.cell[15][0],off_cell);
     assert(!strcmp(off_cell,"OFF..XJP1F"));
+    char relative_cell[11];tt_cell_text(&original.cell[13][5],relative_cell);
+    assert(!strcmp(relative_cell,"+=4......."));
     assert(tt_pattern_save(path,&original,error,sizeof(error)));
     FILE *file=fopen(path,"r");assert(file);
     char line[128];assert(fgets(line,sizeof(line),file));

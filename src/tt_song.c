@@ -245,7 +245,7 @@ int tt_song_save(const char *path,const TtSong *song,
         fprintf(file,"TABLE\t%d\t%d\t%s\n",table,t->length,valid?name:"");
         for(int tick=0;tick<t->length && tick<TT_TABLE_MAX_TICKS;++tick) {
             const TtTableTick *entry=&song->table[table].tick[tick];
-            if(entry->note < TT_NOTE_OFF || entry->note>127 ||
+            if((entry->note < TT_NOTE_OFF && !tt_note_is_relative(entry->note)) || entry->note>127 ||
                entry->instrument < -1 || entry->instrument>255)valid=0;
             fprintf(file,"TICK\t%d\t%d\t%d",tick,entry->note,entry->instrument);
             for(int effect=0;effect<TT_TABLE_EFFECTS;++effect) {
@@ -404,7 +404,8 @@ int tt_song_load(const char *path,TtSong *song,
                     &next->table[table].tick[tick]:&parsed;
                 if(!READ(10) || strcmp(field[0],"TICK") ||
                    !integer(field[1],tick,tick,&number) ||
-                   !integer(field[2],TT_NOTE_OFF,127,&entry->note) ||
+                   !integer(field[2],TT_NOTE_REL_MINUS_BASE-TT_NOTE_RELATIVE_MAX,
+                            127,&entry->note) ||
                    !integer(field[3],-1,255,&entry->instrument)) { valid=0;break; }
                 for(int effect=0;effect<TT_TABLE_EFFECTS;++effect) {
                     const char *token=field[4+effect];

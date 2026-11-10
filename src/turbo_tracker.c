@@ -24,6 +24,8 @@
 #include "tt_song.h"
 #include "tt_edit.h"
 #include "tt_tracker_internal.h"
+
+static void tracker_note_text(int note,char out[4]);
 #include "tt_play.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -1327,9 +1329,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                                 memcpy(shown,tracker.note_input,
                                        (size_t)tracker.note_input_length);
                                 shown[tracker.note_input_length]=0;
-                            } else if(tick->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
-                            else if(tick->note>=0)tt_note_name(tick->note,shown);
-                            else { memcpy(shown,"...",4);empty=1; }
+                            } else { tracker_note_text(tick->note,shown);
+                                empty=tick->note==-1; }
                         } else if(column==1) {
                             if(tick->instrument>=0)
                                 snprintf(shown,sizeof(shown),"%02X",tick->instrument);
@@ -1368,9 +1369,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             } else if(inline_line && channel==tracker.inline_table_channel) {
                 const TtTableTick *tick=&tracker.song.table[tracker.inline_table_index].tick[table_tick];
                 if(field==0) {
-                    if(tick->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
-                    else if(tick->note>=0)tt_note_name(tick->note,shown);
-                    else memcpy(shown,"...",4);
+                    tracker_note_text(tick->note,shown);
                     empty=tick->note==-1;
                 } else if(field==1) {
                     if(tick->instrument>=0)snprintf(shown,sizeof(shown),"%02X",tick->instrument);
@@ -1391,9 +1390,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             } else if(field>7) {
                 memset(shown,' ',sizeof(shown));shown[visible]=0;empty=1;
             } else if(field==0) {
-                if(cell->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
-                else if(cell->note>=0)tt_note_name(cell->note,shown);
-                else memcpy(shown,"...",4);
+                tracker_note_text(cell->note,shown);
                 empty=cell->note==-1;
             } else if(field==1) {
                 if(cell->instrument>=0)snprintf(shown,sizeof(shown),"%02X",cell->instrument);
@@ -1902,9 +1899,7 @@ static void table_cell_text(void *user,int tick,int field,char *out,size_t size)
     (void)user;
     const TtTableTick *entry=&tracker.song.table[tracker.table_index].tick[tick];
     if(field==0) {
-        if(entry->note==TT_NOTE_OFF)snprintf(out,size,"OFF");
-        else if(entry->note<0)snprintf(out,size,"...");
-        else { char note[4];tt_note_name(entry->note,note);snprintf(out,size,"%s",note); }
+        { char note[4];tracker_note_text(entry->note,note);snprintf(out,size,"%s",note); }
     } else if(field==1) {
         if(entry->instrument<0)snprintf(out,size,"..");
         else snprintf(out,size,"%02X",entry->instrument);
@@ -1993,7 +1988,7 @@ static void show_help(F80Widget *button,void *user) {
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W X Y Z; values 00-FF.",
         "O in the note field enters OFF; X/Y jump pattern or row; Z sets BPM in patterns, ticks per row in tables.",
-        "Pattern/table notes: type C-4 or C#4; Space advances fields.",
+        "Notes: type C-4, C#4, +=X, or -=X (X is hex semitones).",
         "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
@@ -2474,6 +2469,15 @@ static int typed_note_value(const char input[4]) {
     int note=(input[2]-'0'+1)*12+semitones[letter-letters]+(input[1]=='#');
     return note<=127?note:-1;
 }
+static void tracker_note_text(int note,char out[4]) {
+    if(note==TT_NOTE_OFF)memcpy(out,"OFF",4);
+    else if(tt_note_is_relative(note)) {
+        static const char digits[]="0123456789ABCDEF";
+        out[0]=tt_note_relative_positive(note)?'+':'-';out[1]='=';
+        out[2]=digits[tt_note_relative_amount(note)];out[3]=0;
+    } else if(note>=0)tt_note_name(note,out);
+    else memcpy(out,"...",4);
+}
 static void type_note_key(int key) {
     if((key=='o' || key=='O') && tracker.note_input_length==0) {
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
@@ -2484,16 +2488,21 @@ static void type_note_key(int key) {
     }
     char character=(char)toupper((unsigned char)key);
     int length=tracker.note_input_length;
-    int valid=length==0?strchr("CDEFGAB",character)!=NULL:
+    int relative=length>0 && (tracker.note_input[0]=='+' || tracker.note_input[0]=='-');
+    int valid=relative?(length==1?character=='=':
+                        length==2?hex_digit(character)>=0:0):
+              length==0?(strchr("CDEFGAB",character)!=NULL || character=='+' || character=='-'):
               length==1?(character=='-' || character=='#'):
               length==2?character>='0' && character<='9':0;
-    if(!valid) { clear_note_input();tt_tracker_message("Type notes as C-4 or C#4");return; }
+    if(!valid) { clear_note_input();tt_tracker_message("Type C-4, C#4, +=X, or -=X (hex semitones)");return; }
     tracker.note_input[length++]=character;
     tracker.note_input_length=length;
     if(length!=3)return;
-    int note=typed_note_value(tracker.note_input);
+    int note=(tracker.note_input[0]=='+' || tracker.note_input[0]=='-')?
+        tt_note_relative(tracker.note_input[0]=='+',hex_digit(tracker.note_input[2])):
+        typed_note_value(tracker.note_input);
     clear_note_input();
-    if(note<0) { tt_tracker_message("Note must be between C-0 and G-9");return; }
+    if(note<0 && !tt_note_is_relative(note)) { tt_tracker_message("Note must be between C-0 and G-9");return; }
     TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
     edited.note=note;
     edit_cell(tracker.step,tracker.channel,edited);
@@ -2623,7 +2632,10 @@ static void type_inline_table_note_key(int key) {
     }
     char character=(char)toupper((unsigned char)key);
     int length=tracker.note_input_length;
-    int valid=length==0?strchr("CDEFGAB",character)!=NULL:
+    int relative=length>0 && (tracker.note_input[0]=='+' || tracker.note_input[0]=='-');
+    int valid=relative?(length==1?character=='=':
+                        length==2?hex_digit(character)>=0:0):
+              length==0?(strchr("CDEFGAB",character)!=NULL || character=='+' || character=='-'):
               length==1?(character=='-' || character=='#'):
               length==2?character>='0' && character<='9':0;
     if(!valid) {
@@ -2634,9 +2646,11 @@ static void type_inline_table_note_key(int key) {
     tracker.note_input[length++]=character;
     tracker.note_input_length=length;
     if(length!=3)return;
-    int note=typed_note_value(tracker.note_input);
+    int note=(tracker.note_input[0]=='+' || tracker.note_input[0]=='-')?
+        tt_note_relative(tracker.note_input[0]=='+',hex_digit(tracker.note_input[2])):
+        typed_note_value(tracker.note_input);
     clear_note_input();
-    if(note<0) {
+    if(note<0 && !tt_note_is_relative(note)) {
         tt_tracker_message("Note must be between C-0 and G-9");
         return;
     }
@@ -2882,9 +2896,7 @@ static void update_labels(void) {
         const char *field_name=tracker.field==0?"NOTE":tracker.field==1?"INST":
             tracker.field%2==0?"FX":"VALUE";
         if(tracker.field==0) {
-            if(cell->note==TT_NOTE_OFF)memcpy(shown,"OFF",4);
-            else if(cell->note>=0)tt_note_name(cell->note,shown);
-            else memcpy(shown,"...",4);
+            tracker_note_text(cell->note,shown);
         } else if(tracker.field==1) {
             if(cell->instrument>=0)snprintf(shown,sizeof(shown),"%02X",cell->instrument);
             else memcpy(shown,"..",3);

@@ -42,6 +42,12 @@ static int resolve_effect_value(int value) {
     return reg>=0 && reg<TT_EFFECT_REGISTER_COUNT?
            tracker.effect_registers[reg]:-1;
 }
+static int resolve_relative_note(int note,int root) {
+    if(!tt_note_is_relative(note) || root<0)return note;
+    int amount=tt_note_relative_amount(note);
+    int resolved=root+(tt_note_relative_positive(note)?amount:-amount);
+    return resolved<0?0:resolved>127?127:resolved;
+}
 static int row_duration_frames(void) {
     int divisor=playback_bpm()*tracker.song.rows_per_beat;
     return divisor>0?TT_AUDIO_OUTPUT_RATE*60/divisor:0;
@@ -179,10 +185,16 @@ void tt_play_play_row(int row) {
                      pattern_is_empty(pattern)?" [empty]":"");
         tt_tracker_message(info);
     }
+    int row_note[TT_CHANNELS];
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         const TtCell *cell=&pattern->cell[row][channel];
+        int note_root=channel>0?row_note[channel-1]:-1;
+        TtCell resolved_cell=*cell;
+        if(tt_note_is_relative(resolved_cell.note))
+            resolved_cell.note=resolve_relative_note(resolved_cell.note,note_root);
+        row_note[channel]=resolved_cell.note>=0?resolved_cell.note:-1;
         int glide=0,udl=-1,table_started=0;
-        TtCell sample=*cell;
+        TtCell sample=resolved_cell;
         for(int slot=0;slot<3;++slot) {
             TtPatternEffect resolved=*tt_cell_effect_const(cell,slot);
             const TtPatternEffect *fx=&resolved;
@@ -202,6 +214,7 @@ void tt_play_play_row(int row) {
             } else if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
                 TableVoice *voice=&tracker.table_voice[channel];
                 voice->active=1;voice->table=fx->value;voice->tick=0;
+                voice->root_note=resolved_cell.note>=0?resolved_cell.note:note_root;
                 voice->next_table=-1;voice->pending=0;
                 voice->table_loop_active=voice->table_loop_broken=0;
                 tt_audio_cancel_delayed(channel);
@@ -226,30 +239,31 @@ void tt_play_play_row(int row) {
                 tt_audio_command(channel,(char)fx->command,fx->value);
         }
         TableVoice *table_voice=&tracker.table_voice[channel];
-        if(!table_started && ((cell->note>=0 && cell->instrument>=0) ||
-                              cell->note==TT_NOTE_OFF) &&
+        if(!table_started && ((resolved_cell.note>=0 && resolved_cell.instrument>=0) ||
+                              resolved_cell.note==TT_NOTE_OFF) &&
            table_voice->active) {
             table_voice->active=0;table_voice->pending=0;
             table_voice->next_table=-1;
             table_voice->table_loop_active=table_voice->table_loop_broken=0;
             tt_audio_cancel_delayed(channel);
         }
-        if(cell->note==TT_NOTE_OFF) {
+        if(resolved_cell.note==TT_NOTE_OFF) {
             table_voice->pending=0;
             tt_audio_note_off(channel);
             continue;
         }
-        if(cell->note<0)continue;
+        if(table_started && resolved_cell.note>=0)continue;
+        if(resolved_cell.note<0)continue;
         int first,last;
         const TtPhrase *phrase=NULL;
-        const TtWave *wave=instrument_wave(cell,&phrase);
+        const TtWave *wave=instrument_wave(&resolved_cell,&phrase);
         if(!wave || !tt_cell_range(phrase,&sample,wave->frames,&first,&last))continue;
         int base=cell_reference_note(phrase,&sample);
         int delay=udl>=0?udl_delay_frames(udl,0):0;
         if(glide>0 && (delay?
-           tt_audio_glide_to_delayed(channel,cell->note,base,glide,delay):
-           tt_audio_glide_to(channel,cell->note,base,glide)))continue;
-        if(!tt_audio_play_channel_delayed(channel,wave,first,last,cell->note,base,delay))
+           tt_audio_glide_to_delayed(channel,resolved_cell.note,base,glide,delay):
+           tt_audio_glide_to(channel,resolved_cell.note,base,glide)))continue;
+        if(!tt_audio_play_channel_delayed(channel,wave,first,last,resolved_cell.note,base,delay))
             tt_tracker_message("Audio unavailable: check the output device or browser permission");
     }
     if(tracker.rendering_song) {
@@ -270,16 +284,20 @@ void tt_play_play_row(int row) {
 }
 
 static void table_play_note(int channel,const TtCell *cell,int glide_rate,
-                            int delay_frames) {
+                            int delay_frames,int root_note) {
+    TtCell resolved=*cell;
+    if(tt_note_is_relative(resolved.note))
+        resolved.note=resolve_relative_note(resolved.note,root_note);
+    if(resolved.note<0)return;
     const TtPhrase *phrase=NULL;
-    const TtWave *wave=instrument_wave(cell,&phrase);
+    const TtWave *wave=instrument_wave(&resolved,&phrase);
     int first,last;
-    if(!wave || !tt_cell_range(phrase,cell,wave->frames,&first,&last))return;
-    int base=cell_reference_note(phrase,cell);
+    if(!wave || !tt_cell_range(phrase,&resolved,wave->frames,&first,&last))return;
+    int base=cell_reference_note(phrase,&resolved);
     if(glide_rate>0 && (delay_frames?
-       tt_audio_glide_to_delayed(channel,cell->note,base,glide_rate,delay_frames):
-       tt_audio_glide_to(channel,cell->note,base,glide_rate)))return;
-    tt_audio_play_channel_delayed(channel,wave,first,last,cell->note,base,delay_frames);
+       tt_audio_glide_to_delayed(channel,resolved.note,base,glide_rate,delay_frames):
+       tt_audio_glide_to(channel,resolved.note,base,glide_rate)))return;
+    tt_audio_play_channel_delayed(channel,wave,first,last,resolved.note,base,delay_frames);
 }
 
 void tt_play_table_ticks(void) {
@@ -345,10 +363,10 @@ void tt_play_table_ticks(void) {
         if(note.note==TT_NOTE_OFF) {
             voice->pending=0;
             tt_audio_note_off(channel);
-        } else if(note.note>=0 && note.instrument>=0) {
+        } else if((note.note>=0 || tt_note_is_relative(note.note)) && note.instrument>=0) {
             voice->pending=0;
             int delay_frames=delay>=0?udl_delay_frames(delay,1):0;
-            table_play_note(channel,&note,glide_rate,delay_frames);
+            table_play_note(channel,&note,glide_rate,delay_frames,voice->root_note);
             voice->pending=delay_frames>0;
         }
         if(jump_table>=0) {

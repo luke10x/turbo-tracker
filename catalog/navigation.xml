@@ -27,6 +27,8 @@
     <node title="Tables (TBL)">
       <node title="Arpeggio" href="./app.html?init_song=%2Fexamples%2Ftbl-arpeggio%2Ftbl-arpeggio.song&amp;init_play=1"
             source="./examples/tbl-arpeggio/README.md" />
+      <node title="Relative notes" href="./app.html?init_song=%2Fexamples%2Ftbl-relative-notes%2Ftbl-relative-notes.song&amp;init_play=1"
+            source="./examples/tbl-relative-notes/README.md" />
       <node title="Backward loop (YRJ)" href="./app.html?init_song=%2Fexamples%2Ftbl-loop%2Ftbl-loop.song&amp;init_play=1"
             source="./examples/tbl-loop/README.md" />
       <node title="Retrigger (X)" href="./app.html?init_song=%2Fexamples%2Ftbl-retrigger%2Ftbl-retrigger.song&amp;init_play=1"
@@ -46,5 +48,9 @@
           source="./examples/yrj-pattern-row-jump/README.md" />
     <node title="Tempo (ZTM)" href="./app.html?init_song=%2Fexamples%2Fztm%2Fztm.song&amp;init_play=1"
           source="./examples/ztm/README.md" />
+  </node>
+  <node title="Features">
+    <node title="Chord voicings" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.song&amp;init_play=1"
+          source="./examples/chord-voicings/README.md" />
   </node>
 </root>

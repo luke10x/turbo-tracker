@@ -45,6 +45,11 @@ void tt_cell_text(const TtCell *cell,char text[11]) {
     static const char digits[]="0123456789ABCDEF";
     memcpy(text,"..........",11);
     if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
+    else if(tt_note_is_relative(cell->note)) {
+        static const char digits[]="0123456789ABCDEF";
+        text[0]=tt_note_relative_positive(cell->note)?'+':'-';text[1]='=';
+        text[2]=digits[tt_note_relative_amount(cell->note)];
+    }
     else if(cell->note>=0) {
         char note[4];tt_note_name(cell->note,note);
         memcpy(text,note,3);
@@ -70,15 +75,19 @@ void tt_cell_text(const TtCell *cell,char text[11]) {
 static int parse_note(const char *text) {
     if(!memcmp(text,"OFF",3))return TT_NOTE_OFF;
     if(!memcmp(text,"...",3))return -1;
+    if((text[0]=='+' || text[0]=='-') && text[1]=='=') {
+        int amount=hex(text[2]);
+        return amount>=0?tt_note_relative(text[0]=='+',amount):-1000;
+    }
     for(int note=0;note<=127;++note) {
         char name[4];tt_note_name(note,name);
         if(!memcmp(text,name,3))return note;
     }
-    return -3;
+    return -1000;
 }
 static int parse_cell(const char *text,TtCell *cell) {
     cell->note=parse_note(text);
-    if(cell->note == -3)return 0;
+    if(cell->note == -1000)return 0;
     if(text[3]=='.' && text[4]=='.')cell->instrument=-1;
     else {
         int high=hex(text[3]),low=hex(text[4]);
@@ -126,6 +135,11 @@ static int parse_cell(const char *text,TtCell *cell) {
 static void cell_row_text(const TtCell *cell,char text[20]) {
     static const char digits[]="0123456789ABCDEF";
     if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
+    else if(tt_note_is_relative(cell->note)) {
+        static const char digits[]="0123456789ABCDEF";
+        text[0]=tt_note_relative_positive(cell->note)?'+':'-';text[1]='=';
+        text[2]=digits[tt_note_relative_amount(cell->note)];
+    }
     else if(cell->note>=0)tt_note_name(cell->note,text);
     else memcpy(text,"...",3);
     if(cell->instrument>=0 && cell->instrument<=255) {
