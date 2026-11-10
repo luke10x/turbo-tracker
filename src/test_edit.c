@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,6 +136,26 @@ int main(void) {
     e.slice=(TtEditSlice){0,72};
     assert(apply(e) && tt_slice_base_note(&phrase,0)==72);
     e.slice.note=128;assert(!apply(e));
+    e=(TtEditEvent){.type=TT_EDIT_SLICES_AUTODETECT};
+    assert(!apply(e) && strstr(message,"Load a sample"));
+    wave.frames=8000;wave.rate=8000;wave.pcm=malloc((size_t)wave.frames*sizeof(float));
+    assert(wave.pcm);
+    for(int i=0;i<wave.frames;++i)wave.pcm[i]=.5f*sinf(6.2831853f*440.0f*i/wave.rate);
+    tt_phrase_init(&phrase,wave.frames);
+    assert(apply(e) && phrase.marker[0]==0 && phrase.marker[TT_MARKERS-1]==wave.frames);
+    for(int i=1;i<TT_MARKERS;++i)assert(phrase.marker[i]>phrase.marker[i-1]);
+    for(int i=0;i<TT_SLICES;++i)
+        assert(tt_slice_base_note(&phrase,i)>=68 && tt_slice_base_note(&phrase,i)<=70);
+    phrase.marker[1]=333;tt_slice_set_note(&phrase,0,74);
+    TtEditHistory *auto_history=tt_edit_history_new(&doc);
+    assert(auto_history && tt_edit_apply_recorded(auto_history,&doc,&e));
+    assert(phrase.marker[1]!=333 && tt_slice_base_note(&phrase,0)!=74);
+    assert(tt_edit_undo(auto_history,&doc) && phrase.marker[1]==333 &&
+           tt_slice_base_note(&phrase,0)==74);
+    assert(tt_edit_redo(auto_history,&doc));
+    assert(phrase.marker[1]!=333 && tt_slice_base_note(&phrase,0)!=74);
+    tt_edit_history_free(auto_history);
+    wave.pcm=NULL; /* the history releases its registered sample buffer */
 
     active.cell[0][0].instrument=1;
     song.pattern[1].cell[0][0].instrument=2;

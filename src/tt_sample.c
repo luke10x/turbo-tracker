@@ -117,6 +117,79 @@ void tt_slice_set_note(TtPhrase *phrase,int slice,int note) {
 void tt_phrase_set_reference_note(TtPhrase *phrase,int note) {
     if(phrase && note>=0 && note<=127)phrase->reference_note=note;
 }
+static double window_rms(const float *pcm,int frames,int first,int width) {
+    if(first<0)first=0;
+    if(first+width>frames)first=frames-width;
+    if(first<0 || width<1)return 0;
+    double sum=0;
+    for(int i=first;i<first+width;++i)sum+=(double)pcm[i]*pcm[i];
+    return sqrt(sum/width);
+}
+static int estimate_note(const TtWave *wave,int first,int last) {
+    int stride=wave->rate>12000?(wave->rate+11999)/12000:1;
+    int rate=wave->rate/stride;
+    int count=(last-first)/stride;
+    int window=rate/12;
+    if(window>count)window=count;
+    if(window<128)return -1;
+    int min_lag=rate/1200,max_lag=rate/55;
+    if(min_lag<2)min_lag=2;
+    if(max_lag>=window)max_lag=window-1;
+    double correlation[512]={0};
+    /* Skip a short attack when a slice is long enough; pitched tails are more
+       reliable than transient-heavy starts. */
+    int offset=count>window*2?window/3:0;
+    for(int lag=min_lag;lag<=max_lag;++lag) {
+        double cross=0,a=0,b=0;
+        for(int i=0;i<window;++i) {
+            double x=wave->pcm[first+(offset+i)*stride];
+            double y=wave->pcm[first+(offset+i+lag)*stride];
+            cross+=x*y;a+=x*x;b+=y*y;
+        }
+        correlation[lag]=(a>1e-12 && b>1e-12)?cross/sqrt(a*b):0;
+    }
+    /* The largest autocorrelation peak often lands on a subharmonic. Use the
+       earliest clear local peak so a 440 Hz tone is not mistaken for 88 Hz. */
+    int best_lag=0;
+    for(int lag=min_lag+1;lag<max_lag;++lag)
+        if(correlation[lag]>=.45 && correlation[lag]>=correlation[lag-1] &&
+           correlation[lag]>correlation[lag+1]) { best_lag=lag;break; }
+    if(!best_lag)return -1;
+    double hz=(double)rate/best_lag;
+    int note=(int)lrint(69.0+12.0*log2(hz/440.0));
+    return note>=0 && note<=127?note:-1;
+}
+int tt_detect_slices_and_notes(const TtWave *wave,const TtPhrase *phrase,
+                               int markers[TT_MARKERS],int notes[TT_SLICES]) {
+    if(!wave || !wave->pcm || wave->frames<2 || wave->rate<1000 || !phrase ||
+       !markers || !notes)return 0;
+    markers[0]=0;markers[TT_MARKERS-1]=wave->frames;
+    int slot=wave->frames/TT_SLICES;
+    int window=wave->rate/100; /* 10 ms energy window */
+    if(window<8)window=8;
+    for(int marker=1;marker<TT_MARKERS-1;++marker) {
+        int target=(int)((long long)marker*wave->frames/TT_SLICES);
+        int radius=slot/3;
+        int low=target-radius,high=target+radius;
+        if(low<markers[marker-1]+1)low=markers[marker-1]+1;
+        int remaining=TT_MARKERS-1-marker;
+        if(high>wave->frames-remaining)high=wave->frames-remaining;
+        int best=target;double best_gain=-1;
+        for(int frame=low;frame<=high;frame+=window/4>0?window/4:1) {
+            double before=window_rms(wave->pcm,wave->frames,frame-window,window);
+            double after=window_rms(wave->pcm,wave->frames,frame,window);
+            double gain=after-before;
+            if(gain>best_gain) { best_gain=gain;best=frame; }
+        }
+        if(best<=markers[marker-1])best=markers[marker-1]+1;
+        markers[marker]=best;
+    }
+    for(int slice=0;slice<TT_SLICES;++slice) {
+        int first=markers[slice],last=markers[slice+1];
+        notes[slice]=estimate_note(wave,first,last);
+    }
+    return 1;
+}
 void tt_pattern_init(TtPattern *pattern) {
     const int melody[16]={60,64,67,72,67,64,62,59,60,67,65,62,60,64,67,72};
     for(int row=0;row<TT_MAX_STEPS;++row)for(int channel=0;channel<TT_CHANNELS;++channel)
