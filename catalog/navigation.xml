@@ -20,5 +20,9 @@
       <node title="Tick automation" href="./app.html?init_song=%2Fexamples%2Ftbl-automation%2Ftbl-automation.song&amp;init_play=1"
             source="./examples/tbl-automation/README.md" />
     </node>
+    <node title="Delay (UDL)" href="./app.html?init_song=%2Fexamples%2Fudl%2Fudl.song&amp;init_play=1"
+          source="./examples/udl/README.md" />
+    <node title="Tempo (ZTM)" href="./app.html?init_song=%2Fexamples%2Fztm%2Fztm.song&amp;init_play=1"
+          source="./examples/ztm/README.md" />
   </node>
 </root>

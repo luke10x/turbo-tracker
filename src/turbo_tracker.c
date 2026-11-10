@@ -980,7 +980,7 @@ static void adjust_value(int delta) {
         else if(pattern_effect_field()) {
             int slot=pattern_effect_slot();
             TtPatternEffect *fx=tt_cell_effect(cell,slot);
-            const char *effects="GIJKMNOPRSTVWXYZ";
+            const char *effects="GIJKMNOPRSTUVWXYZ";
             const char *current=fx->command?strchr(effects,fx->command):NULL;
             int index=current?(int)(current-effects):-1;
             int next=clamp(index+(delta>0?1:-1),-1,(int)strlen(effects)-1);
@@ -1990,7 +1990,7 @@ static void show_help(F80Widget *button,void *user) {
         "Wave: F7/F8 or Down/Up zoom; Left/Right pans; 0-F selects.",
         "Pattern: Up/Down row; Left/Right moves note, instrument, FX, value.",
         "FX: G I J K M N O P R S T V W X Y Z; values 00-FF.",
-        "O in the note field enters OFF; X/Y jump pattern or row, Z sets ticks per row.",
+        "O in the note field enters OFF; X/Y jump pattern or row; Z sets BPM in patterns, ticks per row in tables.",
         "Pattern/table notes: type C-4 or C#4; Space advances fields.",
         "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
@@ -2796,7 +2796,9 @@ static void update_labels(void) {
     tracker.follow_button->text=tracker.follow?"~F~ollow":"~H~old";
     tracker.mode_button->text=tracker.play_mode==PLAY_SONG?"~S~ong":"~P~attern";
     tracker.pattern_lock_button->text=tracker.pattern_lock?"~U~nlock":"~L~ock";
-    snprintf(tracker.bpm_text,sizeof(tracker.bpm_text),"BPM %d",tracker.song.bpm);
+    int display_bpm=tracker.playing && tracker.playback_bpm>0?
+                    tracker.playback_bpm:tracker.song.bpm;
+    snprintf(tracker.bpm_text,sizeof(tracker.bpm_text),"BPM %d",display_bpm);
     int total=tracker.play_mode==PLAY_SONG?
               tracker.song.order_count*tracker.song.pattern_rows:tracker.song.pattern_rows;
     int current=tracker.active_step>=0?
@@ -2804,8 +2806,8 @@ static void update_labels(void) {
                  tracker.active_order_index*tracker.song.pattern_rows:0)+
                 tracker.active_step:0;
     tracker.progress->value=total>0?(float)current/total:0;
-    if(total>0 && tracker.song.bpm>0 && tracker.song.rows_per_beat>0) {
-        float row_secs=60.0f/(tracker.song.bpm*tracker.song.rows_per_beat);
+    if(total>0 && display_bpm>0 && tracker.song.rows_per_beat>0) {
+        float row_secs=60.0f/(display_bpm*tracker.song.rows_per_beat);
         f80_progress_set_time(tracker.progress,
             (int)(current*row_secs+0.5f),(int)(total*row_secs+0.5f));
     } else {
@@ -3133,7 +3135,7 @@ static void handle_key(int key) {
             entry->instrument=digit;
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(pattern_effect_field() &&
-                  strchr("GIJKMNOPRSTVWXYZ",key>='a' && key<='z'?key-32:key)) {
+                  strchr("GIJKMNOPRSTUVWXYZ",key>='a' && key<='z'?key-32:key)) {
             set_effect_slot(entry,pattern_effect_slot(),key>='a' && key<='z'?key-32:key);
             edit_cell(tracker.step,tracker.channel,edited);
         } else if(tracker.field>=3 && tracker.field%2==1 && digit>=0) {

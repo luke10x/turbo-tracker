@@ -21,12 +21,12 @@ has three effect slots per pattern cell and six slots per table tick.
 | `R` RRR | Working | Working | Pitch-preserving granular time stretch; `80` normal duration, `40` about 2×, `C0` about ½×. Persists per channel until changed or playback stops. Repeat a table note to retrigger. |
 | `S` SLC | Working | Working | `xy` plays from marker `x` to marker `y`. If `x > y`, playback runs backward. Equal markers are silent. |
 | `T` TBL | Working | Working | Pattern invokes table; table queues its successor. |
-| `U` UDL | — | Working | Table note delay in ticks; pattern delay not implemented. |
+| `U` UDL | Working | Working | Delay a note by `xx/FF` of its pattern row or table tick; `80` is about half and `55` is one third. |
 | `V` VIB | Working | Working | Sine vibrato; high nibble speed, low nibble depth. |
 | `W` WBL | Working | Working | Sine tremolo; high nibble speed, low nibble depth. |
 | `X` XJP | Working | Working | Pattern mode jumps directly; Song mode jumps to the next active order referencing the target. Table mode jumps immediately to tick `00` of the target table. |
 | `Y` YRJ | Working | Working | Absolute row/tick jump. A backward table jump loops until a pattern note or `OFF` in that channel breaks it. |
-| `Z` ZTM | Working | — | Sets runtime ticks per row (`01`–`30` hex); `00` restores the song setting. |
+| `Z` ZTM | Working | Working | In patterns, sets runtime BPM (`xx` is hexadecimal BPM; `00` restores the song BPM). In tables, sets ticks per row (`01`–`30` hex; `00` restores the song setting). |
 | `0`–`F` slots | — | — | Slot writers and `$N` readers not implemented. |
 
 For `N`, `V`, and `W`, the high nibble advances a sine phase by that many

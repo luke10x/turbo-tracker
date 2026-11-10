@@ -16,7 +16,7 @@ static const char *effect_alias(int effect) {
     case 'M':return "MVL";case 'N':return "NPN";
     case 'O':return "OUT";case 'P':return "PAN";
     case 'R':return "RRR";case 'r':return "RTG";case 'S':return "SLC";
-    case 'T':return "TBL";case 'V':return "VIB";
+    case 'T':return "TBL";case 'U':return "UDL";case 'V':return "VIB";
     case 'W':return "WBL";case 'X':return "XJP";
     case 'Y':return "YRJ";case 'Z':return "ZTM";
     default:return NULL;
@@ -82,7 +82,7 @@ static int parse_cell(const char *text,TtCell *cell) {
         else if(!memcmp(text+5,"~ST",3))cell->effect=TT_EFFECT_STRETCH;
         else {
             cell->effect=TT_EFFECT_NONE;
-            for(const char *commands="GIJKMNOPRSTVWXYZ";*commands;++commands) {
+            for(const char *commands="GIJKMNOPRSTUVWXYZ";*commands;++commands) {
                 const char *alias=effect_alias(*commands);
                 if(!memcmp(text+5,alias,3)) { cell->effect=*commands;break; }
             }

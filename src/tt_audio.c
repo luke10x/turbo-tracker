@@ -14,6 +14,9 @@ typedef struct {
 typedef struct {
     SDL_AudioStream *stream;
     TtVoice voice[TT_CHANNELS];
+    TtVoice delayed_voice[TT_CHANNELS];
+    int delayed_frames[TT_CHANNELS],delayed_active[TT_CHANNELS],delayed_kind[TT_CHANNELS];
+    int delayed_note[TT_CHANNELS],delayed_reference[TT_CHANNELS],delayed_rate[TT_CHANNELS];
     float level[TT_CHANNELS];
     float volume[TT_CHANNELS];
     float pan[TT_CHANNELS],pan_offset[TT_CHANNELS],tremolo[TT_CHANNELS];
@@ -41,6 +44,24 @@ static TtVoice make_voice(const TtWave *wave,int start,int end,
                          .position=position,.increment=increment,
                          .base_increment=increment,.grain_start=position,
                          .grain_previous=position};
+}
+static void start_voice_now(int channel,TtVoice voice) {
+    audio.voice[channel]=voice;
+    audio.pitch[channel]=0;audio.glide_target[channel]=0;
+    audio.glide_current[channel]=fabs(voice.increment);
+    audio.retrigger_clock[channel]=0;
+}
+static int glide_voice_now(int channel,int note,int reference_note,int rate) {
+    if(rate<=0 || !audio.voice[channel].active)return 0;
+    TtVoice *voice=&audio.voice[channel];
+    audio.glide_target[channel]=(double)voice->source_rate/OUTPUT_RATE*
+        pow(2.0,(note-reference_note)/12.0);
+    audio.pitch[channel]=0;
+    if(audio.glide_current[channel]<=0)
+        audio.glide_current[channel]=fabs(voice->base_increment);
+    audio.glide_rate[channel]=rate/64.0;
+    audio.pitch_step[channel]=0;
+    return 1;
 }
 static float tt_at(const TtVoice *voice,double position) {
     int forward=voice->increment>=0;
@@ -82,6 +103,16 @@ static void SDLCALL fill_audio(void *unused,SDL_AudioStream *stream,
         for(int frame=0;frame<frames;++frame) {
             float left=0,right=0;
             for(int channel=0;channel<TT_CHANNELS;++channel) {
+                if(audio.delayed_active[channel]) {
+                    if(audio.delayed_frames[channel]<=0) {
+                        if(audio.delayed_kind[channel]==2)
+                            glide_voice_now(channel,audio.delayed_note[channel],
+                                audio.delayed_reference[channel],audio.delayed_rate[channel]);
+                        else start_voice_now(channel,audio.delayed_voice[channel]);
+                        audio.delayed_active[channel]=0;
+                        audio.delayed_kind[channel]=0;
+                    } else --audio.delayed_frames[channel];
+                }
                 TtVoice *voice=&audio.voice[channel];
                 int forward=voice->increment>=0;
                 if(voice->active && voice->pcm &&
@@ -153,6 +184,8 @@ void tt_audio_stop(void) {
     if(audio.stream)SDL_LockAudioStream(audio.stream);
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         audio.voice[channel].active=0;audio.level[channel]=0;
+        audio.delayed_active[channel]=0;audio.delayed_frames[channel]=0;
+        audio.delayed_kind[channel]=0;
         audio.volume[channel]=audio.tremolo[channel]=1;
         audio.pan[channel]=.5f;audio.pan_offset[channel]=audio.fade[channel]=0;
         audio.stretch[channel]=1;
@@ -205,17 +238,55 @@ int tt_audio_play_channel(int channel,const TtWave *wave,int start,int end,
     if(!tt_audio_open())return 0;
     TtVoice next=make_voice(wave,start,end,note,reference_note);
     SDL_LockAudioStream(audio.stream);
-    audio.voice[channel]=next;
-    audio.pitch[channel]=0;audio.glide_target[channel]=0;
-    audio.glide_current[channel]=fabs(next.increment);
-    audio.retrigger_clock[channel]=0;
+    audio.delayed_active[channel]=0;
+    audio.delayed_kind[channel]=0;
+    start_voice_now(channel,next);
     SDL_UnlockAudioStream(audio.stream);
     return 1;
+}
+int tt_audio_play_channel_delayed(int channel,const TtWave *wave,int start,int end,
+                                  int note,int reference_note,int delay_frames) {
+    if(delay_frames<=0)
+        return tt_audio_play_channel(channel,wave,start,end,note,reference_note);
+    if(channel<0 || channel>=TT_CHANNELS || !wave || !wave->pcm || start<0 ||
+       start>wave->frames || end<0 || end>wave->frames || end==start)return 0;
+    if(!tt_audio_open())return 0;
+    TtVoice next=make_voice(wave,start,end,note,reference_note);
+    SDL_LockAudioStream(audio.stream);
+    audio.delayed_voice[channel]=next;
+    audio.delayed_frames[channel]=delay_frames;
+    audio.delayed_kind[channel]=1;audio.delayed_active[channel]=1;
+    SDL_UnlockAudioStream(audio.stream);
+    return 1;
+}
+void tt_audio_cancel_delayed(int channel) {
+    if(channel<0 || channel>=TT_CHANNELS)return;
+    if(audio.stream)SDL_LockAudioStream(audio.stream);
+    audio.delayed_active[channel]=0;audio.delayed_frames[channel]=0;
+    audio.delayed_kind[channel]=0;
+    if(audio.stream)SDL_UnlockAudioStream(audio.stream);
+}
+int tt_audio_glide_to_delayed(int channel,int note,int reference_note,int rate,
+                              int delay_frames) {
+    if(channel<0 || channel>=TT_CHANNELS || delay_frames<=0 || rate<=0)return 0;
+    if(audio.stream)SDL_LockAudioStream(audio.stream);
+    int active=audio.voice[channel].active;
+    if(active) {
+        audio.delayed_frames[channel]=delay_frames;
+        audio.delayed_note[channel]=note;
+        audio.delayed_reference[channel]=reference_note;
+        audio.delayed_rate[channel]=rate;
+        audio.delayed_kind[channel]=2;audio.delayed_active[channel]=1;
+    }
+    if(audio.stream)SDL_UnlockAudioStream(audio.stream);
+    return active;
 }
 void tt_audio_note_off(int channel) {
     if(channel<0 || channel>=TT_CHANNELS)return;
     if(audio.stream)SDL_LockAudioStream(audio.stream);
     audio.voice[channel].active=0;
+    audio.delayed_active[channel]=0;audio.delayed_frames[channel]=0;
+    audio.delayed_kind[channel]=0;
     if(audio.stream)SDL_UnlockAudioStream(audio.stream);
 }
 void tt_audio_set_stretch(int channel,int value) {
@@ -288,17 +359,7 @@ void tt_audio_command(int channel,char command,int value) {
 int tt_audio_glide_to(int channel,int note,int reference_note,int rate) {
     if(channel<0 || channel>=TT_CHANNELS || rate<=0)return 0;
     if(audio.stream)SDL_LockAudioStream(audio.stream);
-    TtVoice *voice=&audio.voice[channel];
-    int active=voice->active;
-    if(active) {
-        audio.glide_target[channel]=(double)voice->source_rate/OUTPUT_RATE*
-            pow(2.0,(note-reference_note)/12.0);
-        audio.pitch[channel]=0;
-        if(audio.glide_current[channel]<=0)
-            audio.glide_current[channel]=fabs(voice->base_increment);
-        audio.glide_rate[channel]=rate/64.0;
-        audio.pitch_step[channel]=0;
-    }
+    int active=glide_voice_now(channel,note,reference_note,rate);
     if(audio.stream)SDL_UnlockAudioStream(audio.stream);
     return active;
 }
@@ -405,7 +466,7 @@ void tt_audio_close(void) {
     audio.stream=NULL;
     audio.song_mode=0;
     for(int channel=0;channel<TT_CHANNELS;++channel)
-        audio.voice[channel].active=0;
+        audio.voice[channel].active=audio.delayed_active[channel]=0;
     if(audio.initialized)SDL_QuitSubSystem(SDL_INIT_AUDIO);
     audio.initialized=0;
 }

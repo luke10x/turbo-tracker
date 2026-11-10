@@ -111,6 +111,14 @@ int main(void) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");
     assert(tt_audio_begin_song());
     assert(audio.song_mode);
+    tt_audio_note_off(0);
+    assert(tt_audio_play_channel_delayed(0,&pulse,0,1000,60,60,37));
+    assert(!tt_audio_voice_active(0));
+    tt_audio_render_song(37);
+    assert(!tt_audio_voice_active(0));
+    tt_audio_render_song(1);
+    assert(tt_audio_voice_active(0));
+    tt_audio_note_off(0);
     tt_audio_render_song(256);
     tt_audio_end_song();
     assert(!audio.song_mode);

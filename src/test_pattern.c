@@ -17,8 +17,8 @@ int main(void) {
     original.cell[9][2]=(TtCell){-1,-1,TT_EFFECT_M,0x80,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[10][3]=(TtCell){60,1,TT_EFFECT_S,0xff,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[11][3]=(TtCell){-1,-1,TT_EFFECT_S,-1,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
-    const char *commands="GIJKMNOPRSTVWXY";
-    for(int row=0;commands[row];++row)
+    const char *commands="GIJKMNOPRSTUVWXY";
+    for(int row=0;commands[row] && row+1<TT_STEPS;++row)
         original.cell[row+1][4]=(TtCell){-1,-1,commands[row],0x4f,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[14][4]=(TtCell){60,1,TT_EFFECT_STRETCH,0x40,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     original.cell[14][5]=(TtCell){-1,-1,TT_EFFECT_Z,0x30,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
@@ -33,6 +33,9 @@ int main(void) {
     char jump_alias[6];
     tt_pattern_effect_text(TT_EFFECT_X,0xa5,jump_alias);
     assert(!strcmp(jump_alias,"XJPA5"));
+    char delay_alias[6];
+    tt_pattern_effect_text(TT_EFFECT_U,0x80,delay_alias);
+    assert(!strcmp(delay_alias,"UDL80"));
     char off_cell[11];
     tt_cell_text(&original.cell[15][0],off_cell);
     assert(!strcmp(off_cell,"OFF..XJP1F"));

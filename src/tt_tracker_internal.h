@@ -11,10 +11,8 @@ enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
 enum { TT_HISTORY_MAX=8 };
 enum { SONG_LOOKAHEAD_FRAMES=16384, SONG_DISPLAY_ROWS=64 };
 typedef struct {
-    int active,table,tick,next_table,delay,pending;
+    int active,table,tick,next_table,pending;
     int table_loop_active,table_loop_broken;
-    int delayed_glide;
-    TtCell delayed_note;
 } TableVoice;
 typedef struct {
     Uint64 frame;
@@ -40,7 +38,8 @@ typedef struct {
     int compact_editing,effect_slots[TT_CHANNELS];
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
-    int playback_ticks_per_row,pending_flow,pending_pattern,pending_order,pending_row;
+    int playback_bpm,playback_ticks_per_row;
+    int pending_flow,pending_pattern,pending_order,pending_row;
     int audio_recovery_result;
     int pattern_lock;
     int document_dirty;

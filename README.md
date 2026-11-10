@@ -238,10 +238,13 @@ with a playable note or `OFF` on that channel cancels the running table and any
 pending delayed note; notes and `OFF` on the row that starts the table do not.
 The default is 12 table ticks per pattern row. The
 six effect slots are processed left to right on each tick. Playback handles the
-per-channel effects listed in the effect status, plus `U` note delay, `T`
+per-channel effects listed in the effect status, plus `U` fractional note delay, `T`
 schedule the next table, `X` jump to a table, and `Y` jump to a tick in the
-current table. In patterns, `X` jumps to another pattern/order, `Y` jumps to a
-row, and `Z` sets ticks per row (`00` restores the song setting). Enter `OFF`
+current table. `U` delays a note by `xx/FF` of its pattern row or table tick.
+In patterns, `X` jumps to another pattern/order, `Y` jumps to a
+row, and `Z` sets the runtime BPM (`xx` is hexadecimal BPM; `00` restores the
+song BPM). In tables, `Z` sets ticks per row (`01`–`30` hex; `00` restores the
+song setting). These runtime changes do not modify the song settings. Enter `OFF`
 in the note field with `O` to stop the channel and cancel its table.
 Song files save timing and pattern length in format version 6.
 Versions 1–3 load with 16 rows, 4 rows per beat, and 12 ticks per row; version 1
