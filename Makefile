@@ -31,8 +31,12 @@ CATALOG_DIR := build/emscripten/catalog
 ITCH_DIR := build/emscripten/itch
 SDL_CFLAGS := $(shell pkg-config --cflags sdl3)
 SDL_LIBS := $(shell pkg-config --libs sdl3)
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2)
+SDL2_LIBS := $(shell pkg-config --libs sdl2)
+SDL3_CONTROLLER_DIAG := $(PLATFORM_BUILD)/bin/sdl3-controller-diagnostic
+SDL2_CONTROLLER_DIAG := $(PLATFORM_BUILD)/bin/sdl2-controller-diagnostic
 
-.PHONY: native wasm test serve clean check-emsdk itch catalog catalog-wasm
+.PHONY: native wasm test serve clean check-emsdk itch catalog catalog-wasm controller-diagnostic
 
 name:
 	@echo "turbo-tracker"
@@ -46,6 +50,16 @@ test: $(TT_TEST_CSV_BIN) $(TT_TEST_PATTERN_BIN) $(TT_TEST_SONG_BIN) $(TT_TEST_TI
 	$(TT_TEST_TIMELINE_BIN)
 	$(TT_TEST_AUDIO_BIN)
 	$(TT_TEST_EDIT_BIN)
+
+controller-diagnostic: $(SDL3_CONTROLLER_DIAG) $(SDL2_CONTROLLER_DIAG)
+
+$(SDL3_CONTROLLER_DIAG): src/sdl_controller_diagnostic.c
+	mkdir -p $(dir $@)
+	cc -std=c11 -Wall -Wextra -O2 $(SDL_CFLAGS) $< $(SDL_LIBS) -o $@
+
+$(SDL2_CONTROLLER_DIAG): src/sdl2_controller_diagnostic.c
+	mkdir -p $(dir $@)
+	cc -std=c11 -Wall -Wextra -O2 $(SDL2_CFLAGS) $< $(SDL2_LIBS) -o $@
 
 wasm: check-emsdk web-assets $(WEB_TT_JS)
 

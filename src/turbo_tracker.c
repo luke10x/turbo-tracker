@@ -3771,7 +3771,9 @@ static void controller_clear_held_state(void) {
     controller_navigation_exit();
 }
 static int controller_open_joystick(SDL_JoystickID instance) {
-    if(controller_input.joystick || SDL_IsGamepad(instance))return 0;
+    /* Some native SDL backends recognize Xbox devices as gamepads but cannot
+       open their mapped interface. Keep the raw joystick path available then. */
+    if(controller_input.joystick || controller_has_gamepad(instance))return 0;
     SDL_Joystick *joystick=SDL_OpenJoystick(instance);
     if(!joystick)return 0;
     controller_input.joystick=joystick;
@@ -3806,7 +3808,8 @@ static void controller_raw_hat(Uint8 value) {
 static void controller_handle_event(const SDL_Event *event) {
     if(!event)return;
     if(event->type==SDL_EVENT_GAMEPAD_ADDED) {
-        controller_open_gamepad(event->gdevice.which);
+        if(!controller_open_gamepad(event->gdevice.which))
+            controller_open_joystick(event->gdevice.which);
         return;
     }
     if(event->type==SDL_EVENT_GAMEPAD_REMOVED) {
@@ -4855,6 +4858,10 @@ static int initial_play_requested(void) {
 }
 int main(int argc,char **argv) {
     setlocale(LC_ALL,"");
+#ifdef __APPLE__
+    /* SDL's GCController path can hide GameController-backed Xbox HID devices. */
+    SDL_SetHint(SDL_HINT_JOYSTICK_MFI,"0");
+#endif
     memset(&tracker,0,sizeof(tracker));
     tracker.entry_octave=4;tracker.loop=tracker.follow=1;tracker.active_step=-1;
     tracker.focus=FOCUS_PHRASE;
