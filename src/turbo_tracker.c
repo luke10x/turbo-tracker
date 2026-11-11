@@ -533,8 +533,10 @@ static int handle_ui_event(TtUiEvent event) {
     }
     if(event.type==TT_UI_PATTERN_CURSOR) {
         tracker.inline_table_selected=0;
-        if(tracker.field>=2 && event.b<2)compact_pattern_effects_if_needed();
         int channel=clamp(event.a,0,TT_CHANNELS-1);
+        if(channel!=tracker.channel ||
+           (tracker.field>=2 && event.b<2))
+            compact_pattern_effects_if_needed();
         if(event.b>=2) {
             int requested=(event.b-2)/2+1;
             if(requested>tracker.effect_slots[channel])
@@ -591,10 +593,15 @@ static int handle_ui_event(TtUiEvent event) {
             tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);
         else if(event.index==F80_KEY_DOWN)
             tracker.step=clamp(tracker.step+1,0,tracker.song.pattern_rows-1);
-        else if(event.index==F80_KEY_LEFT)
-            tracker.channel=clamp(tracker.channel-1,0,TT_CHANNELS-1);
-        else if(event.index==F80_KEY_RIGHT)
-            tracker.channel=clamp(tracker.channel+1,0,TT_CHANNELS-1);
+        else if(event.index==F80_KEY_LEFT) {
+            int channel=clamp(tracker.channel-1,0,TT_CHANNELS-1);
+            if(channel!=tracker.channel)compact_pattern_effects_if_needed();
+            tracker.channel=channel;
+        } else if(event.index==F80_KEY_RIGHT) {
+            int channel=clamp(tracker.channel+1,0,TT_CHANNELS-1);
+            if(channel!=tracker.channel)compact_pattern_effects_if_needed();
+            tracker.channel=channel;
+        }
         else return 0;
         if(event.index==F80_KEY_UP || event.index==F80_KEY_DOWN)
             tracker.reveal_cursor=1;

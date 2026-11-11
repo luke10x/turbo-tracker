@@ -435,6 +435,29 @@ int main(void) {
     tracker.edit_order=0;
     TtEditDoc navigation_doc=edit_doc();
     edit_history=tt_edit_history_new(&navigation_doc);assert(edit_history);
+    tracker.pattern_index=0;tracker.channel=0;tracker.field=2;
+    tracker.focus=FOCUS_PHRASE;
+    tracker.pattern.cell[0][0].effect2=TT_EFFECT_M;
+    tracker.pattern.cell[0][0].value2=0x45;
+    tracker.song.pattern[1].cell[0][0].effect3=TT_EFFECT_P;
+    tracker.song.pattern[1].cell[0][0].value3=0x67;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
+        .a=1,.b=0}));
+    assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_M &&
+           tracker.pattern.cell[0][0].value==0x45 &&
+           tracker.pattern.cell[0][0].effect2==TT_EFFECT_NONE &&
+           tracker.song.pattern[1].cell[0][0].effect==TT_EFFECT_P &&
+           tracker.song.pattern[1].cell[0][0].value==0x67 &&
+           tracker.song.pattern[1].cell[0][0].effect3==TT_EFFECT_NONE);
+    tracker.focus=FOCUS_PHRASE;tracker.field=2;
+    tracker.pattern.cell[1][0].effect3=TT_EFFECT_R;
+    tracker.pattern.cell[1][0].value3=0x89;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_FOCUS,
+        .index=FOCUS_WAVE}));
+    assert(tracker.pattern.cell[1][0].effect==TT_EFFECT_R &&
+           tracker.pattern.cell[1][0].value==0x89 &&
+           tracker.pattern.cell[1][0].effect3==TT_EFFECT_NONE);
+    tracker.focus=FOCUS_PHRASE;tracker.channel=0;tracker.field=0;
     tracker.step=tracker.song.pattern_rows-1;
     tracker.pattern_lock=0;tracker.play_order=0;tracker.active_order_index=0;
     move_pattern_row(1);
