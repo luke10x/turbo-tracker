@@ -355,12 +355,15 @@ typedef enum {
     TT_UI_CONTROLLER_TOOLBAR_ENTER, TT_UI_CONTROLLER_TOOLBAR_MOVE,
     TT_UI_CONTROLLER_TOOLBAR_EXIT, TT_UI_CONTROLLER_STATUS_ENTER,
     TT_UI_CONTROLLER_STATUS_MOVE, TT_UI_CONTROLLER_STATUS_EXIT,
+    TT_UI_CONTROLLER_SCREEN_NAV_START, TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
+    TT_UI_CONTROLLER_SCREEN_NAV_EXIT,
     TT_UI_EXIT_REQUEST,
     TT_UI_EXIT_CONFIRM, TT_UI_EXIT_CANCEL
 } TtUiType;
 typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
 static int handle_ui_event(TtUiEvent event);
 static void leave_follow(void);
+static void controller_screen_focus_step(int direction);
 static void confirm_exit(F80Widget *button,void *user) {
     (void)button;(void)user;
     handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CONFIRM});
@@ -645,6 +648,26 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_CONTROLLER_STATUS_EXIT) {
         if(!tracker.controller_status_mode)return 0;
         tracker.controller_status_mode=0;
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_SCREEN_NAV_START) {
+        if(!tracker.app.root)return 0;
+        tracker.controller_toolbar_mode=0;
+        tracker.controller_status_mode=0;
+        tracker.controller_screen_navigation=1;
+        controller_screen_focus_step(event.a<0?-1:1);
+        tt_tracker_log_event("UI","Screen control navigation started");
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_SCREEN_NAV_MOVE) {
+        if(!tracker.controller_screen_navigation)return 0;
+        controller_screen_focus_step(event.a<0?-1:1);
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_SCREEN_NAV_EXIT) {
+        if(!tracker.controller_screen_navigation)return 0;
+        tracker.controller_screen_navigation=0;
+        tt_tracker_log_event("UI","Screen control navigation ended");
         return 1;
     }
     int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
@@ -2628,9 +2651,12 @@ static void controller_navigation_exit(void) {
         handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_EXIT});
     if(tracker.controller_status_mode)
         handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_STATUS_EXIT});
+    if(tracker.controller_screen_navigation)
+        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_SCREEN_NAV_EXIT});
 }
 static int controller_navigation_active(void) {
-    return tracker.controller_toolbar_mode || tracker.controller_status_mode;
+    return tracker.controller_toolbar_mode || tracker.controller_status_mode ||
+           tracker.controller_screen_navigation;
 }
 static int controller_status_next_index(int start,int direction) {
     const F80StatusItem *items=current_status();
@@ -2642,8 +2668,46 @@ static int controller_status_next_index(int start,int direction) {
     }
     return 0;
 }
+static int controller_status_next_linear(int start,int direction) {
+    const F80StatusItem *items=current_status();
+    int count=tracker.status?tracker.status->status_count:0;
+    for(int at=start+direction;at>=0 && at<count;at+=direction)
+        if(items[at].action)return at;
+    return -1;
+}
+static void controller_screen_focus_step(int direction) {
+    if(tracker.app.modal) {
+        /* Modal traversal is confined to the top dialog's focusables. */
+        f80_focus_next(&tracker.app,direction);
+        return;
+    }
+    if(tracker.app.focus==tracker.status) {
+        int next=controller_status_next_linear(
+            tracker.controller_status_index,direction);
+        if(next>=0) {
+            tracker.controller_status_index=next;
+            tracker.status->selected=next;
+            return;
+        }
+    }
+    f80_focus_next(&tracker.app,direction);
+    if(tracker.app.focus==tracker.status) {
+        int count=tracker.status->status_count;
+        int start=direction>0?0:count-1;
+        tracker.controller_status_index=controller_status_next_index(
+            start,direction>0?1:-1);
+        tracker.status->selected=tracker.controller_status_index;
+    } else if(tracker.status)tracker.status->selected=-1;
+}
 static void controller_navigation_activate(void) {
-    if(tracker.controller_toolbar_mode) {
+    if(tracker.controller_screen_navigation) {
+        if(tracker.app.focus==tracker.status) {
+            const F80StatusItem *items=current_status();
+            int index=tracker.controller_status_index;
+            if(index>=0 && index<tracker.status->status_count &&
+               items[index].action)items[index].action(NULL,NULL);
+        } else f80_key(&tracker.app,13);
+    } else if(tracker.controller_toolbar_mode) {
         F80Widget *buttons[]={tracker.play_button,tracker.stop_button,
             tracker.follow_button,tracker.mode_button,tracker.pattern_lock_button};
         F80Widget *button=buttons[tracker.controller_toolbar_index];
@@ -3246,6 +3310,10 @@ static int widget_is_inside(F80Widget *widget,F80Widget *parent) {
     for(F80Widget *at=widget;at;at=at->parent)if(at==parent)return 1;
     return 0;
 }
+static int widget_tree_visible(F80Widget *widget) {
+    for(F80Widget *at=widget;at;at=at->parent)if(!at->visible)return 0;
+    return widget!=NULL;
+}
 static void handle_key(int key) {
     if(key==3) { quit(NULL,NULL);return; } /* Ctrl-C */
     if(key==15) { toggle_console(NULL,NULL);return; } /* Ctrl-O */
@@ -3337,13 +3405,37 @@ static void handle_key(int key) {
         f80_key(&tracker.app,key);
         return;
     }
-    if(controller_navigation_active()) {
+    if(tracker.controller_screen_navigation) {
+        if(key==9 || key==F80_KEY_BTAB) {
+            handle_ui_event((TtUiEvent){
+                .type=TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
+                .a=key==9?1:-1});
+            return;
+        }
         if(key==10 || key==13) {
             controller_navigation_activate();
             return;
         }
-        if(key==27)controller_navigation_exit();
-        else controller_navigation_exit();
+        controller_navigation_exit();
+    } else if(tracker.controller_toolbar_mode ||
+              tracker.controller_status_mode) {
+        if(key==9 || key==F80_KEY_BTAB) {
+            handle_ui_event((TtUiEvent){
+                .type=TT_UI_CONTROLLER_SCREEN_NAV_START,
+                .a=key==9?1:-1});
+            return;
+        }
+        if(key==10 || key==13) {
+            controller_navigation_activate();
+            return;
+        }
+        controller_navigation_exit();
+    }
+    if((key==9 || key==F80_KEY_BTAB) && tracker.focus!=FOCUS_PHRASE) {
+        handle_ui_event((TtUiEvent){
+            .type=TT_UI_CONTROLLER_SCREEN_NAV_START,
+            .a=key==9?1:-1});
+        return;
     }
     if(tracker.focus==FOCUS_PHRASE && (key==10 || key==13)) {
         handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,
@@ -4628,6 +4720,9 @@ static int frame(void *user) {
 #ifndef __EMSCRIPTEN__
         }
 #endif
+    } else if(tracker.controller_screen_navigation &&
+              widget_tree_visible(tracker.app.focus)) {
+        /* Keep the focus selected by screen-wide Tab navigation. */
     } else if(tracker.console_visible)tracker.app.focus=tracker.console;
     else if(tracker.perspective==TT_PERSPECTIVE_ORDERS) {
         if(!widget_is_inside(tracker.app.focus,tracker.order_dialog))
@@ -4645,6 +4740,9 @@ static int frame(void *user) {
     } else if(tracker.controller_status_mode) {
         tracker.status->selected=tracker.controller_status_index;
         tracker.app.focus=tracker.status;
+    } else if(tracker.controller_screen_navigation &&
+              tracker.app.focus==tracker.status) {
+        tracker.status->selected=tracker.controller_status_index;
     } else tracker.status->selected=-1;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
@@ -4862,6 +4960,7 @@ int main(int argc,char **argv) {
     tracker.details->style=F80_COLOR_TEXT;
     f80_sized(tracker.details,f80_grow(),f80_fixed(1));
     tracker.status=f80_add(tracker.root,f80_statusbar(wave_status,10));
+    tracker.status->focusable=1;
     tracker.console=f80_add(tracker.root,f80_canvas(paint_event_console,NULL));
     tracker.console->window_role=F80_WINDOW_CONSOLE;
     tracker.console->visible=0;

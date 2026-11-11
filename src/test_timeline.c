@@ -78,6 +78,19 @@ int main(void) {
                 assert(header_clicks[j]==(i==j?1:0));
             }
         }
+        assert(handle_ui_event((TtUiEvent){
+            .type=TT_UI_CONTROLLER_SCREEN_NAV_START,.a=1}));
+        assert(tracker.controller_screen_navigation &&
+               tracker.app.focus==tracker.play_button);
+        assert(handle_ui_event((TtUiEvent){
+            .type=TT_UI_CONTROLLER_SCREEN_NAV_MOVE,.a=1}));
+        assert(tracker.app.focus==tracker.stop_button);
+        assert(handle_ui_event((TtUiEvent){
+            .type=TT_UI_CONTROLLER_SCREEN_NAV_MOVE,.a=-1}));
+        assert(tracker.app.focus==tracker.play_button);
+        controller_navigation_activate();
+        assert(header_clicks[0]==1 && tracker.controller_screen_navigation);
+        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_SCREEN_NAV_EXIT});
         f80_free(root);
     }
     F80Widget *flex_buttons[]={f80_button("Up",NULL,NULL),
@@ -90,6 +103,24 @@ int main(void) {
     f80_wrap_layout(&flex,(F80Rect){0,0,42,8},flex_buttons,4);
     for(int i=1;i<4;++i)assert(flex_buttons[i]->rect.y==flex_buttons[0]->rect.y);
     for(int i=0;i<4;++i)f80_free(flex_buttons[i]);
+
+    F80App modal_app={0};
+    F80Widget *background=f80_box(F80_COL);
+    F80Widget *background_button=f80_add(background,f80_button("Background",NULL,NULL));
+    F80Widget *modal=f80_box(F80_COL);
+    F80Widget *modal_first=f80_add(modal,f80_button("First",NULL,NULL));
+    F80Widget *modal_second=f80_add(modal,f80_button("Second",NULL,NULL));
+    f80_set_root(&modal_app,background);
+    assert(modal_app.focus==background_button);
+    f80_show_modal(&modal_app,modal);
+    assert(modal_app.focus==modal_first);
+    f80_focus_next(&modal_app,1);
+    assert(modal_app.focus==modal_second);
+    f80_focus_next(&modal_app,1);
+    assert(modal_app.focus==modal_first && modal_app.focus!=background_button);
+    f80_hide_modal(&modal_app);
+    assert(modal_app.focus==background_button);
+    f80_free(background);
 
     memset(&tracker,0,sizeof(tracker));
     tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;

@@ -517,6 +517,7 @@ void f80_colors(void) {
     init_pair(66,COLORS>67?67:COLOR_CYAN,COLOR_BLUE);
 #endif
     init_pair(F80_PAIR_RANGE_CURSOR,COLOR_BLUE,COLOR_YELLOW);
+    init_pair(F80_PAIR_BUTTON_SELECTED,COLOR_BLACK,COLOR_YELLOW);
 }
 void f80_put(int y, int x, const char *text, int width, int pair, int bold) {
     if(!text || width<=0 || y<0 || x<0)return;
@@ -793,8 +794,9 @@ static void draw_status(F80Widget *w) {
     for(int i=0;i<w->status_count && x<r.x+r.w;++i) {
         const F80StatusItem *it=&w->status_items[i]; int key=(int)strlen(it->key), label=(int)strlen(it->label);
         int selected=w->app && w->app->focus==w && w->selected==i;
-        f80_put(r.y,x,it->key,key,selected?18:16,1); x+=key;
-        f80_put(r.y,x,it->label,label,selected?18:6,0); x+=label+1;
+        f80_put(r.y,x,it->key,key,selected?F80_PAIR_BUTTON_SELECTED:16,1); x+=key;
+        f80_put(r.y,x,it->label,label,
+                selected?F80_PAIR_BUTTON_SELECTED:6,0); x+=label+1;
     }
 }
 
@@ -1095,11 +1097,14 @@ void f80_draw(F80Widget *w) {
         int bx=r.x+(pressed?1:0);
         char label[256]; int hot;
         int len=hot_label(w->text,label,sizeof(label),&hot), face=r.w-1;
-        f80_put(r.y,bx,"",face,w->app&&w->app->focus==w?18:5,1);
+        int selected=w->app&&w->app->focus==w;
+        int selected_pair=selected?F80_PAIR_BUTTON_SELECTED:5;
+        f80_put(r.y,bx,"",face,selected_pair,1);
         if(len) {
             if(len>face)len=face;
-            f80_put(r.y,bx+(face-len)/2,label,len,w->app&&w->app->focus==w?18:5,1);
-            if(hot>=0 && hot<len)f80_put(r.y,bx+(face-len)/2+hot,label+hot,1,21,1);
+            f80_put(r.y,bx+(face-len)/2,label,len,selected_pair,1);
+            if(hot>=0 && hot<len)f80_put(r.y,bx+(face-len)/2+hot,label+hot,1,
+                selected?F80_PAIR_BUTTON_SELECTED:21,1);
         }
         if(!pressed) {
             int side_shadow=F80_COLOR_SHADOW;

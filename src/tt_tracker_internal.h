@@ -37,6 +37,7 @@ typedef struct {
     Uint64 leader_deadline;
     int controller_toolbar_mode,controller_toolbar_index;
     int controller_status_mode,controller_status_index;
+    int controller_screen_navigation;
     int note_input_length;
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;

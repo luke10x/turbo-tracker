@@ -15,6 +15,7 @@ typedef enum { F80_WINDOW_INHERIT, F80_WINDOW_BLUE, F80_WINDOW_CYAN,
                F80_WINDOW_ROLE_COUNT } F80WindowRole;
 enum { F80_PALETTE_SLOTS = 31 };
 enum { F80_PAIR_RANGE_CURSOR = 67 }; /* blue foreground on yellow selection */
+enum { F80_PAIR_BUTTON_SELECTED = 68 }; /* black foreground on yellow selection */
 typedef enum {
     F80_COLOR_PANEL=1, F80_COLOR_TEXT, F80_COLOR_SELECTION,
     F80_COLOR_HIGHLIGHT, F80_COLOR_BUTTON, F80_COLOR_STATUS,
