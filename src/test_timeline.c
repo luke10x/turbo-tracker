@@ -487,15 +487,49 @@ int main(void) {
     assert(tracker.play_order==0 && tracker.active_order_index==0);
     tracker.focus=FOCUS_WAVE;
     handle_key(9);
-    assert(tracker.focus==FOCUS_PHRASE);
+    assert(tracker.focus==FOCUS_WAVE);
     handle_key(9);
-    assert(tracker.focus==FOCUS_ORDER && current_status()==mode_status_visible);
+    assert(tracker.focus==FOCUS_WAVE && current_status()==perspective_status_visible);
+    tracker.focus=FOCUS_ORDER;
     assert(strcmp(current_status()[0].label,"Or-")==0 &&
            current_status()[0].action==previous_order);
     tracker.play_mode=PLAY_PATTERN;
     assert(strcmp(current_status()[0].label,"Pt-")==0 &&
            current_status()[0].action==prev_pattern);
+    F80Widget fake_wave_row={.visible=1},fake_phrase_frame={.visible=1};
+    F80Widget fake_instrument_panels={.visible=0},fake_order_frame={.visible=1};
+    F80Widget fake_wave_frame={.visible=1};
+    F80Widget fake_wave_canvas={.visible=1},fake_order_dialog={.visible=0};
+    F80Widget fake_manage_dialog={.visible=1},fake_slices_dialog={.visible=1};
+    tracker.wave_row=&fake_wave_row;tracker.phrase_frame=&fake_phrase_frame;
+    tracker.instrument_panels=&fake_instrument_panels;tracker.order_frame=&fake_order_frame;
+    tracker.wave_frame=&fake_wave_frame;
+    tracker.wave_canvas=&fake_wave_canvas;tracker.order_dialog=&fake_order_dialog;
+    tracker.manage_dialog=&fake_manage_dialog;tracker.slices_dialog=&fake_slices_dialog;
+    tracker.order_list=&order_choice;tracker.playing=1;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                       .a=TT_PERSPECTIVE_ORDERS}));
+    assert(fake_order_dialog.visible && !fake_phrase_frame.visible &&
+           fake_wave_canvas.visible==0 && tracker.playing);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                       .a=TT_PERSPECTIVE_INSTRUMENTS}));
+    assert(fake_instrument_panels.visible && !fake_order_frame.visible &&
+           !fake_order_dialog.visible && tracker.playing);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                       .a=TT_PERSPECTIVE_MAIN}));
+    tracker.app.modal=NULL;tracker.console_visible=0;
+    handle_key(';');handle_key('x');
+    assert(!tracker.leader_pending &&
+           tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.playing);
+    tracker.wave_row=tracker.phrase_frame=tracker.instrument_panels=NULL;
+    tracker.order_frame=tracker.wave_frame=tracker.wave_canvas=tracker.order_dialog=NULL;
+    tracker.manage_dialog=tracker.slices_dialog=NULL;
+    tracker.playing=0;
     tracker.focus=FOCUS_PHRASE;
+    handle_key(';');
+    assert(tracker.leader_pending);
+    handle_key(27);
+    assert(!tracker.leader_pending);
     F80Widget pattern_choice={0};pattern_choice.cursor=0;
     tracker.order_list=&pattern_choice;
     order_panel_selected(&pattern_choice,NULL);
@@ -521,7 +555,7 @@ int main(void) {
     tracker.play_order=0;
     tracker.active_order_index=0;
     handle_key(9);
-    assert(tracker.focus==FOCUS_WAVE);
+    assert(tracker.focus==FOCUS_ORDER);
     handle_key(F80_KEY_BTAB);
     assert(tracker.focus==FOCUS_ORDER);
     order_choice.item_count=3;order_choice.rect=f80_rect(80,0,10,2);

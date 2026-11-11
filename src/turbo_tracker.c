@@ -104,6 +104,18 @@ static int event_log_head,event_log_count;
 static char event_console_menu_label[32]="~S~how event console";
 static F80Wrap order_pattern_actions,order_play_actions;
 static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
+static F80Wrap manage_actions,slices_actions;
+static F80Widget *manage_buttons[6],*slices_buttons[6];
+static int status_columns=80;
+static void perspective_orders(F80Widget *,void *);
+static void perspective_instruments(F80Widget *,void *);
+static void perspective_main(F80Widget *,void *);
+static void slices_selected(F80Widget *,void *);
+static void slices_apply(F80Widget *,void *);
+static void slices_inherit(F80Widget *,void *);
+static void slices_step(F80Widget *,void *);
+static void slices_detect_beats(F80Widget *,void *);
+static void slices_detect_tones(F80Widget *,void *);
 
 void tt_tracker_log_event(const char *category,const char *description) {
     Uint64 ticks=SDL_GetTicks();
@@ -312,6 +324,9 @@ static int pattern_edit_fields_per_channel(int channel);
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_PATTERN_ONLY, TT_UI_SELECT_ORDER,
     TT_UI_MODE_CONTEXT, TT_UI_SYNC_PATTERN_ORDER,
+    TT_UI_SET_PERSPECTIVE,
+    TT_UI_LEADER_START, TT_UI_LEADER_CANCEL,
+    TT_UI_LEADER_TIMEOUT, TT_UI_LEADER_COMPLETE,
     TT_UI_FOCUS, TT_UI_SCROLL_ORDER, TT_UI_ORDER_CURSOR,
     TT_UI_PATTERN_LOCK,
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
@@ -332,6 +347,22 @@ static void cancel_exit(F80Widget *button,void *user) {
     handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CANCEL});
 }
 static int handle_ui_event(TtUiEvent event) {
+    if(event.type==TT_UI_LEADER_START) {
+        if(event.a<250 || event.a>5000)return 0;
+        tracker.leader_pending=1;
+        tracker.leader_deadline=SDL_GetTicks()+(Uint64)event.a;
+        tt_tracker_message("Leader: O Orders, I Instruments, X Main");
+        tt_tracker_log_event("UI","Leader shortcut prefix entered");
+        return 1;
+    }
+    if(event.type==TT_UI_LEADER_CANCEL || event.type==TT_UI_LEADER_TIMEOUT ||
+       event.type==TT_UI_LEADER_COMPLETE) {
+        if(!tracker.leader_pending)return 0;
+        tracker.leader_pending=0;tracker.leader_deadline=0;
+        if(event.type==TT_UI_LEADER_CANCEL)tt_tracker_message("Leader canceled");
+        else if(event.type==TT_UI_LEADER_TIMEOUT)tt_tracker_message("Leader timed out");
+        return 1;
+    }
     if(event.type==TT_UI_SYNC_PATTERN_ORDER) {
         if(tracker.play_mode!=PLAY_SONG)return 1;
         if(tracker.edit_order>=0 &&
@@ -342,6 +373,37 @@ static int handle_ui_event(TtUiEvent event) {
             tracker.edit_order=found;
             tracker.reveal_cursor=1;
         }
+        return 1;
+    }
+    if(event.type==TT_UI_SET_PERSPECTIVE) {
+        if(event.a<TT_PERSPECTIVE_MAIN || event.a>TT_PERSPECTIVE_INSTRUMENTS)
+            return 0;
+        tracker.perspective=event.a;
+        tracker.wave_row->visible=!tracker.console_visible;
+        tracker.phrase_frame->visible=!tracker.console_visible &&
+            tracker.perspective==TT_PERSPECTIVE_MAIN;
+        tracker.instrument_panels->visible=!tracker.console_visible &&
+            tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        tracker.order_frame->visible=tracker.perspective!=TT_PERSPECTIVE_INSTRUMENTS;
+        tracker.wave_canvas->visible=tracker.perspective!=TT_PERSPECTIVE_ORDERS;
+        tracker.wave_frame->title=tracker.perspective==TT_PERSPECTIVE_ORDERS?
+            "Patterns and Play Order":NULL;
+        if(tracker.order_dialog)tracker.order_dialog->visible=
+            tracker.perspective==TT_PERSPECTIVE_ORDERS;
+        if(tracker.manage_dialog)tracker.manage_dialog->visible=
+            tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        if(tracker.slices_dialog)tracker.slices_dialog->visible=
+            tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        tracker.focus=tracker.perspective==TT_PERSPECTIVE_MAIN?FOCUS_PHRASE:
+                      tracker.perspective==TT_PERSPECTIVE_ORDERS?FOCUS_ORDER:FOCUS_WAVE;
+        if(tracker.perspective==TT_PERSPECTIVE_ORDERS)tracker.app.focus=tracker.order_list;
+        else if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS)
+            tracker.app.focus=tracker.manage_list;
+        else tracker.app.focus=tracker.phrase_canvas;
+        tracker.reveal_cursor=1;
+        tt_tracker_log_event("UI",tracker.perspective==TT_PERSPECTIVE_MAIN?
+            "Main perspective selected":tracker.perspective==TT_PERSPECTIVE_ORDERS?
+            "Orders perspective selected":"Instruments perspective selected");
         return 1;
     }
     if(event.type==TT_UI_MODE_CONTEXT) {
@@ -1009,18 +1071,6 @@ static void value_down_16(F80Widget *button,void *user) {
 static void value_up_16(F80Widget *button,void *user) {
     (void)button;(void)user;adjust_value(16);
 }
-static void focus_phrase(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
-}
-static void focus_wave(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
-}
-static void focus_order(F80Widget *button,void *user) {
-    (void)button;(void)user;
-    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
-}
 static void toggle_loop(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_TOGGLE_LOOP,0,0);
 }
@@ -1586,16 +1636,21 @@ static void manage_ref(F80Widget *button,void *user) {
     if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     manage_refresh();tt_tracker_message("Sample base changed; slice bases transposed");
 }
+static void build_slices_panel(void);
 static void close_manage(F80Widget *button,void *user) {
-    (void)button;(void)user;f80_hide_modal(&tracker.app);
-    tracker.manage_dialog=tracker.manage_list_bg=tracker.manage_list=
-        tracker.manage_name=tracker.manage_info=NULL;
-}
-static void show_manage(F80Widget *button,void *user) {
     (void)button;(void)user;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_MAIN});
+}
+static void build_manage_panel(void) {
+    if(tracker.manage_dialog)return;
     F80Widget *dialog=f80_dialog("Manage samples",NULL,NULL,0,0);
+    dialog->kind=F80_BOX;dialog->direction=F80_COL;dialog->frame=1;
+    dialog->title="Manage samples";
+    f80_sized(dialog,f80_percent(.5f),f80_grow());
     dialog->dialog_default=3;
     tracker.manage_dialog=dialog;
+    f80_add(tracker.instrument_panels,dialog);
     tracker.manage_list_bg=f80_add(dialog,f80_window(F80_WINDOW_CYAN,F80_COL));
     tracker.manage_list=f80_add(dialog,f80_listbox(tracker.manage_items,tracker.sample_count,
                                                    manage_selected,NULL));
@@ -1604,15 +1659,45 @@ static void show_manage(F80Widget *button,void *user) {
     tracker.manage_name=f80_add(dialog,f80_input());
     tracker.manage_info=f80_add(dialog,f80_label(tracker.manage_details));
     tracker.manage_info->style=F80_COLOR_TEXT;
-    f80_add(dialog,f80_button("~U~p",manage_move,(void *)(long)-1));
-    f80_add(dialog,f80_button("Dow~n~",manage_move,(void *)(long)1));
-    f80_add(dialog,f80_button("~D~elete",manage_delete,NULL));
-    f80_add(dialog,f80_button("~R~ename",manage_rename,NULL));
-    f80_add(dialog,f80_button("Ref ~-~",manage_ref,(void *)(long)-1));
-    f80_add(dialog,f80_button("Ref ~+~",manage_ref,(void *)(long)1));
-    f80_add(dialog,f80_button("~C~lose",close_manage,NULL));
+    manage_buttons[0]=f80_add(dialog,f80_button("~U~p",manage_move,(void *)(long)-1));
+    manage_buttons[1]=f80_add(dialog,f80_button("Dow~n~",manage_move,(void *)(long)1));
+    manage_buttons[2]=f80_add(dialog,f80_button("~D~elete",manage_delete,NULL));
+    manage_buttons[3]=f80_add(dialog,f80_button("~R~ename",manage_rename,NULL));
+    manage_buttons[4]=f80_add(dialog,f80_button("Ref ~-~",manage_ref,(void *)(long)-1));
+    manage_buttons[5]=f80_add(dialog,f80_button("Ref ~+~",manage_ref,(void *)(long)1));
+    f80_wrap_init(&manage_actions,1,0);
     manage_selected(tracker.manage_list,NULL);
-    f80_show_modal(&tracker.app,dialog);
+}
+static void build_slices_panel(void) {
+    if(tracker.slices_dialog)return;
+    F80Widget *dialog=f80_dialog("Slices",NULL,NULL,0,0);
+    dialog->kind=F80_BOX;dialog->direction=F80_COL;dialog->frame=1;
+    dialog->title="Slices";
+    f80_sized(dialog,f80_percent(.5f),f80_grow());
+    tracker.slices_dialog=dialog;
+    f80_add(tracker.instrument_panels,dialog);
+    tracker.slices_list_bg=f80_add(dialog,f80_window(F80_WINDOW_CYAN,F80_COL));
+    tracker.slices_list=f80_add(dialog,f80_listbox(tracker.slice_items,TT_SLICES,
+                                                   slices_selected,NULL));
+    tracker.slices_list->window_role=F80_WINDOW_CYAN;
+    tracker.slices_list->cursor=clamp(tracker.marker,0,TT_SLICES-1);
+    tracker.slices_note=f80_add(dialog,f80_input());
+    tracker.slices_info=f80_add(dialog,f80_label(tracker.slice_details));
+    tracker.slices_info->style=F80_COLOR_TEXT;
+    slices_buttons[0]=f80_add(dialog,f80_button("~A~pply",slices_apply,NULL));
+    slices_buttons[1]=f80_add(dialog,f80_button("~I~nherit",slices_inherit,NULL));
+    slices_buttons[2]=f80_add(dialog,f80_button("Note ~-~",slices_step,(void *)(long)-1));
+    slices_buttons[3]=f80_add(dialog,f80_button("Note ~+~",slices_step,(void *)(long)1));
+    slices_buttons[4]=f80_add(dialog,f80_button("Detect ~B~eats",slices_detect_beats,NULL));
+    slices_buttons[5]=f80_add(dialog,f80_button("Detect ~T~ones",slices_detect_tones,NULL));
+    f80_wrap_init(&slices_actions,1,0);
+    slices_selected(tracker.slices_list,NULL);
+}
+static void show_manage(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    build_manage_panel();build_slices_panel();
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_INSTRUMENTS});
 }
 static int parse_note(const char *text) {
     char candidate[4];
@@ -1680,31 +1765,15 @@ static void slices_detect_tones(F80Widget *button,void *user) {
     tt_tracker_message("Slice reference notes estimated from current markers");
 }
 static void close_slices(F80Widget *button,void *user) {
-    (void)button;(void)user;f80_hide_modal(&tracker.app);
-    tracker.slices_dialog=tracker.slices_list_bg=tracker.slices_list=
-        tracker.slices_note=tracker.slices_info=NULL;
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_MAIN});
 }
 static void show_slices(F80Widget *button,void *user) {
     (void)button;(void)user;
-    F80Widget *dialog=f80_dialog("Slices",NULL,NULL,0,0);
-    tracker.slices_dialog=dialog;
-    tracker.slices_list_bg=f80_add(dialog,f80_window(F80_WINDOW_CYAN,F80_COL));
-    tracker.slices_list=f80_add(dialog,f80_listbox(tracker.slice_items,TT_SLICES,
-                                                   slices_selected,NULL));
-    tracker.slices_list->window_role=F80_WINDOW_CYAN;
-    tracker.slices_list->cursor=clamp(tracker.marker,0,TT_SLICES-1);
-    tracker.slices_note=f80_add(dialog,f80_input());
-    tracker.slices_info=f80_add(dialog,f80_label(tracker.slice_details));
-    tracker.slices_info->style=F80_COLOR_TEXT;
-    f80_add(dialog,f80_button("~A~pply",slices_apply,NULL));
-    f80_add(dialog,f80_button("~I~nherit",slices_inherit,NULL));
-    f80_add(dialog,f80_button("Note ~-~",slices_step,(void *)(long)-1));
-    f80_add(dialog,f80_button("Note ~+~",slices_step,(void *)(long)1));
-    f80_add(dialog,f80_button("Detect ~B~eats",slices_detect_beats,NULL));
-    f80_add(dialog,f80_button("Detect ~T~ones",slices_detect_tones,NULL));
-    f80_add(dialog,f80_button("~C~lose",close_slices,NULL));
-    slices_selected(tracker.slices_list,NULL);
-    f80_show_modal(&tracker.app,dialog);
+    build_manage_panel();build_slices_panel();
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_INSTRUMENTS});
 }
 static void order_refresh(void) {
     if(!tracker.order_dialog)return;
@@ -1854,15 +1923,21 @@ static void show_settings(F80Widget *button,void *user) {
     f80_show_modal(&tracker.app,dialog);
 }
 static void close_order(F80Widget *button,void *user) {
-    (void)button;(void)user;f80_hide_modal(&tracker.app);
-    tracker.order_dialog=tracker.order_bank_label=tracker.order_bank_bg=tracker.order_bank=
-        tracker.order_seq_label=tracker.order_seq_bg=tracker.order_seq=tracker.order_name=NULL;
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_MAIN});
 }
 static void show_order(F80Widget *button,void *user) {
     (void)button;(void)user;
+    if(!tracker.order_dialog) {
     F80Widget *dialog=f80_dialog("Patterns and play order",NULL,NULL,0,0);
+    dialog->kind=F80_BOX;dialog->direction=F80_COL;dialog->frame=0;
+    dialog->title=NULL;
+    f80_sized(dialog,f80_grow(),f80_grow());
     dialog->dialog_default=1;
     tracker.order_dialog=dialog;
+    f80_add(tracker.wave_frame,dialog);
+    dialog->visible=0;
     tracker.order_bank_label=f80_add(dialog,f80_label("PATTERN BANK"));
     tracker.order_bank_label->style=F80_COLOR_TEXT;
     tracker.order_bank_bg=f80_add(dialog,f80_window(F80_WINDOW_CYAN,F80_COL));
@@ -1887,9 +1962,11 @@ static void show_order(F80Widget *button,void *user) {
     order_play_buttons[3]=f80_add(dialog,f80_button("Delete",order_remove,NULL));
     f80_wrap_init(&order_pattern_actions,1,0);
     f80_wrap_init(&order_play_actions,1,0);
-    f80_add(dialog,f80_button("~C~lose",close_order,NULL));
+    f80_add(dialog,f80_button("Back",close_order,NULL));
     order_refresh();order_bank_selected(tracker.order_bank,NULL);
-    f80_show_modal(&tracker.app,dialog);
+    }
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_ORDERS});
 }
 static void table_title(void) {
     snprintf(tracker.table_title,sizeof(tracker.table_title),"Table %02X / %d ticks",
@@ -1981,7 +2058,7 @@ static void show_help(F80Widget *button,void *user) {
     (void)button;(void)user;
     static const char *lines[]={
         "File > Load WAV adds a sample; Open/Save Song handles the whole song.",
-        "Tab switches Waveform and Pattern.",
+        "Type ; then O for Orders, I for Instruments, or X for Main.",
         "Wave: F1/F2 previous/next sample; F3/F4 previous/next marker.",
         "Wave: Ctrl+Left/Right selects markers; Shift+Left/Right moves one.",
         "Wave: F7/F8 or Down/Up zoom; Left/Right pans; 0-F selects.",
@@ -1992,10 +2069,8 @@ static void show_help(F80Widget *button,void *user) {
         "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
-        "Sampler > Manage reorders, renames, deletes and retunes samples.",
-        "Sampler > Slices sets a base note for each marker-to-marker slice.",
-        "Song > Settings changes BPM, pattern rows, rows per beat, and ticks.",
-        "Song > Patterns and order edits the bank and playback sequence.",
+        "File > Song settings changes BPM, pattern rows, and table ticks.",
+        "Instruments contains sample management and slice settings.",
         "Select TBLxx or its value, then use F7 to expand its inline table.",
         "Table ticks show note, instrument, and six FX slots."
     };
@@ -2055,7 +2130,12 @@ static void toggle_console(F80Widget *button,void *user) {
     tracker.header_gap->visible=panels_visible;
     tracker.header->visible=panels_visible;
     tracker.wave_row->visible=panels_visible;
-    tracker.phrase_frame->visible=panels_visible;
+    tracker.phrase_frame->visible=panels_visible &&
+        tracker.perspective==TT_PERSPECTIVE_MAIN;
+    if(tracker.instrument_panels)tracker.instrument_panels->visible=panels_visible &&
+        tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+    if(tracker.order_dialog)tracker.order_dialog->visible=panels_visible &&
+        tracker.perspective==TT_PERSPECTIVE_ORDERS;
     tracker.details->visible=panels_visible;
     tracker.status->visible=panels_visible;
     tracker.console->visible=tracker.console_visible;
@@ -2124,6 +2204,7 @@ static const F80MenuItem file_items[]={
     {"~L~oad WAV...",NULL,open_load,1},
     {"~O~pen song...",NULL,open_song,1},
     {"~S~ave song...",NULL,save_song,1},
+    {"Song ~s~ettings...",NULL,show_settings,1},
     {"~Q~uit",NULL,quit,1}
 };
 static const F80MenuItem edit_items[]={
@@ -2137,26 +2218,17 @@ static const F80MenuItem play_items[]={
     {"S~t~op",NULL,stop_playback,1},
     {"~L~oop song order",NULL,toggle_loop,1}
 };
-static const F80MenuItem sampler_items[]={
-    {"~M~anage...",NULL,show_manage,1},
-    {"~S~lices...",NULL,show_slices,1}
-};
-static const F80MenuItem song_items[]={
-    {"~S~ettings...",NULL,show_settings,1},
-    {"~P~atterns and order...",NULL,show_order,1}
-};
 static const F80MenuItem view_items[]={
-    {"Zoom ~o~ut",NULL,zoom_out,1},{"Zoom ~i~n",NULL,zoom_in,1},
-    {"~W~aveform",NULL,focus_wave,1},{"~O~RD list",NULL,focus_order,1},
-    {"P~a~ttern",NULL,focus_phrase,1},
+    {"~M~ain perspective","; X",perspective_main,1},
+    {"~O~rders perspective","; O",perspective_orders,1},
+    {"~I~nstruments perspective","; I",perspective_instruments,1},
+    {"Wave zoom ~o~ut",NULL,zoom_out,1},{"Wave zoom ~i~n",NULL,zoom_in,1},
     {event_console_menu_label,"Ctrl+O",toggle_console,1}
 };
 static const F80MenuItem help_items[]={ {"~K~eys and format",NULL,show_help,1} };
 static const F80Menu menus[]={
     {"~F~ile",file_items,sizeof(file_items)/sizeof(*file_items)},
     {"~E~dit",edit_items,sizeof(edit_items)/sizeof(*edit_items)},
-    {"~S~ampler",sampler_items,sizeof(sampler_items)/sizeof(*sampler_items)},
-    {"S~o~ng",song_items,sizeof(song_items)/sizeof(*song_items)},
     {"~P~lay",play_items,sizeof(play_items)/sizeof(*play_items)},
     {"~V~iew",view_items,sizeof(view_items)/sizeof(*view_items)},
     {"~H~elp",help_items,sizeof(help_items)/sizeof(*help_items)}
@@ -2193,7 +2265,7 @@ static const F80StatusItem order_status[]={
     {"1","Ord-",previous_order},{"2","Ord+",next_order},
     {"3","Ply",toggle_play},{"4","Stp",stop_playback},
     {"5","Fol",toggle_follow},{"6","Pat",show_order},
-    {"7","Wav",focus_wave},{"8","Act",toggle_order_active},
+    {"7","Main",perspective_main},{"8","Act",toggle_order_active},
     {"9","Men",pull_menu},{"10","Xit",quit}
 };
 static void prev_pattern(F80Widget *button,void *user) {
@@ -2397,6 +2469,39 @@ static const F80StatusItem reference_status[]={
 static F80StatusItem selection_visible[10];
 static F80StatusItem pattern_status_visible[10];
 static F80StatusItem mode_status_visible[10];
+static F80StatusItem perspective_status_visible[10];
+static void perspective_orders(F80Widget *button,void *user) {
+    (void)button;(void)user;show_order(NULL,NULL);
+}
+static void perspective_instruments(F80Widget *button,void *user) {
+    (void)button;(void)user;show_manage(NULL,NULL);
+}
+static void perspective_main(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_MAIN});
+}
+static int process_leader_key(int key) {
+    if(!tracker.leader_pending) {
+        if(key==';')
+            handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_START,.a=1500});
+        return key==';';
+    }
+    if(key==27) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_CANCEL});
+        return 1;
+    }
+    int command=tolower((unsigned char)key);
+    if(command=='o' || command=='i' || command=='x') {
+        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_COMPLETE});
+        if(command=='o')show_order(NULL,NULL);
+        else if(command=='i')show_manage(NULL,NULL);
+        else perspective_main(NULL,NULL);
+        return 1;
+    }
+    handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_CANCEL});
+    return 0;
+}
 static const F80StatusItem *mode_status(const F80StatusItem *base) {
     memcpy(mode_status_visible,base,sizeof(mode_status_visible));
     if(tracker.play_mode==PLAY_SONG) {
@@ -2409,29 +2514,46 @@ static const F80StatusItem *mode_status(const F80StatusItem *base) {
     return mode_status_visible;
 }
 static const F80StatusItem *current_status(void) {
-    if(tracker.focus==FOCUS_WAVE)return wave_status;
-    if(tracker.focus==FOCUS_ORDER)return mode_status(order_status);
-    if(tracker.focus==FOCUS_REFERENCE)return reference_status;
-    if(tracker.inline_table_selected)return mode_status(inline_table_status);
+    int columns=status_columns;
+    const F80StatusItem *base;
+    if(tracker.focus==FOCUS_WAVE)base=wave_status;
+    else if(tracker.focus==FOCUS_ORDER)base=mode_status(order_status);
+    else if(tracker.focus==FOCUS_REFERENCE)base=reference_status;
+    else if(tracker.inline_table_selected)base=mode_status(inline_table_status);
     if(tracker.selecting) {
         memcpy(selection_visible,selection_status,sizeof(selection_visible));
         if(!paste_available()) {
             selection_visible[6].label="---";
             selection_visible[6].action=NULL;
         }
-        return mode_status(selection_visible);
+        base=mode_status(selection_visible);
+    } else if(tracker.focus==FOCUS_PHRASE && !tracker.inline_table_selected) {
+        if(tracker.field==0)base=mode_status(note_status);
+        else if(tracker.field==1)base=mode_status(instrument_status);
+        else {
+            const F80StatusItem *fields=tracker.field%2==0?effect_status:value_status;
+            memcpy(pattern_status_visible,fields,sizeof(pattern_status_visible));
+            int table;
+            if(selected_pattern_table(&table)) {
+                pattern_status_visible[6].label=tracker.inline_table_open &&
+                    tracker.inline_table_index==table?"Hide":"Tbl";
+                pattern_status_visible[6].action=toggle_inline_table;
+            }
+            base=mode_status(pattern_status_visible);
+        }
     }
-    if(tracker.field==0)return mode_status(note_status);
-    if(tracker.field==1)return mode_status(instrument_status);
-    const F80StatusItem *base=tracker.field%2==0?effect_status:value_status;
-    memcpy(pattern_status_visible,base,sizeof(pattern_status_visible));
-    int table;
-    if(selected_pattern_table(&table)) {
-        pattern_status_visible[6].label=tracker.inline_table_open &&
-            tracker.inline_table_index==table?"Hide":"Tbl";
-        pattern_status_visible[6].action=toggle_inline_table;
-    }
-    return mode_status(pattern_status_visible);
+    int kept=columns>=70?8:4;
+    for(int i=0;i<kept;++i)perspective_status_visible[i]=base[i];
+    perspective_status_visible[kept]=tracker.perspective==TT_PERSPECTIVE_MAIN?
+        (F80StatusItem){"More","(; O)",perspective_orders}:
+        (F80StatusItem){"Back","(; X)",perspective_main};
+    perspective_status_visible[kept+1]=tracker.perspective==TT_PERSPECTIVE_MAIN?
+        (F80StatusItem){"More","(; I)",perspective_instruments}:
+        tracker.perspective==TT_PERSPECTIVE_ORDERS?
+        (F80StatusItem){"Inst","(; I)",perspective_instruments}:
+        (F80StatusItem){"Orders","(; O)",perspective_orders};
+    if(tracker.status)tracker.status->status_count=kept+2;
+    return perspective_status_visible;
 }
 static void change_octave(int delta) {
     tracker.entry_octave=clamp(tracker.entry_octave+delta,0,8);
@@ -2913,6 +3035,10 @@ static void update_labels(void) {
                  tracker.message);
     }
 }
+static int widget_is_inside(F80Widget *widget,F80Widget *parent) {
+    for(F80Widget *at=widget;at;at=at->parent)if(at==parent)return 1;
+    return 0;
+}
 static void handle_key(int key) {
     if(key==3) { quit(NULL,NULL);return; } /* Ctrl-C */
     if(key==15) { toggle_console(NULL,NULL);return; } /* Ctrl-O */
@@ -2987,6 +3113,24 @@ static void handle_key(int key) {
         else if(key==' ')toggle_play(NULL,NULL);
         return;
     }
+    if(key==9 || key==F80_KEY_BTAB)return;
+    if(tracker.leader_pending && process_leader_key(key))return;
+    if(key==';' && (!tracker.app.focus ||
+                    tracker.app.focus->kind!=F80_INPUT)) {
+        process_leader_key(key);return;
+    }
+    if(tracker.perspective==TT_PERSPECTIVE_ORDERS &&
+       widget_is_inside(tracker.app.focus,tracker.order_dialog)) {
+        f80_key(&tracker.app,key);
+        if(tracker.app.focus==tracker.order_name)order_name_changed();
+        return;
+    }
+    if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
+       (widget_is_inside(tracker.app.focus,tracker.manage_dialog) ||
+        widget_is_inside(tracker.app.focus,tracker.slices_dialog))) {
+        f80_key(&tracker.app,key);
+        return;
+    }
     if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected) {
         inline_table_key(key);return;
     }
@@ -3017,14 +3161,7 @@ static void handle_key(int key) {
     }
     switch(key) {
     case 10:case 13:toggle_play(NULL,NULL);return;
-    case 9:case F80_KEY_BTAB:
-        handle_ui_event((TtUiEvent){TT_UI_FOCUS,
-            key==9?
-                tracker.focus==FOCUS_WAVE?FOCUS_PHRASE:
-                tracker.focus==FOCUS_PHRASE?FOCUS_ORDER:FOCUS_WAVE:
-                tracker.focus==FOCUS_WAVE?FOCUS_ORDER:
-                tracker.focus==FOCUS_ORDER?FOCUS_PHRASE:FOCUS_WAVE});
-        return;
+    case 9:case F80_KEY_BTAB:return;
     case 27:
         if(tracker.focus==FOCUS_ORDER && tracker.order_range_active)
             send_play(TT_PLAY_CLEAR_ORDER_RANGE,0,0);
@@ -3800,11 +3937,13 @@ static int frame(void *user) {
     native_poll_hold();
 #endif
     tt_play_advance();
+    if(tracker.leader_pending && SDL_GetTicks()>=tracker.leader_deadline)
+        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_TIMEOUT});
     update_labels();
+    int rows,cols;getmaxyx(stdscr,rows,cols);
+    status_columns=cols;
     const F80StatusItem *items=current_status();
     tracker.status->status_items=items;
-    tracker.status->status_count=10;
-    int rows,cols;getmaxyx(stdscr,rows,cols);
     int editing=0;
 #ifdef __EMSCRIPTEN__
     editing=tt_web_compact_editing();
@@ -3813,8 +3952,77 @@ static int frame(void *user) {
     tracker.compact_editing=editing;
     int wide_header=header_is_wide(cols);
     tracker.header->height=f80_fixed(wide_header?2:4);
-    tracker.wave_row->height=f80_fixed(editing?3:rows>=32?14:rows>=23?10:6);
+    tracker.wave_row->height=tracker.perspective==TT_PERSPECTIVE_ORDERS?f80_grow():
+        tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?f80_percent(.42f):
+        f80_fixed(editing?3:rows>=32?14:rows>=23?10:6);
+    tracker.instrument_panels->height=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+        f80_grow():f80_fixed(0);
     f80_layout(tracker.root,f80_rect(0,0,cols,rows));
+    if(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.order_dialog) {
+        F80Rect r=tracker.wave_frame->rect;
+        f80_layout(tracker.order_dialog,r);
+        int inner=r.w-4,left=r.x+2,top=r.y+2;
+        if(inner<4)inner=4;
+        if(r.w>=58) {
+            int bank_w=(inner-2)/2,seq_w=inner-bank_w-2,seq_x=left+bank_w+2;
+            int list_h=r.h-9;if(list_h<2)list_h=2;
+            f80_layout(tracker.order_bank_label,f80_rect(left,top,bank_w,1));
+            f80_layout(tracker.order_bank_bg,f80_rect(left,top+1,bank_w,list_h));
+            f80_layout(tracker.order_bank,f80_rect(left,top+1,bank_w,list_h));
+            f80_layout(tracker.order_seq_label,f80_rect(seq_x,top,seq_w,1));
+            f80_layout(tracker.order_seq_bg,f80_rect(seq_x,top+1,seq_w,list_h));
+            f80_layout(tracker.order_seq,f80_rect(seq_x,top+1,seq_w,list_h));
+            f80_layout(tracker.order_name,f80_rect(left,top+list_h+2,bank_w,1));
+            f80_wrap_layout(&order_pattern_actions,
+                f80_rect(left,top+list_h+4,bank_w,r.h-list_h-7),order_pattern_buttons,4);
+            f80_wrap_layout(&order_play_actions,
+                f80_rect(seq_x,top+list_h+4,seq_w,r.h-list_h-7),order_play_buttons,4);
+        } else {
+            int list_h=(r.h-15)/2;if(list_h<2)list_h=2;if(list_h>3)list_h=3;
+            int seq_y=top+list_h+3;
+            f80_layout(tracker.order_bank_label,f80_rect(left,top,inner,1));
+            f80_layout(tracker.order_bank_bg,f80_rect(left,top+1,inner,list_h));
+            f80_layout(tracker.order_bank,f80_rect(left,top+1,inner,list_h));
+            f80_layout(tracker.order_seq_label,f80_rect(left,seq_y,inner,1));
+            f80_layout(tracker.order_seq_bg,f80_rect(left,seq_y+1,inner,list_h));
+            f80_layout(tracker.order_seq,f80_rect(left,seq_y+1,inner,list_h));
+            f80_layout(tracker.order_name,f80_rect(left,seq_y+list_h+2,inner,1));
+            int actions_y=seq_y+list_h+3;
+            int remain=r.y+r.h-2-actions_y;
+            f80_wrap_layout(&order_pattern_actions,
+                f80_rect(left,actions_y,(inner-1)/2,remain),order_pattern_buttons,4);
+            f80_wrap_layout(&order_play_actions,
+                f80_rect(left+(inner+1)/2+1,actions_y,inner-(inner+1)/2-1,
+                         remain),order_play_buttons,4);
+        }
+        if(tracker.order_dialog->child_count>15)
+            tracker.order_dialog->children[15]->visible=0;
+    }
+    if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS && tracker.instrument_panels) {
+        F80Rect r=tracker.instrument_panels->rect;
+        int half=r.w/2;
+        if(tracker.manage_dialog) {
+            F80Rect p=f80_rect(r.x,r.y,half,r.h);f80_layout(tracker.manage_dialog,p);
+            int list_h=r.h-13;if(list_h<2)list_h=2;if(list_h>4)list_h=4;
+            f80_layout(tracker.manage_list_bg,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
+            f80_layout(tracker.manage_list,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
+            f80_layout(tracker.manage_info,f80_rect(p.x+1,p.y+list_h+2,p.w-2,1));
+            f80_layout(tracker.manage_name,f80_rect(p.x+1,p.y+list_h+3,p.w-2,1));
+            f80_wrap_layout(&manage_actions,
+                f80_rect(p.x+1,p.y+list_h+5,p.w-2,r.h-list_h-6),manage_buttons,6);
+        }
+        if(tracker.slices_dialog) {
+            F80Rect p=f80_rect(r.x+half,r.y,r.w-half,r.h);
+            f80_layout(tracker.slices_dialog,p);
+            int list_h=r.h-13;if(list_h<2)list_h=2;if(list_h>4)list_h=4;
+            f80_layout(tracker.slices_list_bg,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
+            f80_layout(tracker.slices_list,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
+            f80_layout(tracker.slices_info,f80_rect(p.x+1,p.y+list_h+2,p.w-2,1));
+            f80_layout(tracker.slices_note,f80_rect(p.x+1,p.y+list_h+3,p.w-2,1));
+            f80_wrap_layout(&slices_actions,
+                f80_rect(p.x+1,p.y+list_h+5,p.w-2,r.h-list_h-6),slices_buttons,6);
+        }
+    }
     if(!tracker.console_visible)layout_header(cols,wide_header);
     if(tracker.app.modal) {
 #ifndef __EMSCRIPTEN__
@@ -3923,8 +4131,15 @@ static int frame(void *user) {
 #ifndef __EMSCRIPTEN__
         }
 #endif
-    } else tracker.app.focus=tracker.console_visible?tracker.console:
-               tracker.focus==FOCUS_ORDER?tracker.order_list:
+    } else if(tracker.console_visible)tracker.app.focus=tracker.console;
+    else if(tracker.perspective==TT_PERSPECTIVE_ORDERS) {
+        if(!widget_is_inside(tracker.app.focus,tracker.order_dialog))
+            tracker.app.focus=tracker.order_list;
+    } else if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS) {
+        if(!widget_is_inside(tracker.app.focus,tracker.manage_dialog) &&
+           !widget_is_inside(tracker.app.focus,tracker.slices_dialog))
+            tracker.app.focus=tracker.manage_list;
+    } else tracker.app.focus=tracker.focus==FOCUS_ORDER?tracker.order_list:
                tracker.focus==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
@@ -4134,6 +4349,9 @@ int main(int argc,char **argv) {
     tracker.phrase_frame=f80_add(tracker.root,f80_box(F80_COL));
     tracker.phrase_frame->frame=1;
     tracker.phrase_canvas=f80_add(tracker.phrase_frame,f80_canvas(paint_phrase,NULL));
+    tracker.instrument_panels=f80_add(tracker.root,f80_box(F80_ROW));
+    tracker.instrument_panels->visible=0;
+    f80_sized(tracker.instrument_panels,f80_grow(),f80_grow());
     tracker.details=f80_add(tracker.root,f80_label(tracker.details_text));
     tracker.details->window_role=F80_WINDOW_CONSOLE;
     tracker.details->style=F80_COLOR_TEXT;

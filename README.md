@@ -136,11 +136,12 @@ app remains silent on startup. The four demo WAVs and C-4 sine are embedded.
 
 The tracker has six sample channels, 16 to 256 rows per pattern in steps of 16,
 up to 32 named patterns, and up to 128 play-order entries. A pattern may appear
-repeatedly in the order or remain unused. **Song > Settings...** edits BPM
+repeatedly in the order or remain unused. **File > Song settings...** edits BPM
 (30–300), pattern rows (16–256), rows per beat (1–16), and initial ticks per row
-(1–48). Their model defaults are 120, 16, 4, and 12. **Song > Patterns and
-order...** shows the pattern bank and play order side by side on wide screens
-and stacked on narrow screens. Shortening a pattern clears notes beyond its new
+(1–48). Their model defaults are 120, 16, 4, and 12. The **Orders perspective**
+is available in **View** or with the leader sequence `; O`. It shows the ORD applet on the
+left and the pattern bank and play order in a flexible panel on the right.
+Shortening a pattern clears notes beyond its new
 last row. New creates an empty pattern and selects it for editing, Rename
 changes its name, Edit selects an existing pattern in the grid, Add inserts it
 into the order, and Remove/Up/Down edit the order. BPM is a song property and
@@ -148,9 +149,10 @@ can be changed there. Selecting an ORD entry opens that pattern in the grid
 and moves the playhead to its first row. As playback advances with Follow off,
 the selected entry can differ from the `>` playhead marker.
 The wheel or a touch swipe scrolls the ORD list without selecting another
-entry or moving the playhead. Tab cycles through waveform, grid, and ORD;
-Shift+Tab cycles in reverse. The shortcut bar changes to ORD actions when
-that list has focus. Its **8 New** action appends an empty pattern and an
+entry or moving the playhead. Press `;` followed by `O`, `I`, or `X` to open
+Orders, open Instruments, or return to Main. The bottom **More** and **Back**
+controls show these leader shortcuts. Tab no longer cycles between editing areas. The shortcut bar changes to ORD actions
+when that list has focus. Its **8 New** action appends an empty pattern and an
 order entry for it, then selects the new entry. One Undo removes both.
 Starting song playback uses the selected ORD entry and advances to the next
 pattern after the configured row count; Loop restarts the order at its end.
@@ -195,9 +197,11 @@ shared across channels and pattern/table playback, start at `00` when playback
 starts, and can be changed elsewhere in the sequence.
 
 Sixteen ordered markers (`0`–`F`) define fifteen slices. Each slice may inherit
-the sample reference note or override it. **Sampler > Slices...** shows the
-frame range and duration of each interval and edits its base note. Changing the
-sample reference note transposes all slice overrides. **Sampler > Manage...**
+the sample reference note or override it. **View > Instruments perspective**
+(`; I`) expands the waveform and places sample management and slice
+editing panels below it. The Slices panel shows the frame range and duration of
+each interval and edits its base note. Changing the sample reference note
+transposes all slice overrides. The Manage Samples panel
 lists loaded samples and their original WAV names. It can rename, retune,
 reorder, and delete samples. Reordering remaps instrument numbers in all
 patterns; deleting clears cells that referenced the removed sample. The
@@ -298,8 +302,8 @@ status bar, or order dialog to switch the editable pattern. In song follow mode,
 the playhead stays near the middle of the grid as the ordered patterns advance,
 reaching the top at the start and bottom at the end. A quick horizontal drag
 pans the waveform. Hold on it for one second to select the nearest marker, then
-drag to move that marker between its neighbors. Tab switches waveform and
-pattern focus. The active pane has a white border.
+drag to move that marker between its neighbors. Use the bottom perspective
+controls to switch layouts. The active pane has a white border.
 
 ### Song files
 
