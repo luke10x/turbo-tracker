@@ -38,6 +38,7 @@ typedef struct {
     int note_input_length;
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
+    int grid_value_editing;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
     int compact_editing,effect_slots[TT_CHANNELS];

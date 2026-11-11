@@ -321,6 +321,8 @@ static int grid_pattern_for_row(int global) {
 }
 static int pattern_fields_per_channel(int channel);
 static int pattern_edit_fields_per_channel(int channel);
+static void inline_table_commit(TtTableTick tick);
+static void inline_table_clear_field(void);
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_PATTERN_ONLY, TT_UI_SELECT_ORDER,
     TT_UI_MODE_CONTEXT, TT_UI_SYNC_PATTERN_ORDER,
@@ -332,7 +334,8 @@ typedef enum {
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
     TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
-    TT_UI_INLINE_TABLE_CURSOR, TT_UI_EXIT_REQUEST,
+    TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
+    TT_UI_EXIT_REQUEST,
     TT_UI_EXIT_CONFIRM, TT_UI_EXIT_CANCEL
 } TtUiType;
 typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
@@ -523,6 +526,7 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_FOCUS) {
         if(tracker.focus==FOCUS_PHRASE && event.index!=FOCUS_PHRASE)
             compact_pattern_effects_if_needed();
+        if(event.index!=FOCUS_PHRASE)tracker.grid_value_editing=0;
         tracker.focus=event.index;
         if(event.index!=FOCUS_PHRASE)tracker.inline_table_selected=0;
         if(event.index!=FOCUS_PHRASE)
@@ -577,6 +581,17 @@ static int handle_ui_event(TtUiEvent event) {
         if(!tracker.visual_selecting)return 0;
         tracker.selecting=tracker.visual_selecting=0;
         tt_tracker_log_event("UI","Visual selection ended");
+        return 1;
+    }
+    if(event.type==TT_UI_GRID_VALUE_EDITING) {
+        if(tracker.focus!=FOCUS_PHRASE || tracker.grid_value_editing==!!event.a)
+            return 0;
+        tracker.grid_value_editing=!!event.a;
+        tt_tracker_message(tracker.grid_value_editing?
+            "Value edit: arrows adjust; Tab moves; Enter exits; Esc clears":
+            "Grid value edit ended");
+        tt_tracker_log_event("UI",tracker.grid_value_editing?
+            "Grid value edit started":"Grid value edit ended");
         return 1;
     }
     int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
@@ -2629,12 +2644,89 @@ static void type_note_key(int key) {
     edited.note=note;
     edit_cell(tracker.step,tracker.channel,edited);
 }
-static void advance_pattern_field(void) {
+static void move_pattern_field(int direction) {
     clear_note_input();
-    int field=tracker.field,channel=tracker.channel;
-    if(field<7)++field;
-    else if(channel<TT_CHANNELS-1) { ++channel;field=0; }
+    int channel=tracker.channel,field=tracker.field;
+    if(direction>0) {
+        if(field<7)++field;
+        else if(channel<TT_CHANNELS-1) { ++channel;field=0; }
+    } else {
+        if(field>0)--field;
+        else if(channel>0) {
+            --channel;field=pattern_edit_fields_per_channel(channel)-1;
+        }
+    }
     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=channel,.b=field});
+}
+static int grid_adjust_delta(int key) {
+    if(key==F80_KEY_UP || key==F80_KEY_RIGHT)return 1;
+    return -1;
+}
+static int adjust_note_value(int note,int key) {
+    int delta=grid_adjust_delta(key);
+    if(tt_note_is_relative(note)) {
+        int amount=clamp(tt_note_relative_amount(note)+delta,0,
+                         TT_NOTE_RELATIVE_MAX);
+        return tt_note_relative(tt_note_relative_positive(note),amount);
+    }
+    if(note==TT_NOTE_OFF)note=48;
+    else if(note<0)note=48;
+    note+=key==F80_KEY_UP || key==F80_KEY_DOWN?12*delta:delta;
+    return clamp(note,0,119);
+}
+static int adjust_byte_value(int value,int key) {
+    int delta=grid_adjust_delta(key);
+    if(value<0)value=0;
+    if(tt_effect_is_register(value) || value==TT_EFFECT_VALUE_REGISTER_PREFIX)
+        return value;
+    value+=key==F80_KEY_UP || key==F80_KEY_DOWN?16*delta:delta;
+    return clamp(value,0,255);
+}
+static void adjust_grid_value(int key) {
+    if(tracker.inline_table_selected) {
+        TtTableTick edited=tracker.song.table[tracker.inline_table_index].tick[
+            tracker.inline_table_tick];
+        int field=tracker.inline_table_field;
+        if(field==0)edited.note=adjust_note_value(edited.note,key);
+        else if(field==1) {
+            edited.instrument=adjust_byte_value(edited.instrument,key);
+        } else if(field%2) {
+            int slot=(field-3)/2;
+            if(edited.effect[slot].command)
+                edited.effect[slot].value=adjust_byte_value(
+                    edited.effect[slot].value,key);
+            else return;
+        } else return;
+        inline_table_commit(edited);
+        return;
+    }
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    int field=tracker.field;
+    if(field==0)edited.note=adjust_note_value(edited.note,key);
+    else if(field==1) {
+        edited.instrument=adjust_byte_value(edited.instrument,key);
+    } else if(field>=3 && field%2) {
+        TtPatternEffect *fx=tt_cell_effect(&edited,(field-3)/2);
+        if(fx->command)fx->value=adjust_byte_value(fx->value,key);
+        else return;
+    } else return;
+    edit_cell(tracker.step,tracker.channel,edited);
+}
+static void clear_grid_subcell(void) {
+    if(tracker.inline_table_selected) {
+        inline_table_clear_field();
+        return;
+    }
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    if(tracker.field==0)edited.note=-1;
+    else if(tracker.field==1)edited.instrument=-1;
+    else {
+        TtPatternEffect *fx=tt_cell_effect(&edited,pattern_effect_slot());
+        if(pattern_effect_field())set_effect_slot(&edited,pattern_effect_slot(),
+                                                   TT_EFFECT_NONE);
+        else fx->value=-1;
+    }
+    edit_cell(tracker.step,tracker.channel,edited);
 }
 static void edit_table_ticks(TtBulkOp op,int top,int left,int bottom,int right,
                              const TtTableTick *data) {
@@ -2797,10 +2889,11 @@ static void inline_table_key(int key) {
         handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,.a=tick,.b=field});
         return;
     }
-    if(key==' ') {
+    if(key==9 || key==F80_KEY_BTAB) {
         clear_note_input();
-        field++;
+        field+=key==9?1:-1;
         if(field>13) { field=0;tick=(tick+1)%tracker.song.table[tracker.inline_table_index].length; }
+        else if(field<0) { field=13;tick=(tick+tracker.song.table[tracker.inline_table_index].length-1)%tracker.song.table[tracker.inline_table_index].length; }
         handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,.a=tick,.b=field});
         return;
     }
@@ -3113,7 +3206,6 @@ static void handle_key(int key) {
         else if(key==' ')toggle_play(NULL,NULL);
         return;
     }
-    if(key==9 || key==F80_KEY_BTAB)return;
     if(tracker.leader_pending && process_leader_key(key))return;
     if(key==';' && (!tracker.app.focus ||
                     tracker.app.focus->kind!=F80_INPUT)) {
@@ -3131,16 +3223,31 @@ static void handle_key(int key) {
         f80_key(&tracker.app,key);
         return;
     }
+    if(tracker.focus==FOCUS_PHRASE && (key==10 || key==13)) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,
+                                    .a=!tracker.grid_value_editing});
+        return;
+    }
+    if(tracker.focus==FOCUS_PHRASE && tracker.grid_value_editing) {
+        if(key==27) {
+            clear_grid_subcell();
+            handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=0});
+            return;
+        }
+        if(key==F80_KEY_UP || key==F80_KEY_DOWN ||
+           key==F80_KEY_LEFT || key==F80_KEY_RIGHT) {
+            adjust_grid_value(key);
+            return;
+        }
+    }
+    if((key==9 || key==F80_KEY_BTAB) && tracker.focus==FOCUS_PHRASE) {
+        if(tracker.inline_table_selected)inline_table_key(key);
+        else move_pattern_field(key==9?1:-1);
+        return;
+    }
     if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected) {
         inline_table_key(key);return;
     }
-    if(key==' ' && tracker.focus==FOCUS_PHRASE && !tracker.selecting) {
-        if(tracker.field==0 && tracker.note_input_length)
-            tt_tracker_message("Complete the note as C-4 or C#4 before advancing");
-        else advance_pattern_field();
-        return;
-    }
-    if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.selecting)return;
     if(key==' ')return;
     if(key==22) { /* Ctrl-V starts a visual selection in the focused editor. */
         if(tracker.focus==FOCUS_PHRASE)
@@ -3222,6 +3329,17 @@ static void handle_key(int key) {
         if(tracker.inline_table_selected) {
             inline_table_key(key);return;
         }
+        if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
+           key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
+            if(!tracker.visual_selecting)
+                handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
+            int direction=key==F80_KEY_SHIFT_UP?F80_KEY_UP:
+                key==F80_KEY_SHIFT_DOWN?F80_KEY_DOWN:
+                key==F80_KEY_SHIFT_LEFT?F80_KEY_LEFT:F80_KEY_RIGHT;
+            handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+                                        .index=direction});
+            return;
+        }
         if(tracker.selecting && tracker.visual_selecting &&
            (key==F80_KEY_UP || key==F80_KEY_DOWN ||
             key==F80_KEY_LEFT || key==F80_KEY_RIGHT)) {
@@ -3231,22 +3349,6 @@ static void handle_key(int key) {
         }
         if((key==F80_KEY_UP || key==F80_KEY_DOWN) &&
            inline_table_vertical_key(key))return;
-        if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
-           key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
-            leave_follow();
-            if(!tracker.selecting) {
-                tracker.anchor_step=tracker.step;
-                tracker.anchor_channel=tracker.channel;
-                tracker.selecting=1;
-            }
-            if(key==F80_KEY_SHIFT_UP)tracker.step=clamp(tracker.step-1,0,tracker.song.pattern_rows-1);
-            else if(key==F80_KEY_SHIFT_DOWN)tracker.step=clamp(tracker.step+1,0,tracker.song.pattern_rows-1);
-            else if(key==F80_KEY_SHIFT_LEFT)tracker.channel=clamp(tracker.channel-1,0,TT_CHANNELS-1);
-            else tracker.channel=clamp(tracker.channel+1,0,TT_CHANNELS-1);
-            if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN)
-                tracker.reveal_cursor=1;
-            return;
-        }
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||

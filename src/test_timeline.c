@@ -172,23 +172,23 @@ int main(void) {
     tracker.field=2;
     handle_key('m');
     assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M);
-    handle_key(' ');handle_key('4');handle_key('2');
+    handle_key(9);handle_key('4');handle_key('2');
     assert(tracker.pattern.cell[0][1].value==0x42);
     handle_key(F80_KEY_DELETE);
     assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value==-1);
     tracker.playing=0;
-    handle_key(' ');
+    handle_key(9);
     assert(tracker.field==4 && tracker.channel==1 && !tracker.playing);
-    handle_key('m');handle_key(' ');handle_key('4');handle_key('2');
+    handle_key('m');handle_key(9);handle_key('4');handle_key('2');
     assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value2==0x42);
     handle_key(F80_KEY_DELETE);
     assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value2==-1);
-    handle_key(' ');
+    handle_key(9);
     assert(tracker.field==6 && tracker.channel==1 && !tracker.playing);
-    handle_key('p');handle_key(' ');handle_key('a');handle_key('f');
+    handle_key('p');handle_key(9);handle_key('a');handle_key('f');
     assert(tracker.pattern.cell[0][1].effect3==TT_EFFECT_P &&
            tracker.pattern.cell[0][1].value3==0xaf);
     tracker.field=6;handle_key(F80_KEY_DELETE);
@@ -424,7 +424,7 @@ int main(void) {
     TtCell *note_entry=&tracker.pattern.cell[0][1];
     assert(note_entry->note<0 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE);
-    handle_key('c');handle_key('-');handle_key('4');handle_key(' ');
+    handle_key('c');handle_key('-');handle_key('4');handle_key(9);
     assert(note_entry->note==60 && tracker.field==1 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE && note_entry->value<0);
     note_entry->instrument=1;
@@ -436,7 +436,7 @@ int main(void) {
     TtCell *effect_entry=&tracker.pattern.cell[0][2];
     handle_key('s');
     assert(effect_entry->effect==TT_EFFECT_S && effect_entry->value==-1);
-    handle_key(' ');handle_key('4');
+    handle_key(9);handle_key('4');
     assert(effect_entry->value==4);
     tracker.step=1;tracker.field=2;
     TtCell *register_input=&tracker.pattern.cell[1][2];
@@ -567,6 +567,46 @@ int main(void) {
            tracker.play_order==0 && tracker.active_order_index==0);
     tracker.order_list=NULL;
     tracker.focus=FOCUS_PHRASE;
+    tracker.inline_table_selected=0;
+    tracker.selecting=tracker.visual_selecting=0;
+    tracker.step=10;tracker.channel=0;tracker.field=0;
+    handle_key(9); /* Tab advances the grid edit cursor. */
+    assert(tracker.field==1 && tracker.channel==0);
+    handle_key(F80_KEY_BTAB);
+    assert(tracker.field==0 && tracker.channel==0);
+    handle_key(' '); /* Space no longer advances to another grid cell. */
+    assert(tracker.field==0 && tracker.channel==0);
+    handle_key(F80_KEY_SHIFT_DOWN); /* Shift+arrow is keyboard visual select. */
+    assert(tracker.visual_selecting && tracker.selecting && tracker.step==11);
+    handle_key(27);
+    assert(!tracker.visual_selecting && !tracker.selecting);
+    tracker.step=10;tracker.channel=0;tracker.field=0;
+    tracker.pattern.cell[10][0].note=48;
+    tracker.playing=0;
+    handle_key(13);
+    assert(tracker.grid_value_editing && !tracker.playing);
+    handle_key(F80_KEY_UP);handle_key(F80_KEY_RIGHT);
+    assert(tracker.pattern.cell[10][0].note==61 && !tracker.playing);
+    handle_key(F80_KEY_DOWN);handle_key(F80_KEY_LEFT);
+    assert(tracker.pattern.cell[10][0].note==48);
+    handle_key(13);
+    assert(!tracker.grid_value_editing && !tracker.playing);
+    tracker.field=1;tracker.pattern.cell[10][0].instrument=0x22;
+    handle_key(13);
+    handle_key(F80_KEY_UP);handle_key(F80_KEY_LEFT);
+    assert(tracker.pattern.cell[10][0].instrument==0x31);
+    handle_key(F80_KEY_DOWN);handle_key(F80_KEY_RIGHT);
+    assert(tracker.pattern.cell[10][0].instrument==0x22);
+    handle_key(13);
+    tracker.field=3;
+    tracker.pattern.cell[10][0].effect='M';
+    tracker.pattern.cell[10][0].value=0x20;
+    handle_key(13);
+    handle_key(F80_KEY_UP);handle_key(F80_KEY_RIGHT);
+    assert(tracker.pattern.cell[10][0].value==0x31);
+    handle_key(27);
+    assert(tracker.pattern.cell[10][0].value==-1 &&
+           !tracker.grid_value_editing && !tracker.playing);
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
     tracker.play_order=0;
