@@ -107,6 +107,23 @@ static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
 static F80Wrap manage_actions,slices_actions;
 static F80Widget *manage_buttons[6],*slices_buttons[6];
 static int status_columns=80;
+enum { TT_CONTROLLER_MAX_DEVICES=8 };
+static struct {
+    SDL_Gamepad *gamepad[TT_CONTROLLER_MAX_DEVICES];
+    SDL_JoystickID gamepad_instance[TT_CONTROLLER_MAX_DEVICES];
+    SDL_Joystick *joystick;
+    SDL_JoystickID joystick_instance;
+    int initialized;
+    unsigned char button_down[SDL_GAMEPAD_BUTTON_COUNT];
+    unsigned char trigger_down[2];
+    Uint64 repeat_at[SDL_GAMEPAD_BUTTON_COUNT];
+    Uint64 trigger_repeat_at[2];
+} controller_input;
+typedef enum {
+    TT_PAD_AFFIRMATIVE, TT_PAD_NEGATIVE, TT_PAD_FOCUS, TT_PAD_OPTION,
+    TT_PAD_TOP_LEFT, TT_PAD_TOP_RIGHT,
+    TT_PAD_BOTTOM_LEFT, TT_PAD_BOTTOM_RIGHT
+} TtPadAction;
 static void perspective_orders(F80Widget *,void *);
 static void perspective_instruments(F80Widget *,void *);
 static void perspective_main(F80Widget *,void *);
@@ -335,6 +352,9 @@ typedef enum {
     TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
     TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
+    TT_UI_CONTROLLER_TOOLBAR_ENTER, TT_UI_CONTROLLER_TOOLBAR_MOVE,
+    TT_UI_CONTROLLER_TOOLBAR_EXIT, TT_UI_CONTROLLER_STATUS_ENTER,
+    TT_UI_CONTROLLER_STATUS_MOVE, TT_UI_CONTROLLER_STATUS_EXIT,
     TT_UI_EXIT_REQUEST,
     TT_UI_EXIT_CONFIRM, TT_UI_EXIT_CANCEL
 } TtUiType;
@@ -592,6 +612,39 @@ static int handle_ui_event(TtUiEvent event) {
             "Grid value edit ended");
         tt_tracker_log_event("UI",tracker.grid_value_editing?
             "Grid value edit started":"Grid value edit ended");
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_TOOLBAR_ENTER) {
+        tracker.controller_toolbar_mode=1;
+        tracker.controller_status_mode=0;
+        tracker.controller_toolbar_index=clamp(event.a,0,4);
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_TOOLBAR_MOVE) {
+        if(!tracker.controller_toolbar_mode)return 0;
+        tracker.controller_toolbar_index=
+            (tracker.controller_toolbar_index+event.a+5)%5;
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_TOOLBAR_EXIT) {
+        if(!tracker.controller_toolbar_mode)return 0;
+        tracker.controller_toolbar_mode=0;
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_STATUS_ENTER) {
+        tracker.controller_status_mode=1;
+        tracker.controller_toolbar_mode=0;
+        tracker.controller_status_index=clamp(event.a,0,9);
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_STATUS_MOVE) {
+        if(!tracker.controller_status_mode)return 0;
+        tracker.controller_status_index=clamp(event.a,0,9);
+        return 1;
+    }
+    if(event.type==TT_UI_CONTROLLER_STATUS_EXIT) {
+        if(!tracker.controller_status_mode)return 0;
+        tracker.controller_status_mode=0;
         return 1;
     }
     int order=event.type==TT_UI_SELECT_ORDER?event.index:-1;
@@ -2570,6 +2623,67 @@ static const F80StatusItem *current_status(void) {
     if(tracker.status)tracker.status->status_count=kept+2;
     return perspective_status_visible;
 }
+static void controller_navigation_exit(void) {
+    if(tracker.controller_toolbar_mode)
+        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_EXIT});
+    if(tracker.controller_status_mode)
+        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_STATUS_EXIT});
+}
+static int controller_navigation_active(void) {
+    return tracker.controller_toolbar_mode || tracker.controller_status_mode;
+}
+static int controller_status_next_index(int start,int direction) {
+    const F80StatusItem *items=current_status();
+    int count=tracker.status?tracker.status->status_count:0;
+    if(count<1)return 0;
+    for(int offset=0;offset<count;++offset) {
+        int at=(start+direction*offset+count*2)%count;
+        if(items[at].action)return at;
+    }
+    return 0;
+}
+static void controller_navigation_activate(void) {
+    if(tracker.controller_toolbar_mode) {
+        F80Widget *buttons[]={tracker.play_button,tracker.stop_button,
+            tracker.follow_button,tracker.mode_button,tracker.pattern_lock_button};
+        F80Widget *button=buttons[tracker.controller_toolbar_index];
+        controller_navigation_exit();
+        if(button && button->action)button->action(button,button->user);
+    } else if(tracker.controller_status_mode) {
+        int index=tracker.controller_status_index;
+        const F80StatusItem *items=current_status();
+        F80Action action=index<tracker.status->status_count?
+            items[index].action:NULL;
+        controller_navigation_exit();
+        if(action)action(NULL,NULL);
+    }
+}
+static void controller_navigation_move(int status,int direction) {
+    if(status) {
+        if(tracker.controller_status_mode) {
+            int index=controller_status_next_index(
+                tracker.controller_status_index+direction,direction);
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_STATUS_MOVE,
+                                        .a=index});
+        } else {
+            controller_navigation_exit();
+            int count=tracker.status?tracker.status->status_count:0;
+            int index=controller_status_next_index(
+                direction>0?0:count-1,direction>0?1:-1);
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_STATUS_ENTER,
+                                        .a=index});
+        }
+    } else {
+        if(tracker.controller_toolbar_mode)
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_MOVE,
+                                        .a=direction});
+        else {
+            controller_navigation_exit();
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_ENTER,
+                                        .a=direction>0?0:4});
+        }
+    }
+}
 static void change_octave(int delta) {
     tracker.entry_octave=clamp(tracker.entry_octave+delta,0,8);
     tt_tracker_message("Keyboard entry octave changed");
@@ -3223,6 +3337,14 @@ static void handle_key(int key) {
         f80_key(&tracker.app,key);
         return;
     }
+    if(controller_navigation_active()) {
+        if(key==10 || key==13) {
+            controller_navigation_activate();
+            return;
+        }
+        if(key==27)controller_navigation_exit();
+        else controller_navigation_exit();
+    }
     if(tracker.focus==FOCUS_PHRASE && (key==10 || key==13)) {
         handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,
                                     .a=!tracker.grid_value_editing});
@@ -3436,8 +3558,280 @@ static void handle_key(int key) {
         else f80_key(&tracker.app,key);
     }
 }
+static void controller_grid_edit_set(int active) {
+    if(tracker.focus==FOCUS_PHRASE)
+        handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,
+                                    .a=active});
+}
+static void controller_action_input(TtPadAction action,int down) {
+    if(action==TT_PAD_AFFIRMATIVE) {
+        if(tracker.focus==FOCUS_PHRASE && !tracker.app.modal &&
+           !tracker.console_visible &&
+           !(tracker.app.menu && tracker.app.menu->menu_active) &&
+           !controller_navigation_active()) {
+            controller_grid_edit_set(down);
+            return;
+        }
+        if(!down)return;
+        if(controller_navigation_active()) {
+            controller_navigation_activate();
+        } else handle_key(13);
+        return;
+    }
+    if(!down)return;
+    if(action==TT_PAD_TOP_LEFT || action==TT_PAD_TOP_RIGHT) {
+        int direction=action==TT_PAD_TOP_RIGHT?1:-1;
+        if(tracker.grid_value_editing)
+            handle_key(action==TT_PAD_TOP_LEFT?F80_KEY_UP:F80_KEY_RIGHT);
+        else controller_navigation_move(0,direction);
+    } else if(action==TT_PAD_BOTTOM_LEFT || action==TT_PAD_BOTTOM_RIGHT) {
+        int direction=action==TT_PAD_BOTTOM_RIGHT?1:-1;
+        if(tracker.grid_value_editing)
+            handle_key(action==TT_PAD_BOTTOM_LEFT?F80_KEY_DOWN:F80_KEY_LEFT);
+        else controller_navigation_move(1,direction);
+    } else if(action==TT_PAD_NEGATIVE) {
+        controller_navigation_exit();handle_key(27);
+    } else if(action==TT_PAD_FOCUS) {
+        controller_navigation_exit();handle_key(22);
+    } else if(action==TT_PAD_OPTION) {
+        controller_navigation_exit();handle_key(9);
+    }
+}
+static TtPadAction controller_semantic_action(SDL_GamepadButton button) {
+    switch(button) {
+    case SDL_GAMEPAD_BUTTON_SOUTH:return TT_PAD_AFFIRMATIVE;
+    case SDL_GAMEPAD_BUTTON_EAST:return TT_PAD_NEGATIVE;
+    case SDL_GAMEPAD_BUTTON_WEST:return TT_PAD_FOCUS;
+    case SDL_GAMEPAD_BUTTON_NORTH:return TT_PAD_OPTION;
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:return TT_PAD_TOP_LEFT;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:return TT_PAD_TOP_RIGHT;
+    default:return (TtPadAction)-1;
+    }
+}
+static void controller_button_action(SDL_GamepadButton button) {
+    if(button==SDL_GAMEPAD_BUTTON_DPAD_UP ||
+       button==SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
+       button==SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
+       button==SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+        if(controller_navigation_active())controller_navigation_exit();
+        handle_key(button==SDL_GAMEPAD_BUTTON_DPAD_UP?F80_KEY_UP:
+            button==SDL_GAMEPAD_BUTTON_DPAD_DOWN?F80_KEY_DOWN:
+            button==SDL_GAMEPAD_BUTTON_DPAD_LEFT?F80_KEY_LEFT:F80_KEY_RIGHT);
+        return;
+    }
+    TtPadAction action=controller_semantic_action(button);
+    if((int)action>=0)controller_action_input(action,1);
+}
+static void controller_button_input(SDL_GamepadButton button,int down) {
+    if(button<0 || button>=SDL_GAMEPAD_BUTTON_COUNT)return;
+    int was_down=controller_input.button_down[button];
+    controller_input.button_down[button]=(unsigned char)!!down;
+    if(was_down==!!down)return;
+    if(down) {
+        controller_input.repeat_at[button]=SDL_GetTicks()+350;
+        controller_button_action(button);
+    } else {
+        controller_input.repeat_at[button]=0;
+        TtPadAction action=controller_semantic_action(button);
+        if((int)action>=0)controller_action_input(action,0);
+    }
+}
+static void controller_trigger_input(int right,int down) {
+    int index=right?1:0;
+    int was_down=controller_input.trigger_down[index];
+    controller_input.trigger_down[index]=(unsigned char)!!down;
+    if(was_down==!!down)return;
+    controller_input.trigger_repeat_at[index]=down?SDL_GetTicks()+350:0;
+    controller_action_input(right?TT_PAD_BOTTOM_RIGHT:TT_PAD_BOTTOM_LEFT,down);
+}
+static int controller_has_gamepad(SDL_JoystickID instance) {
+    for(int i=0;i<TT_CONTROLLER_MAX_DEVICES;++i)
+        if(controller_input.gamepad[i] &&
+           controller_input.gamepad_instance[i]==instance)return 1;
+    return 0;
+}
+static int controller_open_gamepad(SDL_JoystickID instance) {
+    if(controller_has_gamepad(instance))return 1;
+    for(int i=0;i<TT_CONTROLLER_MAX_DEVICES;++i)
+        if(!controller_input.gamepad[i]) {
+            SDL_Gamepad *gamepad=SDL_OpenGamepad(instance);
+            if(!gamepad)return 0;
+            controller_input.gamepad[i]=gamepad;
+            controller_input.gamepad_instance[i]=SDL_GetGamepadID(gamepad);
+            const char *name=SDL_GetGamepadName(gamepad);
+            char description[120];
+            snprintf(description,sizeof(description),"Gamepad connected: %.100s",
+                     name?name:"unknown");
+            tt_tracker_log_event("INPUT",description);
+            tt_tracker_message(description);
+            return 1;
+        }
+    return 0;
+}
+static void controller_clear_held_state(void) {
+    if(controller_input.button_down[SDL_GAMEPAD_BUTTON_SOUTH])
+        controller_grid_edit_set(0);
+    memset(controller_input.button_down,0,sizeof(controller_input.button_down));
+    memset(controller_input.trigger_down,0,sizeof(controller_input.trigger_down));
+    memset(controller_input.repeat_at,0,sizeof(controller_input.repeat_at));
+    memset(controller_input.trigger_repeat_at,0,
+           sizeof(controller_input.trigger_repeat_at));
+    controller_navigation_exit();
+}
+static int controller_open_joystick(SDL_JoystickID instance) {
+    if(controller_input.joystick || SDL_IsGamepad(instance))return 0;
+    SDL_Joystick *joystick=SDL_OpenJoystick(instance);
+    if(!joystick)return 0;
+    controller_input.joystick=joystick;
+    controller_input.joystick_instance=SDL_GetJoystickID(joystick);
+    const char *name=SDL_GetJoystickName(joystick);
+    char description[144];
+    snprintf(description,sizeof(description),
+             "Unmapped controller: %.100s (basic Xbox layout enabled)",
+             name?name:"unknown");
+    tt_tracker_log_event("INPUT",description);
+    tt_tracker_message(description);
+    return 1;
+}
+static void controller_raw_button(int index,int down) {
+    static const SDL_GamepadButton xbox_buttons[]={
+        SDL_GAMEPAD_BUTTON_SOUTH,SDL_GAMEPAD_BUTTON_EAST,
+        SDL_GAMEPAD_BUTTON_WEST,SDL_GAMEPAD_BUTTON_NORTH,
+        SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER};
+    if(index>=0 && index<(int)(sizeof(xbox_buttons)/sizeof(xbox_buttons[0])))
+        controller_button_input(xbox_buttons[index],down);
+}
+static void controller_raw_hat(Uint8 value) {
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_UP,
+                            (value&SDL_HAT_UP)!=0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+                            (value&SDL_HAT_DOWN)!=0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                            (value&SDL_HAT_LEFT)!=0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+                            (value&SDL_HAT_RIGHT)!=0);
+}
+static void controller_handle_event(const SDL_Event *event) {
+    if(!event)return;
+    if(event->type==SDL_EVENT_GAMEPAD_ADDED) {
+        controller_open_gamepad(event->gdevice.which);
+        return;
+    }
+    if(event->type==SDL_EVENT_GAMEPAD_REMOVED) {
+        for(int i=0;i<TT_CONTROLLER_MAX_DEVICES;++i)
+            if(controller_input.gamepad[i] &&
+               event->gdevice.which==controller_input.gamepad_instance[i]) {
+                SDL_CloseGamepad(controller_input.gamepad[i]);
+                controller_input.gamepad[i]=NULL;
+                controller_input.gamepad_instance[i]=0;
+                controller_clear_held_state();
+                break;
+            }
+        return;
+    }
+    if(event->type==SDL_EVENT_JOYSTICK_ADDED) {
+        controller_open_joystick(event->jdevice.which);
+        return;
+    }
+    if(event->type==SDL_EVENT_JOYSTICK_REMOVED) {
+        if(controller_input.joystick &&
+           event->jdevice.which==controller_input.joystick_instance) {
+            SDL_CloseJoystick(controller_input.joystick);
+            controller_input.joystick=NULL;
+            controller_input.joystick_instance=0;
+            controller_clear_held_state();
+        }
+        return;
+    }
+    if(event->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+       event->type==SDL_EVENT_GAMEPAD_BUTTON_UP) {
+        if(controller_has_gamepad(event->gbutton.which))
+            controller_button_input((SDL_GamepadButton)event->gbutton.button,
+                event->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+    } else if(event->type==SDL_EVENT_GAMEPAD_AXIS_MOTION &&
+              controller_has_gamepad(event->gaxis.which)) {
+        if(event->gaxis.axis==SDL_GAMEPAD_AXIS_LEFT_TRIGGER)
+            controller_trigger_input(0,event->gaxis.value>16000);
+        else if(event->gaxis.axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+            controller_trigger_input(1,event->gaxis.value>16000);
+    } else if(event->type==SDL_EVENT_JOYSTICK_BUTTON_DOWN ||
+              event->type==SDL_EVENT_JOYSTICK_BUTTON_UP) {
+        if(controller_input.joystick &&
+           event->jbutton.which==controller_input.joystick_instance)
+            controller_raw_button(event->jbutton.button,
+                event->type==SDL_EVENT_JOYSTICK_BUTTON_DOWN);
+    } else if(event->type==SDL_EVENT_JOYSTICK_HAT_MOTION &&
+              controller_input.joystick &&
+              event->jhat.which==controller_input.joystick_instance &&
+              event->jhat.hat==0) {
+        controller_raw_hat(event->jhat.value);
+    } else if(event->type==SDL_EVENT_JOYSTICK_AXIS_MOTION &&
+              controller_input.joystick &&
+              event->jaxis.which==controller_input.joystick_instance) {
+        if(event->jaxis.axis==4)
+            controller_trigger_input(0,event->jaxis.value>16000);
+        else if(event->jaxis.axis==5)
+            controller_trigger_input(1,event->jaxis.value>16000);
+    }
+}
+static void controller_open_connected(void) {
+    int count=0;
+    SDL_JoystickID *devices=SDL_GetGamepads(&count);
+    if(devices) {
+        for(int i=0;i<count;++i)controller_open_gamepad(devices[i]);
+        SDL_free(devices);
+    }
+    devices=SDL_GetJoysticks(&count);
+    if(devices) {
+        for(int i=0;i<count && !controller_input.joystick;++i)
+            controller_open_joystick(devices[i]);
+        SDL_free(devices);
+    }
+}
+static void controller_init(void) {
+    if(!SDL_InitSubSystem(SDL_INIT_GAMEPAD))return;
+    controller_input.initialized=1;
+    controller_open_connected();
+}
+static void controller_poll(void) {
+    if(!controller_input.initialized)return;
+    SDL_Event event;
+    while(SDL_PollEvent(&event))controller_handle_event(&event);
+    Uint64 now=SDL_GetTicks();
+    const SDL_GamepadButton repeat_buttons[]={
+        SDL_GAMEPAD_BUTTON_DPAD_UP,SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+        SDL_GAMEPAD_BUTTON_DPAD_LEFT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+        SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER};
+    for(size_t i=0;i<sizeof(repeat_buttons)/sizeof(repeat_buttons[0]);++i) {
+        SDL_GamepadButton button=repeat_buttons[i];
+        if(controller_input.button_down[button] &&
+           controller_input.repeat_at[button] &&
+           now>=controller_input.repeat_at[button]) {
+            controller_button_action(button);
+            controller_input.repeat_at[button]=now+110;
+        }
+    }
+    for(int side=0;side<2;++side)
+        if(controller_input.trigger_down[side] &&
+           controller_input.trigger_repeat_at[side] &&
+           now>=controller_input.trigger_repeat_at[side]) {
+            controller_action_input(side?TT_PAD_BOTTOM_RIGHT:
+                TT_PAD_BOTTOM_LEFT,1);
+            controller_input.trigger_repeat_at[side]=now+110;
+        }
+}
+static void controller_shutdown(void) {
+    controller_clear_held_state();
+    for(int i=0;i<TT_CONTROLLER_MAX_DEVICES;++i)
+        if(controller_input.gamepad[i])
+            SDL_CloseGamepad(controller_input.gamepad[i]);
+    if(controller_input.joystick)SDL_CloseJoystick(controller_input.joystick);
+    if(controller_input.initialized)SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    memset(&controller_input,0,sizeof(controller_input));
+}
 static void handle_mouse(int x,int y,int wheel) {
     if(wheel==3)return;
+    controller_navigation_exit();
     if(tracker.app.modal) {
         if(tracker.app.modal==tracker.table_dialog &&
            f80_wrap_mouse(&tracker.table_actions,x,y,wheel,
@@ -4038,6 +4432,7 @@ static int frame(void *user) {
 #ifndef __EMSCRIPTEN__
     native_poll_hold();
 #endif
+    controller_poll();
     tt_play_advance();
     if(tracker.leader_pending && SDL_GetTicks()>=tracker.leader_deadline)
         handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_TIMEOUT});
@@ -4243,6 +4638,14 @@ static int frame(void *user) {
             tracker.app.focus=tracker.manage_list;
     } else tracker.app.focus=tracker.focus==FOCUS_ORDER?tracker.order_list:
                tracker.focus==FOCUS_PHRASE?tracker.phrase_canvas:tracker.wave_canvas;
+    if(tracker.controller_toolbar_mode) {
+        F80Widget *buttons[]={tracker.play_button,tracker.stop_button,
+            tracker.follow_button,tracker.mode_button,tracker.pattern_lock_button};
+        tracker.app.focus=buttons[tracker.controller_toolbar_index];
+    } else if(tracker.controller_status_mode) {
+        tracker.status->selected=tracker.controller_status_index;
+        tracker.app.focus=tracker.status;
+    } else tracker.status->selected=-1;
     f80_draw_screen(&tracker.app);
 #ifdef __EMSCRIPTEN__
     if(!web_audio_lifecycle_installed) {
@@ -4463,8 +4866,10 @@ int main(int argc,char **argv) {
     tracker.console->window_role=F80_WINDOW_CONSOLE;
     tracker.console->visible=0;
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
+    controller_init();
     if(initial_play_requested())send_play(TT_PLAY_START,0,0);
     f80_curses_run(frame,NULL,30);
+    controller_shutdown();
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);
     fputs("\033[?1002l\033[?1006l",stdout);fflush(stdout);

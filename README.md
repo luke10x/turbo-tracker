@@ -212,20 +212,35 @@ waveform frame title shows the sample slot and display name.
 The grid shows cells as `C-4 01 SLC04`. Up/Down selects a row and Left/Right
 moves through note, instrument, effect, and value fields and into adjacent
 channels. On narrow screens, the grid scrolls by field. Type notes as `C-4` or
-`C#4`; after a complete note, Space advances through instrument, effect, and
-value fields (then to the next channel). Type `S` or `M` in the effect field to
+`C#4`; after a complete note, Tab advances through instrument, effect, and
+value fields (then to the next channel), and Shift+Tab moves back. Type `S` or `M` in the effect field to
 select `SLC` or `MVL`. The same field accepts register digits `0`–`9`, register
 letters `A`–`F`, and effect keys `G I J K M N O P R S T U V W X Y Z`; their
 current status and byte meanings are in
 [the effect status](docs/turbo-tracker-effect-status.md). The value stays `..`
 until entered in the value field. Type `$` then a hex digit for a register
-reference such as `$0`. F3/F4 change a selected value by 16, and
-F5/F6 by 1. Delete clears a field. Enter auditions the selected cell. Outside
-the pattern grid, Space controls playback. F9 opens the menu and F10 exits. Pattern F1/F2 select the
+reference such as `$0`. In grid value-edit mode, Up/Down change a note by an
+octave or a byte's high hex digit by `0x10`; Left/Right change a note by one
+semitone or a byte's low digit by one. Enter toggles this mode, and Esc clears
+the focused sub-cell and exits it. Shift+arrow extends visual selection; Esc
+clears the selection when value-edit mode is off. Outside the grid, Enter
+controls playback. F9 opens the menu and F10 exits. Pattern F1/F2 select the
 previous/next pattern. F3–F8 depend on the selected field: note controls
 octave, semitone, order, and clear; instrument controls sample, markers,
 management, load, and clear; effect controls type, MVL, SLC, repeat, and clear;
 value controls steps of 16 or 1, repeat, and clear.
+
+### Controller
+
+The controller uses the same actions as the keyboard: **Affirmative** is Sony
+Cross/Xbox A, **Negative** is Circle/B, **Focus** is Square/X, and **Option**
+is Triangle/Y. The D-pad moves the cursor. Hold Affirmative in the grid and
+use the D-pad or shoulder buttons to edit the focused value: Top Left/L1 and
+Bottom Left/L2 make major steps; Top Right/R1 and Bottom Right/R2 make minor
+steps. Outside the grid, Top Left/Top Right navigate the highlighted Play,
+Stop, Follow, Song/Pattern, and Lock controls; Affirmative activates the
+highlighted control. Bottom Left/Bottom Right navigate highlighted status-bar
+actions; Affirmative activates one. Negative exits those modes.
 
 ### Tables
 

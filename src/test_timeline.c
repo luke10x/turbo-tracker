@@ -607,6 +607,37 @@ int main(void) {
     handle_key(27);
     assert(tracker.pattern.cell[10][0].value==-1 &&
            !tracker.grid_value_editing && !tracker.playing);
+    memset(&controller_input,0,sizeof(controller_input));
+    tracker.field=0;tracker.pattern.cell[10][0].note=48;tracker.playing=1;
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_UP,1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
+    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==73 &&
+           tracker.playing);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
+    assert(!tracker.grid_value_editing && tracker.playing);
+    memset(&controller_input,0,sizeof(controller_input));
+    tracker.pattern.cell[10][0].note=48;
+    controller_raw_button(0,1); /* Unmapped Xbox fallback: A */
+    controller_raw_hat(SDL_HAT_UP);
+    controller_raw_button(4,1); /* LB */
+    controller_raw_button(5,1); /* RB */
+    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==73 &&
+           tracker.playing);
+    controller_raw_button(0,0);
+    controller_raw_hat(SDL_HAT_CENTERED);
+    memset(&controller_input,0,sizeof(controller_input));
+    F80Widget fake_controller_play={.action=count_header_click,.user=(void *)2};
+    tracker.play_button=&fake_controller_play;
+    header_clicks[2]=0;
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
+    assert(tracker.controller_toolbar_mode &&
+           tracker.controller_toolbar_index==0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
+    assert(!tracker.controller_toolbar_mode && header_clicks[2]==1);
+    tracker.play_button=NULL;
+    memset(&controller_input,0,sizeof(controller_input));
     toggle_follow(NULL,NULL);
     assert(tracker.follow==1);
     tracker.play_order=0;

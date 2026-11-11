@@ -792,8 +792,9 @@ static void draw_status(F80Widget *w) {
     F80Rect r=w->rect; f80_put(r.y,r.x,"",r.w,F80_COLOR_STATUS,0); int x=r.x;
     for(int i=0;i<w->status_count && x<r.x+r.w;++i) {
         const F80StatusItem *it=&w->status_items[i]; int key=(int)strlen(it->key), label=(int)strlen(it->label);
-        f80_put(r.y,x,it->key,key,16,1); x+=key;
-        f80_put(r.y,x,it->label,label,6,0); x+=label+1;
+        int selected=w->app && w->app->focus==w && w->selected==i;
+        f80_put(r.y,x,it->key,key,selected?18:16,1); x+=key;
+        f80_put(r.y,x,it->label,label,selected?18:6,0); x+=label+1;
     }
 }
 

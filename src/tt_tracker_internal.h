@@ -35,6 +35,8 @@ typedef struct {
     int focus,marker,zoom,view_start,step,channel,field,entry_octave,perspective;
     int leader_pending;
     Uint64 leader_deadline;
+    int controller_toolbar_mode,controller_toolbar_index;
+    int controller_status_mode,controller_status_index;
     int note_input_length;
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
