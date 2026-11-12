@@ -344,3 +344,49 @@ WAVs. This also works in the itch.io ZIP build.
 
 The older standalone slice CSV and single-pattern parsers remain in the source
 for compatibility tests; the File menu now loads and saves entire songs.
+
+## DX7 synth instruments
+
+Every channel can play either a sample or an MSFA DX7 instrument, and can switch
+between them on successive notes. Channels remain monophonic. Instrument numbers
+and table instrument references work for both types.
+
+Open Instruments (`; I`), then **New DX7** to add a synth without a WAV, or
+**Type: WAV/DX7** to switch the selected instrument. The existing eight-slot bank
+limit applies to samples and synths together. Switching types retains a sample
+asset when present; undo/redo restores instrument type and patch edits.
+
+The DX7 editor replaces sample/marker controls with global settings and six
+operator panels. Click a parameter or use arrows to select it; `+`/`-` changes
+its value. Page Up/Down and the mouse wheel scroll. Enter auditions C4, Space
+stops it, and the footer has clickable decrement/increment/audition/stop buttons.
+Patch edits (including output level and coarse ratio), imports into an existing
+DX7 instrument, and undo/redo update sounding voices and pending delayed notes
+using that instrument. Envelope progress, release state and oscillator/LFO phase
+are preserved. Sync switches apply at the next note-on. Updates take effect at
+the next synthesis block; audio already queued to the device still has its normal
+buffering latency. Operator mode supports ratio and fixed
+frequency; detune is displayed as -7..+7 and transpose as -24..+24. Algorithms
+use 0..31. Pitch and amplitude envelopes use four rates and four levels; the
+pitch envelope is an original DX7 feature. DX7 scaling curves are 0=-linear,
+1=-exponential, 2=+exponential, 3=+linear; breakpoint 0 is A-1 (MIDI 21).
+
+**Import .syx** accepts Yamaha single-voice and 32-voice-bank dumps, validating
+framing, checksum and parameter ranges before changing the instrument. Use
+**Bank voice -/+** to select 1..32 before importing a bank; import replaces the
+selected instrument's patch and name in one undoable edit. No external effects
+or third-party patch bank is bundled.
+
+Songs now save version 7 instrument tags and complete DX7 patches. Versions
+1..6 still load as sample instruments. Synths play through the normal channel
+mixer, with pan, volume, pitch modulation, glide and delayed triggers; sample
+slicing/time stretching applies only to sample instruments. Note-off releases
+the DX7 envelopes rather than cutting them. See `third_party/msfa/README.md` for
+engine provenance and the amplitude-modulation approximation.
+
+INIT VOICE holds a steady sine at full operator sustain until note-off. Synth
+output is calibrated so a single full-level carrier peaks at 0.5 before the
+channel mixer (about -15 dBFS per side when centered at full channel volume).
+Imported patch output levels are preserved.
+
+Native builds require a C++11 compiler in addition to the C toolchain.

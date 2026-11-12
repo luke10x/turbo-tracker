@@ -16,6 +16,7 @@
 #define ERR (-1)
 #define OK 0
 #define A_BOLD 0x100
+#define A_DIM 0x200
 #define COLOR_BLACK 0
 #define COLOR_RED 1
 #define COLOR_GREEN 2
@@ -58,6 +59,7 @@ typedef struct {
     int x;
     int color_pair;
     int bold;
+    int dim;
 } WINDOW;
 
 #ifdef __cplusplus
@@ -200,12 +202,14 @@ static void wasm_apply_style(const WINDOW *win) {
     int pair = win ? win->color_pair : 0;
     int fg = pair > 0 && pair < 128 ? wasm_pair_fg[pair] : COLOR_WHITE;
     int bg = pair > 0 && pair < 128 ? wasm_pair_bg[pair] : COLOR_BLACK;
+    const char *weight=win && win->bold?(win->dim?"1;2":"1"):
+                       win && win->dim?"2":"22";
     if(fg>=16)
-        snprintf(sequence,sizeof(sequence),"\033[%d;38;5;%d;%dm",
-                 win && win->bold ? 1 : 22,fg,40+bg);
+        snprintf(sequence,sizeof(sequence),"\033[%s;38;5;%d;%dm",
+                 weight,fg,40+bg);
     else
-        snprintf(sequence, sizeof(sequence), "\033[%d;%d;%dm",
-                 win && win->bold ? 1 : 22, fg==8?90:30+fg, 40 + bg);
+        snprintf(sequence, sizeof(sequence), "\033[%s;%d;%dm",
+                 weight, fg==8?90:30+fg, 40 + bg);
     wasm_puts(sequence);
 }
 
@@ -292,11 +296,13 @@ int wnoutrefresh(WINDOW *win) { (void)win; return OK; }
 int wrefresh(WINDOW *win) { (void)win; return OK; }
 int wattron(WINDOW *win, int attrs) {
     if (attrs & A_BOLD) win->bold = 1;
+    if (attrs & A_DIM) win->dim = 1;
     if ((attrs & 0xff) != 0) win->color_pair = attrs & 0xff;
     return OK;
 }
 int wattroff(WINDOW *win, int attrs) {
     if (attrs & A_BOLD) win->bold = 0;
+    if (attrs & A_DIM) win->dim = 0;
     if ((attrs & 0xff) != 0) win->color_pair = 0;
     return OK;
 }

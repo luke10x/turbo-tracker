@@ -200,7 +200,7 @@ int tt_song_save(const char *path,const TtSong *song,
     }
     FILE *file=fopen(path,"w");
     if(!file) { snprintf(error,error_size,"Cannot save song: %s",strerror(errno));return 0; }
-    fprintf(file,"F80_SAMPLE_SONG\t6\nBPM\t%d\nROWS\t%d\nBEAT_ROWS\t%d\nTICKS\t%d\nSAMPLES\t%d\n",
+    fprintf(file,"F80_SAMPLE_SONG\t7\nBPM\t%d\nROWS\t%d\nBEAT_ROWS\t%d\nTICKS\t%d\nSAMPLES\t%d\n",
             song->bpm,song->pattern_rows,song->rows_per_beat,
             song->ticks_per_row,sample_count);
     int valid=1;
@@ -213,6 +213,11 @@ int tt_song_save(const char *path,const TtSong *song,
         fprintf(file,"SAMPLE\t%d\t%s\t%s\t%s\t%d\t%d\t%d\n",
                 i,name,source,path_text,samples[i].frames,samples[i].rate,
                 samples[i].phrase.reference_note);
+        fprintf(file,"INSTRUMENT\t%d\t",samples[i].instrument_type);
+        for(int p=0;p<TT_DX7_BYTES;++p)fprintf(file,"%02X",samples[i].dx7.data[p]);
+        fputc('\n',file);
+        if(samples[i].instrument_type<0 || samples[i].instrument_type>TT_INSTRUMENT_DX7 ||
+           (samples[i].instrument_type==TT_INSTRUMENT_DX7 && !tt_dx7_valid(&samples[i].dx7)))valid=0;
         for(int marker=0;marker<TT_MARKERS;++marker)
             fprintf(file,"MARKER\t%d\t%d\t%d\n",i,marker,
                     samples[i].phrase.marker[marker]);
@@ -296,6 +301,7 @@ int tt_song_load(const char *path,TtSong *song,
     else if(!strcmp(field[1],"4"))version=4;
     else if(!strcmp(field[1],"5"))version=5;
     else if(!strcmp(field[1],"6"))version=6;
+    else if(!strcmp(field[1],"7"))version=7;
     else valid=0;
     next->pattern_rows=TT_STEPS;
     next->rows_per_beat=4;
@@ -318,9 +324,20 @@ int tt_song_load(const char *path,TtSong *song,
            !decode(field[2],s->name,sizeof(s->name)) || !s->name[0] ||
            !decode(field[3],s->source_name,sizeof(s->source_name)) || !s->source_name[0] ||
            !decode(field[4],s->path,sizeof(s->path)) || !s->path[0] ||
-           !integer(field[5],1,TT_MAX_FRAMES,&s->frames) ||
-           !integer(field[6],1,384000,&s->rate) ||
+           !integer(field[5],version>=7?0:1,TT_MAX_FRAMES,&s->frames) ||
+           !integer(field[6],version>=7?0:1,384000,&s->rate) ||
            !integer(field[7],0,127,&s->phrase.reference_note)) { valid=0;break; }
+        if(version>=7) {
+            if(!READ(3) || strcmp(field[0],"INSTRUMENT") ||
+               !integer(field[1],0,TT_INSTRUMENT_DX7,&s->instrument_type) ||
+               strlen(field[2])!=TT_DX7_BYTES*2){valid=0;break;}
+            for(int p=0;p<TT_DX7_BYTES;++p) {
+                int a=hex(field[2][p*2]),b=hex(field[2][p*2+1]);
+                if(a<0 || b<0){valid=0;break;}
+                s->dx7.data[p]=(uint8_t)((a<<4)|b);
+            }
+            if(s->instrument_type==TT_INSTRUMENT_DX7 && !tt_dx7_valid(&s->dx7))valid=0;
+        }
         s->phrase.bpm=next->bpm;
         for(int marker=0;marker<TT_MARKERS && valid;++marker) {
             if(!READ(4) || strcmp(field[0],"MARKER") ||

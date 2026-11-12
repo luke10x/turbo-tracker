@@ -120,6 +120,40 @@ int main(void) {
     assert(tt_audio_voice_active(0));
     tt_audio_note_off(0);
     tt_audio_render_song(256);
+    /* Synth/sample switching shares channels and exact delayed scheduling. */
+    TtWave synth={.instrument_type=TT_INSTRUMENT_DX7};tt_dx7_init(&synth.dx7);
+    tt_audio_note_off(0);tt_audio_note_off(1);
+    assert(tt_audio_play_channel_delayed(0,&synth,0,0,60,60,37));
+    tt_audio_render_song(37);assert(!tt_audio_voice_active(0));
+    tt_audio_render_song(1);assert(tt_audio_voice_active(0) && audio.voice[0].synth);
+    assert(tt_audio_play_channel(1,&pulse,0,1000,60,60));
+    assert(!audio.voice[1].synth && tt_audio_voice_active(1));
+    tt_audio_note_off(0);assert(tt_audio_voice_active(0)); /* release tail */
+    for(int i=0;i<1000 && tt_audio_voice_active(0);++i)tt_audio_render_song(512);
+    assert(!tt_audio_voice_active(0));
+    assert(tt_audio_play_channel(0,&synth,0,0,60,60));
+    assert(tt_audio_glide_to(0,72,60,64));
+    for(int i=0;i<20;++i)tt_audio_tick();
+    assert(fabs(tt_audio_increment(0)-2)<.001);
+    assert(tt_audio_play_channel(0,&pulse,0,1000,60,60));
+    assert(!audio.voice[0].synth && tt_audio_voice_pcm(0)==pulse.pcm);
+    assert(tt_audio_play_channel_delayed(0,&synth,0,0,60,60,100));
+    tt_audio_note_off(0);tt_audio_render_song(101);assert(!tt_audio_voice_active(0));
+    /* Two instruments can share identical patch bytes but edits follow slot
+       identity. Include two voices and a delayed note on the edited slot. */
+    assert(tt_audio_play_instrument_delayed(0,2,&synth,0,0,60,60,0));
+    assert(tt_audio_play_instrument_delayed(1,3,&synth,0,0,60,60,0));
+    assert(tt_audio_play_instrument_delayed(2,2,&synth,0,0,67,60,0));
+    assert(tt_audio_play_instrument_delayed(3,2,&synth,0,0,72,60,100));
+    TtDx7Patch edited=synth.dx7;edited.data[134]=17;
+    assert(tt_audio_update_dx7(2,&edited));
+    assert(audio.voice[0].patch.data[134]==17 && audio.voice[2].patch.data[134]==17);
+    assert(audio.voice[1].patch.data[134]==synth.dx7.data[134]);
+    assert(audio.delayed_voice[3].patch.data[134]==17 && audio.delayed_frames[3]==100);
+    edited.data[134]=32;assert(!tt_audio_update_dx7(2,&edited));
+    assert(!tt_audio_update_dx7(-1,&synth.dx7));
+    assert(audio.voice[0].patch.data[134]==17);
+    tt_audio_render_song(101);assert(audio.voice[3].patch.data[134]==17);
     tt_audio_end_song();
     assert(!audio.song_mode);
     tt_audio_stop();tt_audio_close();

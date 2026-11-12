@@ -2,6 +2,7 @@
 #define TT_SAMPLE_H
 
 #include <stddef.h>
+#include "tt_synth.h"
 
 enum { TT_MARKERS=16, TT_SLICES=15, TT_STEPS=16,
        TT_MAX_STEPS=256, TT_CHANNELS=6,
@@ -70,7 +71,11 @@ static inline int tt_effect_register_command(int command) {
 typedef struct { int command,value; } TtPatternEffect;
 
 typedef struct { float low,high; } TtPeak;
+/* Legacy wave asset container, now tagged: DX7 instruments need no PCM.
+   An optional retained sample allows reversible type switching. */
 typedef struct {
+    int instrument_type;
+    TtDx7Patch dx7;
     float *pcm;
     TtPeak *peaks;
     int frames,rate,peak_count;

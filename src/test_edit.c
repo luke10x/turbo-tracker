@@ -38,6 +38,21 @@ static int apply(TtEditEvent event) {
 }
 int main(void) {
     setup();
+    TtEditHistory *synth_history=tt_edit_history_new(&doc);assert(synth_history);
+    TtEditEvent synth={.type=TT_EDIT_INSTRUMENT_TYPE};
+    synth.instrument_type.index=0;synth.instrument_type.type=TT_INSTRUMENT_DX7;
+    assert(tt_edit_apply_recorded(synth_history,&doc,&synth));
+    assert(wave.instrument_type==TT_INSTRUMENT_DX7 && tt_dx7_valid(&wave.dx7));
+    synth=(TtEditEvent){.type=TT_EDIT_DX7_PARAMETER};
+    synth.dx7_parameter.index=0;synth.dx7_parameter.parameter=134;synth.dx7_parameter.value=31;
+    assert(tt_edit_apply_recorded(synth_history,&doc,&synth));
+    synth.dx7_parameter.value=32;assert(!tt_edit_apply_recorded(synth_history,&doc,&synth));
+    assert(wave.dx7.data[134]==31);
+    assert(tt_edit_undo(synth_history,&doc) && wave.dx7.data[134]==0);
+    assert(tt_edit_undo(synth_history,&doc) && wave.instrument_type==TT_INSTRUMENT_SAMPLE);
+    assert(tt_edit_redo(synth_history,&doc) && wave.instrument_type==TT_INSTRUMENT_DX7);
+    tt_edit_history_free(synth_history);
+    setup();
     TtEditEvent e={.type=TT_EDIT_CELL_SET};
     e.cell_set=(TtEditCellSet){2,1,{60,1,TT_EFFECT_S,0x12,
                                       TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1}};

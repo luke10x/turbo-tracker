@@ -9,7 +9,7 @@ enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { TT_PERSPECTIVE_MAIN, TT_PERSPECTIVE_ORDERS,
        TT_PERSPECTIVE_INSTRUMENTS };
-enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE };
+enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE, PATH_DX7 };
 enum { TT_HISTORY_MAX=8 };
 enum { SONG_LOOKAHEAD_FRAMES=16384, SONG_DISPLAY_ROWS=64 };
 typedef struct {
@@ -28,7 +28,8 @@ typedef struct {
     TtSong song;
     F80Widget *root,*header_gap,*console,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
-    F80Widget *instrument_panels;
+    F80Widget *instrument_selector_frame,*instrument_panels,*synth_canvas;
+    int synth_field,synth_scroll,sysex_voice;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
     F80Widget *pattern_lock_button;
     F80Widget *progress,*bpm_label,*details,*status;

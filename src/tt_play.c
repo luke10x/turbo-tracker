@@ -82,12 +82,15 @@ static void play_stop_now(F80Widget *button,void *user) {
     tt_tracker_message("Stopped");
 }
 
+static int instrument_index(const TtCell *cell) {
+    return cell->instrument==0?tracker.sample_index:cell->instrument-1;
+}
 static const TtWave *instrument_wave(const TtCell *cell, const TtPhrase **phrase) {
-    int index=cell->instrument==0?tracker.sample_index:cell->instrument-1;
+    int index=instrument_index(cell);
     if(index<0 || index>=tracker.sample_count)return NULL;
-    if(index==tracker.sample_index) { *phrase=&tracker.phrase;return tracker.wave.pcm?&tracker.wave:NULL; }
+    if(index==tracker.sample_index) { *phrase=&tracker.phrase;return (tracker.wave.pcm || tracker.wave.instrument_type==TT_INSTRUMENT_DX7)?&tracker.wave:NULL; }
     *phrase=&tracker.samples[index].phrase;
-    return tracker.samples[index].wave.pcm?&tracker.samples[index].wave:NULL;
+    return (tracker.samples[index].wave.pcm || tracker.samples[index].wave.instrument_type==TT_INSTRUMENT_DX7)?&tracker.samples[index].wave:NULL;
 }
 
 static TtCell cell_sample_selection(const TtCell *cell) {
@@ -109,8 +112,10 @@ static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
 }
 
 static void play_audition_cell_now(int step,int channel) {
-    int first,last;
+    int first=0,last=0;
     TtCell *cell=&tracker.pattern.cell[step][channel];
+    if(cell->note==TT_NOTE_OFF){tt_audio_note_off(0);return;}
+    if(cell->note<0)return;
     for(int slot=0;slot<3;++slot) {
         const TtPatternEffect *fx=tt_cell_effect_const(cell,slot);
         int reg=tt_effect_register_index(fx->command);
@@ -123,7 +128,7 @@ static void play_audition_cell_now(int step,int channel) {
     TtCell sample=cell_sample_selection(cell);
     const TtPhrase *phrase=NULL;
     const TtWave *wave=instrument_wave(cell,&phrase);
-    if(!wave || !tt_cell_range(phrase,&sample,wave->frames,&first,&last)) {
+    if(!wave || (wave->instrument_type!=TT_INSTRUMENT_DX7 && !tt_cell_range(phrase,&sample,wave->frames,&first,&last))) {
         tt_audio_stop();
         tt_tracker_message("Set a loaded instrument, note, and playable effect value first");
         return;
@@ -136,7 +141,8 @@ static void play_audition_cell_now(int step,int channel) {
         if(resolved.command==TT_EFFECT_G && resolved.value>0)glide=resolved.value;
     }
     int glided=glide>0 && tt_audio_glide_to(0,cell->note,base,glide);
-    if(!glided && !tt_audio_play(wave,first,last,cell->note,base)) {
+    if(!glided)tt_audio_stop();
+    if(!glided && !tt_audio_play_instrument_delayed(0,instrument_index(cell),wave,first,last,cell->note,base,0)) {
         tt_tracker_message("Audio unavailable: check the output device or browser permission");
         return;
     }
@@ -254,16 +260,16 @@ void tt_play_play_row(int row) {
         }
         if(table_started && resolved_cell.note>=0)continue;
         if(resolved_cell.note<0)continue;
-        int first,last;
+        int first=0,last=0;
         const TtPhrase *phrase=NULL;
         const TtWave *wave=instrument_wave(&resolved_cell,&phrase);
-        if(!wave || !tt_cell_range(phrase,&sample,wave->frames,&first,&last))continue;
+        if(!wave || (wave->instrument_type!=TT_INSTRUMENT_DX7 && !tt_cell_range(phrase,&sample,wave->frames,&first,&last)))continue;
         int base=cell_reference_note(phrase,&sample);
         int delay=udl>=0?udl_delay_frames(udl,0):0;
         if(glide>0 && (delay?
            tt_audio_glide_to_delayed(channel,resolved_cell.note,base,glide,delay):
            tt_audio_glide_to(channel,resolved_cell.note,base,glide)))continue;
-        if(!tt_audio_play_channel_delayed(channel,wave,first,last,resolved_cell.note,base,delay))
+        if(!tt_audio_play_instrument_delayed(channel,instrument_index(&resolved_cell),wave,first,last,resolved_cell.note,base,delay))
             tt_tracker_message("Audio unavailable: check the output device or browser permission");
     }
     if(tracker.rendering_song) {
@@ -291,13 +297,13 @@ static void table_play_note(int channel,const TtCell *cell,int glide_rate,
     if(resolved.note<0)return;
     const TtPhrase *phrase=NULL;
     const TtWave *wave=instrument_wave(&resolved,&phrase);
-    int first,last;
-    if(!wave || !tt_cell_range(phrase,&resolved,wave->frames,&first,&last))return;
+    int first=0,last=0;
+    if(!wave || (wave->instrument_type!=TT_INSTRUMENT_DX7 && !tt_cell_range(phrase,&resolved,wave->frames,&first,&last)))return;
     int base=cell_reference_note(phrase,&resolved);
     if(glide_rate>0 && (delay_frames?
        tt_audio_glide_to_delayed(channel,resolved.note,base,glide_rate,delay_frames):
        tt_audio_glide_to(channel,resolved.note,base,glide_rate)))return;
-    tt_audio_play_channel_delayed(channel,wave,first,last,resolved.note,base,delay_frames);
+    tt_audio_play_instrument_delayed(channel,instrument_index(&resolved),wave,first,last,resolved.note,base,delay_frames);
 }
 
 void tt_play_table_ticks(void) {
@@ -386,7 +392,11 @@ void tt_play_table_ticks(void) {
 
 static void play_audition_now(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(tracker.focus==FOCUS_WAVE) {
+    if(tracker.focus==FOCUS_WAVE && tracker.wave.instrument_type==TT_INSTRUMENT_DX7) {
+        tt_audio_stop();
+        if(!tt_audio_play_instrument_delayed(0,tracker.sample_index,&tracker.wave,0,0,60,60,0))tt_tracker_message("Audio unavailable");
+        else tt_tracker_message("Audition DX7 C4; Stop ends audition");
+    } else if(tracker.focus==FOCUS_WAVE) {
         int marker=tracker.marker;
         int first=tracker.phrase.marker[marker];
         int last=marker<15?tracker.phrase.marker[marker+1]:tracker.wave.frames;
@@ -562,6 +572,7 @@ int tt_play_emit(TtPlayEvent event) {
     play_queue[play_queue_count++]=event;
     const char *name="playback";
     switch(event.type) {
+    case TT_PLAY_DX7_PATCH_UPDATE:name="live DX7 patch update";break;
     case TT_PLAY_START:name="start";break;
     case TT_PLAY_STOP:name="stop";break;
     case TT_PLAY_TOGGLE:name="pause/resume";break;
@@ -591,6 +602,8 @@ int tt_play_emit(TtPlayEvent event) {
         snprintf(detail,sizeof(detail),"order %02X pattern %02X started",event.c,event.b);
     else if(event.type==TT_PLAY_ROW_PLAYED)
         snprintf(detail,sizeof(detail),"pattern %02X loop started",event.b);
+    else if(event.type==TT_PLAY_DX7_PATCH_UPDATE)
+        snprintf(detail,sizeof(detail),"%s instrument %02X",name,event.dx7_patch.instrument+1);
     else if(event.type==TT_PLAY_AUDITION_CELL)
         snprintf(detail,sizeof(detail),"%s row %02X ch %d",name,event.a,event.b+1);
     else if(event.type==TT_PLAY_SELECT_ORDER)
@@ -767,6 +780,9 @@ void tt_play_flush(void) {
         }
         case TT_PLAY_CLEAR_ORDER_RANGE:
             tracker.order_range_active=0;
+            break;
+        case TT_PLAY_DX7_PATCH_UPDATE:
+            tt_audio_update_dx7(event.dx7_patch.instrument,&event.dx7_patch.patch);
             break;
         case TT_PLAY_AUDITION:play_audition_now(NULL,NULL);break;
         case TT_PLAY_AUDITION_CELL:play_audition_cell_now(event.a,event.b);break;

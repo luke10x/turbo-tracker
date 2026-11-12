@@ -84,6 +84,7 @@ int main(void) {
     char record[4096];assert(fgets(record,sizeof(record),modern));
     assert(fputs("F80_SAMPLE_SONG\t1\n",legacy)>=0);
     while(fgets(record,sizeof(record),modern)) {
+        if(!strncmp(record,"INSTRUMENT\t",11))continue;
         if(!strncmp(record,"TABLES\t",7))break;
         if(!strncmp(record,"ROWS\t",5) || !strncmp(record,"BEAT_ROWS\t",10) ||
            !strncmp(record,"TICKS\t",6))continue;
@@ -103,6 +104,7 @@ int main(void) {
     assert(fgets(record,sizeof(record),modern));
     assert(fputs("F80_SAMPLE_SONG\t2\n",v2)>=0);
     while(fgets(record,sizeof(record),modern)) {
+        if(!strncmp(record,"INSTRUMENT\t",11))continue;
         if(!strncmp(record,"ROWS\t",5) || !strncmp(record,"BEAT_ROWS\t",10) ||
            !strncmp(record,"TICKS\t",6))continue;
         char *fx=strstr(record,"\tRC0");if(fx)fx[1]='~';
@@ -126,6 +128,7 @@ int main(void) {
     assert(fgets(record,sizeof(record),modern));
     assert(fputs("F80_SAMPLE_SONG\t4\n",v4)>=0);
     while(fgets(record,sizeof(record),modern)) {
+        if(!strncmp(record,"INSTRUMENT\t",11))continue;
         char *fx=strstr(record,"\tRC0");if(fx)fx[1]='~';
         fx=strstr(record,"\tr02");if(fx)fx[1]='R';
         strip_order_activity(record);

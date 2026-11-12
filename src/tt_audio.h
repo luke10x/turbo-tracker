@@ -18,6 +18,9 @@ int tt_audio_play_channel(int channel,const TtWave *wave,int start,int end,
                               int note,int reference_note);
 int tt_audio_play_channel_delayed(int channel,const TtWave *wave,int start,int end,
                                   int note,int reference_note,int delay_frames);
+int tt_audio_play_instrument_delayed(int channel,int instrument,const TtWave *wave,
+    int start,int end,int note,int reference_note,int delay_frames);
+int tt_audio_update_dx7(int instrument,const TtDx7Patch *patch);
 void tt_audio_cancel_delayed(int channel);
 int tt_audio_glide_to_delayed(int channel,int note,int reference_note,int rate,
                               int delay_frames);

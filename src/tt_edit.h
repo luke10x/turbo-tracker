@@ -64,6 +64,10 @@ typedef enum {
     TT_EDIT_PATTERN_SELECT,
     TT_EDIT_PATTERN_SYNC,
     TT_EDIT_PATTERN_EFFECTS_COMPACT,
+    TT_EDIT_INSTRUMENT_TYPE,
+    TT_EDIT_DX7_PARAMETER,
+    TT_EDIT_DX7_IMPORT,
+    TT_EDIT_DX7_APPEND,
     TT_EDIT_COUNT
 } TtEditType;
 
@@ -158,6 +162,9 @@ typedef struct {
         TtEditTableTicksBulk table_ticks;
         TtEditTable table;
         TtEditSample sample;
+        struct { int index,type; } instrument_type;
+        struct { int index,parameter,value; } dx7_parameter;
+        struct { int index; TtDx7Patch patch; } dx7_import;
         TtEditMarker marker;
         TtEditSlice slice;
         TtEditLoadedWave loaded_wave;
@@ -178,6 +185,8 @@ int tt_edit_apply_recorded(TtEditHistory *history,TtEditDoc *doc,
                            const TtEditEvent *event);
 int tt_edit_undo(TtEditHistory *history,TtEditDoc *doc);
 int tt_edit_redo(TtEditHistory *history,TtEditDoc *doc);
+/* Instrument index for a patch-only undo/redo, or -1 for other edits. */
+int tt_edit_history_dx7_patch(const TtEditHistory *history,int redo);
 int tt_edit_can_undo(const TtEditHistory *history);
 int tt_edit_can_redo(const TtEditHistory *history);
 

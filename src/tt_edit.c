@@ -429,6 +429,7 @@ static int apply_sample_recover(TtEditDoc *doc,const TtEditLoadedWave *e) {
     }
     snprintf(e->wave->name,sizeof(e->wave->name),"%s",wave->name);
     snprintf(e->wave->source_name,sizeof(e->wave->source_name),"%s",wave->source_name);
+    e->wave->instrument_type=wave->instrument_type;e->wave->dx7=wave->dx7;
     *wave=*e->wave;
     memset(e->wave,0,sizeof(*e->wave));
     char *path=e->index==*doc->sample_index?
@@ -464,6 +465,48 @@ static int apply_document_replace(TtEditDoc *doc,const TtEditDocumentReplace *e)
 int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
     if(!doc || !event || !doc->active || !doc->song)return 0;
     switch(event->type) {
+    case TT_EDIT_INSTRUMENT_TYPE: {
+        int index=event->instrument_type.index,type=event->instrument_type.type;
+        if(!sample_ok(doc,index) || (type!=TT_INSTRUMENT_SAMPLE && type!=TT_INSTRUMENT_DX7))return 0;
+        TtWave *w=sample_wave(doc,index);
+        if(type==TT_INSTRUMENT_DX7 && !tt_dx7_valid(&w->dx7))tt_dx7_init(&w->dx7);
+        w->instrument_type=type;return 1;
+    }
+    case TT_EDIT_DX7_PARAMETER: {
+        int index=event->dx7_parameter.index,p=event->dx7_parameter.parameter,v=event->dx7_parameter.value;
+        if(!sample_ok(doc,index) || p<0 || p>=TT_DX7_PARAMETERS || v<0 || v>tt_dx7_max(p)) {
+            reject(doc,"DX7 parameter out of range");return 0;
+        }
+        TtWave *w=sample_wave(doc,index);
+        if(w->instrument_type!=TT_INSTRUMENT_DX7){reject(doc,"Select a DX7 instrument");return 0;}
+        w->dx7.data[p]=(uint8_t)v;return 1;
+    }
+    case TT_EDIT_DX7_APPEND: {
+        if(!doc->sample_count || !doc->sample_index || !doc->samples ||
+           !doc->active_wave || !doc->active_phrase || !doc->active_loaded_path ||
+           !doc->active_csv_path || *doc->sample_count>=TT_SONG_SAMPLES) {
+            reject(doc,"Instrument bank full");return 0;
+        }
+        store_active_sample(doc);
+        *doc->sample_index=(*doc->sample_count)++;
+        memset(doc->active_wave,0,sizeof(*doc->active_wave));
+        doc->active_wave->instrument_type=TT_INSTRUMENT_DX7;
+        tt_dx7_init(&doc->active_wave->dx7);
+        snprintf(doc->active_wave->name,256,"INIT VOICE");
+        snprintf(doc->active_wave->source_name,256,"DX7");
+        tt_phrase_init(doc->active_phrase,0);
+        snprintf(doc->active_loaded_path,512,"builtin:dx7");doc->active_csv_path[0]=0;
+        return 1;
+    }
+    case TT_EDIT_DX7_IMPORT: {
+        int index=event->dx7_import.index;
+        if(!sample_ok(doc,index) || !tt_dx7_valid(&event->dx7_import.patch)) {
+            reject(doc,"Invalid DX7 patch");return 0;
+        }
+        TtWave *w=sample_wave(doc,index);
+        w->instrument_type=TT_INSTRUMENT_DX7;w->dx7=event->dx7_import.patch;
+        snprintf(w->name,sizeof(w->name),"%.10s",w->dx7.data+145);return 1;
+    }
     case TT_EDIT_CELL_SET:
         return apply_cell_set(doc,&event->cell_set);
     case TT_EDIT_CELLS_BULK:
@@ -539,7 +582,7 @@ typedef struct {
     TtStored samples[TT_SONG_SAMPLES];
     TtWave wave;
     TtPhrase phrase;
-    int active_index,sample_count,sample_index,restore_song_path;
+    int active_index,sample_count,sample_index,restore_song_path,dx7_patch_index;
     char loaded_path[512],csv_path[256],song_path[512];
 } TtEditSnapshot;
 struct TtEditHistory {
@@ -560,7 +603,7 @@ static TtEditSnapshot *snapshot_new(const TtEditDoc *doc) {
     s->wave=*doc->active_wave;s->phrase=*doc->active_phrase;
     s->active_index=*doc->active_index;
     s->sample_count=*doc->sample_count;s->sample_index=*doc->sample_index;
-    s->restore_song_path=0;
+    s->restore_song_path=0;s->dx7_patch_index=-1;
     snprintf(s->loaded_path,sizeof(s->loaded_path),"%s",doc->active_loaded_path);
     snprintf(s->csv_path,sizeof(s->csv_path),"%s",doc->active_csv_path);
     snprintf(s->song_path,sizeof(s->song_path),"%s",doc->song_path?doc->song_path:"");
@@ -669,6 +712,10 @@ int tt_edit_apply_recorded(TtEditHistory *history,TtEditDoc *doc,
         before=snapshot_new(doc);
         if(!before) { reject(doc,"Undo history unavailable");return 0; }
         before->restore_song_path=event->type==TT_EDIT_DOCUMENT_REPLACE;
+        if(event->type==TT_EDIT_DX7_PARAMETER)before->dx7_patch_index=event->dx7_parameter.index;
+        if(event->type==TT_EDIT_DX7_IMPORT && sample_ok(doc,event->dx7_import.index) &&
+           sample_wave(doc,event->dx7_import.index)->instrument_type==TT_INSTRUMENT_DX7)
+            before->dx7_patch_index=event->dx7_import.index;
     }
     if(!assets_reserve(history,TT_SONG_SAMPLES)) {
         free(before);reject(doc,"Undo history unavailable");return 0;
@@ -686,6 +733,11 @@ int tt_edit_apply_recorded(TtEditHistory *history,TtEditDoc *doc,
     assets_collect(history,doc);
     return 1;
 }
+int tt_edit_history_dx7_patch(const TtEditHistory *history,int redo) {
+    if(!history)return -1;
+    int n=redo?history->redo_count:history->undo_count;
+    return n?(redo?history->redo[n-1]:history->undo[n-1])->dx7_patch_index:-1;
+}
 int tt_edit_can_undo(const TtEditHistory *history) {
     return history && history->undo_count>0;
 }
@@ -702,6 +754,7 @@ static int history_step(TtEditHistory *history,TtEditDoc *doc,int redo) {
     int *source_count=redo?&history->redo_count:&history->undo_count;
     TtEditSnapshot *prior=source[--*source_count];
     current->restore_song_path=prior->restore_song_path;
+    current->dx7_patch_index=prior->dx7_patch_index;
     stack_push(redo?history->undo:history->redo,
                redo?&history->undo_count:&history->redo_count,current);
     snapshot_restore(doc,prior);

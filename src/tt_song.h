@@ -34,6 +34,8 @@ typedef struct {
 typedef struct {
     char name[256],source_name[256],path[512];
     int frames,rate;
+    int instrument_type;
+    TtDx7Patch dx7;
     TtPhrase phrase;
 } TtSongSample;
 

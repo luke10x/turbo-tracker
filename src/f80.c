@@ -150,7 +150,7 @@ F80Widget *f80_button(const char *text, F80Action action, void *user) {
 }
 F80Widget *f80_listbox(const char **items, int count, F80Action action, void *user) {
     F80Widget *w = f80_widget(F80_LISTBOX);
-    if (w) { w->items = items; w->item_count = count; w->action = action; w->user = user; w->focusable = 1; }
+    if (w) { w->items = items; w->item_count = count; w->action = action; w->user = user; w->focusable = 1; w->window_role=F80_WINDOW_CYAN; }
     return w;
 }
 F80Widget *f80_radio_group(const char **items,int count,int selected,F80Action action,void *user) {
@@ -518,6 +518,15 @@ void f80_colors(void) {
 #endif
     init_pair(F80_PAIR_RANGE_CURSOR,COLOR_BLUE,COLOR_YELLOW);
     init_pair(F80_PAIR_BUTTON_SELECTED,COLOR_BLACK,COLOR_YELLOW);
+    init_pair(F80_PAIR_LIST_SELECTED,COLOR_CYAN,COLOR_BLACK);
+#ifdef __EMSCRIPTEN__
+    init_pair(F80_PAIR_LIST_INACTIVE,8,COLOR_CYAN);
+    init_pair(F80_PAIR_LIST_INACTIVE_SELECTED,8,COLOR_WHITE);
+#else
+    init_pair(F80_PAIR_LIST_INACTIVE,COLORS>8?8:COLOR_WHITE,COLOR_CYAN);
+    init_pair(F80_PAIR_LIST_INACTIVE_SELECTED,COLORS>8?8:COLOR_WHITE,
+              COLOR_WHITE);
+#endif
 }
 void f80_put(int y, int x, const char *text, int width, int pair, int bold) {
     if(!text || width<=0 || y<0 || x<0)return;
@@ -546,7 +555,10 @@ void f80_put(int y, int x, const char *text, int width, int pair, int bold) {
     }
     buffer[bytes]='\0';
 #endif
-    int attr=COLOR_PAIR(paint_widget?f80_palette_pair(paint_widget,pair):pair)|(bold?A_BOLD:0);
+    int attr=COLOR_PAIR(paint_widget?f80_palette_pair(paint_widget,pair):pair)|
+             (bold?A_BOLD:0);
+    if(pair==F80_PAIR_LIST_INACTIVE ||
+       pair==F80_PAIR_LIST_INACTIVE_SELECTED)attr|=A_DIM;
     wattron(stdscr,attr); mvwprintw(stdscr,y,x,"%s",buffer); wattroff(stdscr,attr);
 }
 void f80_fill(F80Rect r, int pair) { for(int y=r.y;y<r.y+r.h;++y) f80_put(y,r.x,"",r.w,pair,0); }
@@ -1059,7 +1071,13 @@ int f80_listbox_row_pair(const F80Widget *w,int row) {
     if(ranged && row==w->cursor && w->range_cursor_pair)
         return w->range_cursor_pair;
     if(ranged)return 65;
-    return w && w->kind==F80_LISTBOX && row==w->cursor?3:2;
+    if(w && w->kind==F80_LISTBOX) {
+        int focused=w->app && w->app->focus==w;
+        if(row==w->cursor)
+            return focused?F80_PAIR_LIST_SELECTED:F80_PAIR_LIST_INACTIVE_SELECTED;
+        if(!focused)return F80_PAIR_LIST_INACTIVE;
+    }
+    return 2;
 }
 
 void f80_draw(F80Widget *w) {
@@ -1076,7 +1094,8 @@ void f80_draw(F80Widget *w) {
             f80_frame(r,w->title,w->style==15?15:w->style==7?7:active?2:1);
             if(w->title && w->style!=15 && w->style!=7 && r.w>6) {
                 int len=(int)strlen(w->title); if(len>r.w-6)len=r.w-6;
-                f80_put(r.y,r.x+(r.w-len-4)/2+2,w->title,len,active?4:2,1);
+                int title_pair=w->title_style?w->title_style:active?4:2;
+                f80_put(r.y,r.x+(r.w-len-4)/2+2,w->title,len,title_pair,1);
             }
         }
         break;
@@ -1432,6 +1451,11 @@ static F80Widget *hit(F80Widget *w,int x,int y) {
     if(!w || !w->visible || !f80_contains(w->rect,x,y))return NULL;
     for(size_t i=w->child_count;i>0;--i) { F80Widget *c=hit(w->children[i-1],x,y); if(c)return c; }
     return w;
+}
+int f80_mouse_over_list(F80App *app,int x,int y) {
+    if(!app)return 0;
+    F80Widget *w=hit(app->modal?app->modal:app->root,x,y);
+    return w && (w->kind==F80_LISTBOX || w->kind==F80_TABLE);
 }
 int f80_mouse(F80App *app,int x,int y,int wheel) {
     F80Widget *menu=app->menu;

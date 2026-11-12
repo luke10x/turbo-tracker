@@ -16,6 +16,8 @@ typedef enum { F80_WINDOW_INHERIT, F80_WINDOW_BLUE, F80_WINDOW_CYAN,
 enum { F80_PALETTE_SLOTS = 31 };
 enum { F80_PAIR_RANGE_CURSOR = 67 }; /* blue foreground on yellow selection */
 enum { F80_PAIR_BUTTON_SELECTED = 68 }; /* black foreground on yellow selection */
+enum { F80_PAIR_LIST_SELECTED = 69, F80_PAIR_LIST_INACTIVE = 70,
+       F80_PAIR_LIST_INACTIVE_SELECTED = 71 };
 typedef enum {
     F80_COLOR_PANEL=1, F80_COLOR_TEXT, F80_COLOR_SELECTION,
     F80_COLOR_HIGHLIGHT, F80_COLOR_BUTTON, F80_COLOR_STATUS,
@@ -71,6 +73,7 @@ struct F80Widget {
     F80WindowRole window_role;
     F80Palette palette; /* zero entries inherit from the window/app palette */
     const char *title, *text;
+    int title_style; /* optional semantic color slot for a framed box title */
     const char **items;
     int item_count, cursor, scroll;
     int scroll_detached; /* allow list viewport to move without moving its cursor */
@@ -177,6 +180,7 @@ void f80_draw_screen(F80App *app);
 void f80_focus_next(F80App *app, int step);
 int f80_key(F80App *app, int key);
 int f80_mouse(F80App *app, int x, int y, int wheel);
+int f80_mouse_over_list(F80App *app, int x, int y);
 void f80_put(int y, int x, const char *text, int width, int pair, int bold);
 void f80_fill(F80Rect rect, int pair);
 void f80_frame(F80Rect rect, const char *title, int pair);

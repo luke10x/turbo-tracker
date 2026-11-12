@@ -1,5 +1,6 @@
 #ifndef TT_PLAY_H
 #define TT_PLAY_H
+#include "tt_synth.h"
 
 typedef enum {
     TT_PLAY_START, TT_PLAY_STOP, TT_PLAY_TOGGLE,
@@ -11,12 +12,14 @@ typedef enum {
     TT_PLAY_CLEAR_ORDER_RANGE, TT_PLAY_AUDIO_RECOVER,
     TT_PLAY_PATTERN_JUMP, TT_PLAY_ROW_JUMP, TT_PLAY_SET_TICKS_PER_ROW,
     TT_PLAY_SET_BPM, TT_PLAY_SET_EFFECT_REGISTER,
+    TT_PLAY_DX7_PATCH_UPDATE,
     TT_PLAY_APPLY_PENDING_FLOW
 } TtPlayType;
 
 typedef struct {
     TtPlayType type;
     int a,b,c;
+    struct { int instrument; TtDx7Patch patch; } dx7_patch;
 } TtPlayEvent;
 
 /* Events are consumed by the playback scheduler. UI callers can flush before
