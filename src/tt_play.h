@@ -1,6 +1,7 @@
 #ifndef TT_PLAY_H
 #define TT_PLAY_H
 #include "tt_synth.h"
+#include "tt_sample.h"
 
 typedef enum {
     TT_PLAY_START, TT_PLAY_STOP, TT_PLAY_TOGGLE,
@@ -28,6 +29,7 @@ int tt_play_emit(TtPlayEvent event);
 void tt_play_flush(void);
 void tt_play_advance(void);
 void tt_play_play_row(int row);
+int tt_play_cell_reference_note(const TtPhrase *phrase,const TtCell *cell);
 void tt_play_table_ticks(void);
 int tt_play_next_tick_frames(int divisor);
 

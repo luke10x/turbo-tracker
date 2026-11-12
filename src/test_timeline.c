@@ -308,6 +308,15 @@ int main(void) {
            tracker.song.pattern[0].cell[50][0].value==0xfd &&
            tracker.song.pattern[0].cell[55][0].value==0xed &&
            tracker.song.pattern[0].cell[59][0].value==0x10);
+    TtCell full_break=tracker.song.pattern[0].cell[15][0];
+    assert(full_break.effect==TT_EFFECT_S && full_break.value==0x0f);
+    tracker.phrase.slice_note_offset[0]=-24; /* tone detection result */
+    assert(
+           tt_play_cell_reference_note(&tracker.phrase,&full_break)==
+               tracker.phrase.reference_note);
+    TtCell detected_slice=full_break;detected_slice.value=0x01;
+    assert(tt_play_cell_reference_note(&tracker.phrase,&detected_slice)==
+           tt_slice_base_note(&tracker.phrase,0));
     assert(setenv("INIT_SONG","examples/tbl-arpeggio/tbl-arpeggio.song",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[0].note==60 &&

@@ -105,8 +105,11 @@ static TtCell cell_sample_selection(const TtCell *cell) {
     return selected;
 }
 
-static int cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
+int tt_play_cell_reference_note(const TtPhrase *phrase,const TtCell *cell) {
     if(cell->effect!=TT_EFFECT_S || cell->value<0)return phrase->reference_note;
+    /* SLC0F spans the whole sample. Its pitch is anchored to the sample
+       reference note, not the detected pitch of its first transient slice. */
+    if(cell->value==0x0f)return phrase->reference_note;
     int slice=cell->value>>4;
     return slice<15?tt_slice_base_note(phrase,slice):phrase->reference_note;
 }
@@ -133,7 +136,7 @@ static void play_audition_cell_now(int step,int channel) {
         tt_tracker_message("Set a loaded instrument, note, and playable effect value first");
         return;
     }
-    int base=cell_reference_note(phrase,&sample),glide=0;
+    int base=tt_play_cell_reference_note(phrase,&sample),glide=0;
     for(int slot=0;slot<3;++slot) {
         TtPatternEffect resolved=*tt_cell_effect_const(cell,slot);
         if(tt_effect_register_command(resolved.command))continue;
@@ -264,7 +267,7 @@ void tt_play_play_row(int row) {
         const TtPhrase *phrase=NULL;
         const TtWave *wave=instrument_wave(&resolved_cell,&phrase);
         if(!wave || (wave->instrument_type!=TT_INSTRUMENT_DX7 && !tt_cell_range(phrase,&sample,wave->frames,&first,&last)))continue;
-        int base=cell_reference_note(phrase,&sample);
+        int base=tt_play_cell_reference_note(phrase,&sample);
         int delay=udl>=0?udl_delay_frames(udl,0):0;
         if(glide>0 && (delay?
            tt_audio_glide_to_delayed(channel,resolved_cell.note,base,glide,delay):
@@ -299,7 +302,7 @@ static void table_play_note(int channel,const TtCell *cell,int glide_rate,
     const TtWave *wave=instrument_wave(&resolved,&phrase);
     int first=0,last=0;
     if(!wave || (wave->instrument_type!=TT_INSTRUMENT_DX7 && !tt_cell_range(phrase,&resolved,wave->frames,&first,&last)))return;
-    int base=cell_reference_note(phrase,&resolved);
+    int base=tt_play_cell_reference_note(phrase,&resolved);
     if(glide_rate>0 && (delay_frames?
        tt_audio_glide_to_delayed(channel,resolved.note,base,glide_rate,delay_frames):
        tt_audio_glide_to(channel,resolved.note,base,glide_rate)))return;
