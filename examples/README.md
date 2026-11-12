@@ -9,7 +9,7 @@ use a parent titled `Effect name (CODE)` and nest the demonstrations below it.
 Sort the effect parents alphabetically by effect code. For a single example,
 the leaf itself may carry that title.
 
-When non-effect demonstrations are added, put them under a separate `Features`
+When non-effect demonstrations are added, put them under a separate `Examples`
 group; do not give them effect-code suffixes.
 
 Feature songs can share the four demo WAVs already embedded by the app, using

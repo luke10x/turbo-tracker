@@ -1220,6 +1220,10 @@ int main(void) {
     tracker.pattern=tracker.song.pattern[0];tracker.sample_count=1;
     tt_phrase_init(&tracker.phrase,0);tracker.wave.instrument_type=TT_INSTRUMENT_DX7;
     tt_dx7_init(&tracker.wave.dx7);
+    assert(initial_instruments_ready()); /* DX7 instruments do not need WAV data */
+    tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
+    assert(!initial_instruments_ready()); /* sample instruments still require WAV data */
+    tracker.wave.instrument_type=TT_INSTRUMENT_DX7;
     F80Widget dx7_canvas={.rect={0,0,120,20}};
     tracker.wave_canvas=&dx7_canvas;tracker.app.focus=&dx7_canvas;
     tracker.focus=FOCUS_WAVE;tracker.synth_field=0;

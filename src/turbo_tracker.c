@@ -5158,6 +5158,16 @@ static int frame(void *user) {
     else if(key!=ERR)handle_key(f80_curses_key(key));
     return 1;
 }
+static int initial_instruments_ready(void) {
+    for(int i=0;i<tracker.sample_count;++i) {
+        const TtWave *wave=i==tracker.sample_index?&tracker.wave:
+                            &tracker.samples[i].wave;
+        if(wave->instrument_type==TT_INSTRUMENT_DX7) {
+            if(!tt_dx7_valid(&wave->dx7))return 0;
+        } else if(!wave->pcm)return 0;
+    }
+    return 1;
+}
 static int load_default_song(const char *executable) {
     const char *initial_song=getenv("INIT_SONG");
 #ifdef __EMSCRIPTEN__
@@ -5201,9 +5211,9 @@ static int load_default_song(const char *executable) {
     if(!load_song_at(resolved))return 0;
 loaded:
 #endif
-    for(int i=0;i<tracker.sample_count;++i) {
-        TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
-        if(!wave->pcm) { tt_tracker_message("Default song has a missing WAV");return 0; }
+    if(!initial_instruments_ready()) {
+        tt_tracker_message("Default song has a missing WAV or invalid synth");
+        return 0;
     }
     return 1;
 }

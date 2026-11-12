@@ -49,8 +49,10 @@
     <node title="Tempo (ZTM)" href="./app.html?init_song=%2Fexamples%2Fztm%2Fztm.song&amp;init_play=1"
           source="./examples/ztm/README.md" />
   </node>
-  <node title="Features">
+  <node title="Examples">
     <node title="Chord voicings" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.song&amp;init_play=1"
           source="./examples/chord-voicings/README.md" />
+    <node title="DX7 chord progression" href="./app.html?init_song=%2Fexamples%2Fsynth-chord-progression%2Fsynth-chord-progression.song&amp;init_play=1"
+          source="./examples/synth-chord-progression/README.md" />
   </node>
 </root>
