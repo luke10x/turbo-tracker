@@ -10,6 +10,65 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static char recent_files[F80_FILE_DIALOG_RECENT][F80_FILE_DIALOG_PATH_MAX];
+static int recent_file_count;
+static char recent_storage_path[F80_FILE_DIALOG_PATH_MAX];
+
+static void save_recent_files(void) {
+    if(!recent_storage_path[0])return;
+    char temporary[F80_FILE_DIALOG_PATH_MAX+16];
+    if(snprintf(temporary,sizeof(temporary),"%s.tmpXXXXXX",recent_storage_path)>=
+       (int)sizeof(temporary))return;
+    int fd=mkstemp(temporary);
+    if(fd<0)return;
+    FILE *file=fdopen(fd,"w");
+    if(!file) { close(fd);unlink(temporary);return; }
+    int ok=1;
+    for(int i=0;i<recent_file_count;++i)
+        if(fprintf(file,"%s\n",recent_files[i])<0)ok=0;
+    if(fclose(file))ok=0;
+    if(ok && !rename(temporary,recent_storage_path))return;
+    unlink(temporary);
+}
+
+void f80_file_dialog_recent_storage(const char *path) {
+    recent_file_count=0;
+    recent_storage_path[0]='\0';
+    if(!path || !path[0] || strlen(path)>=sizeof(recent_storage_path))return;
+    snprintf(recent_storage_path,sizeof(recent_storage_path),"%s",path);
+    FILE *file=fopen(path,"r");
+    if(!file)return;
+    char line[F80_FILE_DIALOG_PATH_MAX+2];
+    while(recent_file_count<F80_FILE_DIALOG_RECENT && fgets(line,sizeof(line),file)) {
+        size_t n=strlen(line);
+        if(n && line[n-1]=='\n')line[--n]='\0';
+        if(!n || n>=F80_FILE_DIALOG_PATH_MAX || strpbrk(line,"\r\n"))continue;
+        int duplicate=0;
+        for(int i=0;i<recent_file_count;++i)
+            if(!strcmp(line,recent_files[i]))duplicate=1;
+        if(!duplicate)snprintf(recent_files[recent_file_count++],
+                               F80_FILE_DIALOG_PATH_MAX,"%s",line);
+    }
+    fclose(file);
+}
+
+void f80_file_dialog_recent_add(const char *path) {
+    if(!path || !path[0] || strlen(path)>=F80_FILE_DIALOG_PATH_MAX ||
+       strpbrk(path,"\r\n"))return;
+    int existing=-1;
+    for(int i=0;i<recent_file_count;++i)
+        if(!strcmp(path,recent_files[i])) { existing=i;break; }
+    if(existing==0)return;
+    int last=existing>=0?existing:
+             recent_file_count<F80_FILE_DIALOG_RECENT?
+             recent_file_count++:F80_FILE_DIALOG_RECENT-1;
+    for(int i=last;i>0;--i) {
+        snprintf(recent_files[i],sizeof(recent_files[i]),"%s",recent_files[i-1]);
+    }
+    snprintf(recent_files[0],sizeof(recent_files[0]),"%s",path);
+    save_recent_files();
+}
+
 static int smaller(int a, int b) { return a < b ? a : b; }
 static int larger(int a, int b) { return a > b ? a : b; }
 
@@ -42,6 +101,11 @@ static int matches_filter(const char *name, const char *filter) {
         while(*part && *part!=',' && *part!=';')++part;
     }
     return 0;
+}
+
+static int recent_in_filter(const F80FileDialog *state,const char *path) {
+    const char *name=strrchr(path,'/');
+    return matches_filter(name?name+1:path,state->filter);
 }
 
 static void set_filename(F80FileDialog *state, const char *name) {
@@ -145,10 +209,12 @@ int f80_file_dialog_active(const F80FileDialog *state) {
 void f80_file_dialog_close(F80FileDialog *state) {
     if(!f80_file_dialog_active(state))return;
     F80App *app=state->app;
+    f80_autocomplete_close(&state->autocomplete);
     state->dialog=state->labels=state->list_background=state->list=NULL;
     state->preview=state->footer=state->input=state->dropdown=NULL;
     state->accept=state->cancel=state->help=NULL;
     f80_hide_modal(app);
+    state->autocomplete.panel=NULL;
 }
 
 static void cancel_action(F80Widget *button, void *user) {
@@ -159,13 +225,52 @@ static void help_action(F80Widget *button, void *user) {
     (void)button;
     F80FileDialog *state=user;
     snprintf(state->status,sizeof(state->status),
-             "Arrows browse files; Enter opens a folder or file; type a path and press Enter");
+             "▼: recent files; Enter fills the name; edit it or press Open/Save");
 }
 
 static void dropdown_action(F80Widget *button, void *user) {
     (void)button;
     F80FileDialog *state=user;
-    if(f80_file_dialog_active(state))state->app->focus=state->list;
+    if(!f80_file_dialog_active(state))return;
+    if(state->autocomplete.active) { f80_autocomplete_close(&state->autocomplete);return; }
+    state->recent_count=0;
+    for(int i=0;i<recent_file_count;++i)
+        if(recent_in_filter(state,recent_files[i]))
+            state->recent_items[state->recent_count++]=recent_files[i];
+    f80_autocomplete_set(&state->autocomplete,state->recent_items,state->recent_count,1);
+    f80_autocomplete_open(&state->autocomplete);
+    f80_autocomplete_layout(&state->autocomplete,state->input->rect,
+                             f80_inset(state->dialog->rect,2,1),10);
+    state->app->focus=state->input;
+}
+
+static void recent_chosen(int index, void *user) {
+    F80FileDialog *state=user;
+    if(index<0 || index>=state->recent_count)return;
+    const char *path=state->recent_items[index];
+    set_filename(state,path);
+    snprintf(state->status,sizeof(state->status),
+             "Recent path filled; edit it or press %s",
+             state->mode==F80_FILE_SAVE?"Save":"Open");
+    state->app->focus=state->input;
+}
+
+static int recent_matches(const char *path,const char *query) {
+    if(!query[0])return 1;
+    const char *name=strrchr(path,'/');
+    if(name)path=name+1;
+    for(const char *at=path;*at;++at)
+        if(!strncasecmp(at,query,strlen(query)))return 1;
+    return 0;
+}
+
+static void filter_recent(F80FileDialog *state) {
+    state->recent_count=0;
+    for(int i=0;i<recent_file_count;++i)
+        if(recent_in_filter(state,recent_files[i]) &&
+           recent_matches(recent_files[i],state->input->input))
+            state->recent_items[state->recent_count++]=recent_files[i];
+    f80_autocomplete_set(&state->autocomplete,state->recent_items,state->recent_count,1);
 }
 
 static void enter_directory(F80FileDialog *state, const char *name) {
@@ -210,6 +315,7 @@ static void accept_action(F80Widget *button, void *user) {
     }
     F80FileChosen chosen=state->chosen;
     void *chosen_user=state->user;
+    f80_file_dialog_recent_add(path);
     f80_file_dialog_close(state);
     if(chosen)chosen(path,chosen_user);
 }
@@ -273,9 +379,13 @@ int f80_file_dialog_show(F80FileDialog *state, F80App *app, F80FileMode mode,
     state->input=f80_add(state->dialog,f80_input());
     set_filename(state,name);
     state->dropdown=f80_add(state->dialog,f80_button("▼",dropdown_action,state));
+    state->dropdown->button_shadow=0;
     state->accept=f80_add(state->dialog,f80_button(mode==F80_FILE_SAVE?"~S~ave":"~O~pen",accept_action,state));
     state->cancel=f80_add(state->dialog,f80_button("~C~ancel",cancel_action,state));
     state->help=f80_add(state->dialog,f80_button("~H~elp",help_action,state));
+    if(!f80_autocomplete_attach(&state->autocomplete,state->dialog,recent_chosen,state)) {
+        f80_free(state->dialog);state->dialog=NULL;return 0;
+    }
     refresh_files(state);
     f80_show_modal(app,state->dialog);
     app->focus=state->input;
@@ -300,16 +410,27 @@ void f80_file_dialog_layout(F80FileDialog *state, int columns, int rows) {
                                         list_width-larger(4,list_width/2),list_height));
     f80_layout(state->footer,f80_rect(box.x+2,box.y+height-3,width-4,2));
     f80_layout(state->input,f80_rect(box.x+3,box.y+(compact?3:4),list_width-4,1));
-    f80_layout(state->dropdown,f80_rect(box.x+list_width,box.y+(compact?3:4),3,2));
+    f80_layout(state->dropdown,f80_rect(box.x+list_width,box.y+(compact?3:4),3,1));
     int button_x=box.x+width-right+1,button_width=right-3;
     f80_layout(state->accept,f80_rect(button_x,box.y+(compact?3:4),button_width,2));
     f80_layout(state->cancel,f80_rect(button_x,box.y+(compact?height-5:height-10),button_width,2));
     f80_layout(state->help,f80_rect(button_x,box.y+height-6,button_width,2));
     state->help->visible=!compact;
+    f80_autocomplete_layout(&state->autocomplete,state->input->rect,
+                             f80_inset(box,2,1),10);
 }
 
 int f80_file_dialog_key(F80FileDialog *state, int key) {
     if(!f80_file_dialog_active(state))return 0;
+    if(state->autocomplete.active) {
+        if(f80_autocomplete_key(&state->autocomplete,key))return 1;
+        if(state->autocomplete.active && state->app->focus==state->input &&
+           ((key>=32 && key<127) || key==F80_KEY_BACKSPACE || key==F80_KEY_DELETE)) {
+            int handled=f80_key(state->app,key);
+            filter_recent(state);
+            return handled;
+        }
+    }
     if(key==27) { f80_file_dialog_close(state);return 1; }
     if(key==9 || key==F80_KEY_BTAB) {
         F80Widget *cycle[]={state->input,state->dropdown,state->list,
@@ -344,12 +465,20 @@ int f80_file_dialog_key(F80FileDialog *state, int key) {
     if(state->app->focus==state->input && (key==10 || key==13)) {
         accept_action(NULL,state);return 1;
     }
-    if(state->app->focus==state->input && key>=32 && key<127)
+    if(state->app->focus==state->input &&
+       ((key>=32 && key<127) || key==F80_KEY_BACKSPACE || key==F80_KEY_DELETE)) {
         state->overwrite_path[0]='\0';
+    }
     return f80_key(state->app,key);
 }
 
 int f80_file_dialog_mouse(F80FileDialog *state, int x, int y, int wheel) {
     if(!f80_file_dialog_active(state))return 0;
+    if(state->autocomplete.active) {
+        if(!wheel && f80_contains(state->dropdown->rect,x,y)) {
+            f80_autocomplete_close(&state->autocomplete);return 1;
+        }
+        if(f80_autocomplete_mouse(&state->autocomplete,x,y,wheel))return 1;
+    }
     return f80_mouse(state->app,x,y,wheel);
 }

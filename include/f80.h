@@ -89,9 +89,10 @@ struct F80Widget {
     F80Action activate;
     void *user;
     F80Paint paint;
-    char input[256];
+    char input[1024];
     int input_pos, input_scroll;
     int pressed_until;
+    int button_shadow; /* buttons can opt out, e.g. an input's drop arrow */
     const F80Menu *menus;
     int menu_count, menu_active, menu_index, menu_item;
     const F80StatusItem *status_items;

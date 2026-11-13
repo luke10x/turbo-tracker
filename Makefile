@@ -12,9 +12,11 @@ TT_TEST_EDIT_BIN := $(PLATFORM_BUILD)/bin/test-tt-edit
 # f80 library module (maintained separately); sources unchanged, f80_* namespace
 F80_CORE_NATIVE_OBJS := $(PLATFORM_BUILD)/obj/f80-core/f80.o \
 	$(PLATFORM_BUILD)/obj/f80-core/f80_components.o \
-	$(PLATFORM_BUILD)/obj/f80-core/f80_file_dialog.o
+	$(PLATFORM_BUILD)/obj/f80-core/f80_file_dialog.o \
+	$(PLATFORM_BUILD)/obj/f80-core/f80_autocomplete.o
 F80_CORE_WASM_OBJS := build/emscripten/obj/f80-core/f80.o \
-	build/emscripten/obj/f80-core/f80_components.o
+	build/emscripten/obj/f80-core/f80_components.o \
+	build/emscripten/obj/f80-core/f80_autocomplete.o
 
 # turbo-tracker application (our code, tt_ namespace)
 TT_APP_NATIVE_OBJS := $(addprefix $(PLATFORM_BUILD)/obj/tt-app/,tt_dx7.o tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_package.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
@@ -84,7 +86,11 @@ $(PLATFORM_BUILD)/obj/f80-core/f80_components.o: src/f80_components.c include/f8
 	mkdir -p $(dir $@)
 	cc -std=c11 -Wall -Wextra -O2 -Iinclude -c $< -o $@
 
-$(PLATFORM_BUILD)/obj/f80-core/f80_file_dialog.o: src/f80_file_dialog.c include/f80_file_dialog.h include/f80.h
+$(PLATFORM_BUILD)/obj/f80-core/f80_file_dialog.o: src/f80_file_dialog.c include/f80_file_dialog.h include/f80_autocomplete.h include/f80.h
+	mkdir -p $(dir $@)
+	cc -std=c11 -Wall -Wextra -O2 -Iinclude -c $< -o $@
+
+$(PLATFORM_BUILD)/obj/f80-core/f80_autocomplete.o: src/f80_autocomplete.c include/f80_autocomplete.h include/f80.h
 	mkdir -p $(dir $@)
 	cc -std=c11 -Wall -Wextra -O2 -Iinclude -c $< -o $@
 
@@ -97,6 +103,11 @@ build/emscripten/obj/f80-core/f80.o: src/f80.c include/f80.h
 		emcc $(WASM_CCOPTS) -c $< -o $@
 
 build/emscripten/obj/f80-core/f80_components.o: src/f80_components.c include/f80_components.h include/f80.h
+	mkdir -p $(dir $@) build/em-cache
+	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
+		emcc $(WASM_CCOPTS) -c $< -o $@
+
+build/emscripten/obj/f80-core/f80_autocomplete.o: src/f80_autocomplete.c include/f80_autocomplete.h include/f80.h
 	mkdir -p $(dir $@) build/em-cache
 	. $(EMSDK_ENV) >/dev/null && EM_CACHE=$(CURDIR)/build/em-cache \
 		emcc $(WASM_CCOPTS) -c $< -o $@
@@ -140,7 +151,7 @@ $(WEB_TT_JS): build/emscripten/obj/f80-core/f80.o $(F80_CORE_WASM_OBJS) $(TT_APP
 		--embed-file $(SAMPLE_DEFAULT_SONG)@/default.ttt \
 		$(foreach song,$(SAMPLE_FEATURE_SONGS),--embed-file $(song)@/$(song)) \
 		--pre-js wasm/init_song.js \
-		-s EXPORTED_FUNCTIONS=_main,_tt_tracker_load_dx7,_tt_tracker_load_wav,_tt_tracker_recover_wav,_tt_tracker_load_song,_tt_tracker_load_package,_tt_tracker_save_song,_tt_tracker_export_package,_tt_tracker_audio_recover,_tt_tracker_begin_touch_selection,_tt_tracker_touch_scroll,_tt_tracker_touch_scroll_fields,_tt_tracker_scroll_order,_tt_tracker_hold_order_selection,_tt_tracker_drag_order_selection,_tt_tracker_scroll_table,_tt_tracker_scroll_table_horizontal,_tt_tracker_scroll_table_actions,_tt_tracker_hold_table_selection,_tt_tracker_drag_table_selection,_tt_tracker_drag_selection,_tt_tracker_begin_wave_gesture,_tt_tracker_pan_wave_touch,_tt_tracker_hold_wave_marker,_tt_tracker_move_wave_marker,_tt_tracker_flush_input,_curses_push_key,_curses_push_mouse,_curses_push_resize \
+		-s EXPORTED_FUNCTIONS=_main,_tt_tracker_load_dx7,_tt_tracker_load_wav,_tt_tracker_recover_wav,_tt_tracker_load_song,_tt_tracker_load_package,_tt_tracker_save_song,_tt_tracker_audio_recover,_tt_tracker_begin_touch_selection,_tt_tracker_touch_scroll,_tt_tracker_touch_scroll_fields,_tt_tracker_scroll_order,_tt_tracker_hold_order_selection,_tt_tracker_drag_order_selection,_tt_tracker_scroll_table,_tt_tracker_scroll_table_horizontal,_tt_tracker_scroll_table_actions,_tt_tracker_hold_table_selection,_tt_tracker_drag_table_selection,_tt_tracker_drag_selection,_tt_tracker_begin_wave_gesture,_tt_tracker_pan_wave_touch,_tt_tracker_hold_wave_marker,_tt_tracker_move_wave_marker,_tt_tracker_flush_input,_curses_push_key,_curses_push_mouse,_curses_push_resize \
 		-s EXPORTED_RUNTIME_METHODS=ccall,UTF8ToString,FS -o $@
 
 # MSFA is C++; keep the tracker and F80 compiled as C.

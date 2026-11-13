@@ -190,25 +190,76 @@ int main(void) {
     const char *sources[TT_SONG_SAMPLES]={"samples/sine-c4.wav"};
     const TtWave *waves[TT_SONG_SAMPLES]={&wav,&fm};
     char package_path[256],unpacked[512];
-    snprintf(package_path,sizeof(package_path),"%s.ttt.zip",path);
-    assert(tt_package_is_path(package_path));
+    snprintf(package_path,sizeof(package_path),"%s.ttt",path);
+    assert(!tt_package_is_path(package_path));
     assert(tt_package_is_path("older.tts.zip"));
     assert(!tt_package_save(package_path,&song,sample,2,
                             (const char *const *)((const char *[TT_SONG_SAMPLES]){"missing.wav"}),
                             waves,error,sizeof(error)));
     assert(tt_package_save(package_path,&song,sample,2,sources,waves,error,sizeof(error)));
+    assert(tt_package_is_path(package_path));
+    FILE *packed_file=fopen(package_path,"rb");assert(packed_file);
+    char header[64];assert(fgets(header,sizeof(header),packed_file));
+    assert(!strcmp(header,"F80_SAMPLE_SONG\t7\n"));
+    assert(!fclose(packed_file));
+    assert(tt_song_load(package_path,&loaded,readback,&count,error,sizeof(error)));
+    assert(loaded.bpm==143 && !strcmp(readback[0].path,"!samples/01.wav"));
+    packed_file=fopen(package_path,"r+b");assert(packed_file);
+    assert(fgets(header,sizeof(header),packed_file));
+    long bpm_at=ftell(packed_file);assert(bpm_at>=0);
+    assert(fgets(header,sizeof(header),packed_file));
+    assert(!strcmp(header,"BPM\t143\n"));
+    assert(fseek(packed_file,bpm_at,SEEK_SET)==0);
+    assert(fwrite("BPM\t144\n",1,8,packed_file)==8);
+    assert(!fclose(packed_file));
     TtPackageBank banks[TT_SONG_SAMPLES];
     assert(tt_package_unpack(package_path,unpacked,sizeof(unpacked),banks,error,sizeof(error)));
     assert(strstr(unpacked,"/song.ttt"));
     assert(tt_song_load(unpacked,&loaded,readback,&count,error,sizeof(error)));
-    assert(count==2 && !strcmp(readback[0].path,"samples/01.wav"));
+    assert(loaded.bpm==144); /* text header remains authoritative */
+    assert(count==2 && !strcmp(readback[0].path,"!samples/01.wav"));
     assert(readback[1].instrument_type==TT_INSTRUMENT_DX7);
     assert(banks[1].size==fm.syx_size && !memcmp(banks[1].data,fm.syx_bank,fm.syx_size));
-    assert(tt_song_resolve_path(unpacked,readback[0].path,resolved,sizeof(resolved)));
+    assert(tt_song_resolve_path(unpacked,readback[0].path+1,resolved,sizeof(resolved)));
     assert(tt_load_wav(resolved,&reopened,error,sizeof(error)));
     assert(reopened.frames==wav.frames && reopened.rate==wav.rate);
+    char repacked[256],unpacked_again[512];
+    snprintf(repacked,sizeof(repacked),"%s-repacked.ttt",path);
+    const char *repacked_sources[TT_SONG_SAMPLES]={resolved};
+    const TtWave *repacked_waves[TT_SONG_SAMPLES]={&reopened,&fm};
+    assert(tt_package_save(repacked,&loaded,readback,count,
+                           repacked_sources,repacked_waves,error,sizeof(error)));
+    assert(tt_package_unpack(repacked,unpacked_again,sizeof(unpacked_again),
+                             banks,error,sizeof(error)));
+    assert(tt_song_load(unpacked_again,&loaded,readback,&count,error,sizeof(error)));
+    assert(loaded.bpm==144 && !strcmp(readback[0].path,"!samples/01.wav"));
+    TtSongSample demo={0};
+    snprintf(demo.name,sizeof(demo.name),"Demo");
+    snprintf(demo.source_name,sizeof(demo.source_name),"demo.wav");
+    snprintf(demo.path,sizeof(demo.path),"builtin:demo");
+    demo.frames=1;demo.rate=22050;tt_phrase_init(&demo.phrase,1);
+    const char *empty_sources[TT_SONG_SAMPLES]={0};
+    const TtWave *empty_waves[TT_SONG_SAMPLES]={0};
+    assert(tt_package_save(repacked,&song,&demo,1,empty_sources,empty_waves,
+                           error,sizeof(error)));
+    assert(tt_package_unpack(repacked,unpacked_again,sizeof(unpacked_again),
+                             banks,error,sizeof(error)));
+    assert(tt_song_load(unpacked_again,&loaded,readback,&count,error,sizeof(error)));
+    assert(count==1 && !strcmp(readback[0].path,"builtin:demo"));
+    TtWave missing={0};
+    const TtWave *missing_waves[TT_SONG_SAMPLES]={&missing,&fm};
+    assert(tt_package_save(repacked,&song,sample,2,sources,missing_waves,
+                           error,sizeof(error)));
+    assert(tt_package_unpack(repacked,unpacked_again,sizeof(unpacked_again),
+                             banks,error,sizeof(error)));
+    assert(tt_song_load(unpacked_again,&loaded,readback,&count,error,sizeof(error)));
+    assert(count==2 && !strcmp(readback[0].path,"!samples/01.wav"));
+    assert(tt_song_resolve_path(unpacked_again,readback[0].path+1,
+                                resolved,sizeof(resolved)));
+    assert(access(resolved,F_OK)!=0); /* recovery remains possible */
     tt_free(&wav);tt_free(&reopened);
     tt_package_cleanup_all();
+    unlink(repacked);
     unlink(package_path);
     unlink(path);puts("song and packed ZIP round-trip passed");
     return 0;

@@ -2,8 +2,10 @@
 #define F80_FILE_DIALOG_H
 
 #include "f80.h"
+#include "f80_autocomplete.h"
 
-enum { F80_FILE_DIALOG_PATH_MAX = 1024, F80_FILE_DIALOG_ITEMS = 512 };
+enum { F80_FILE_DIALOG_PATH_MAX = 1024, F80_FILE_DIALOG_ITEMS = 512,
+       F80_FILE_DIALOG_RECENT = 10 };
 typedef enum { F80_FILE_OPEN, F80_FILE_SAVE } F80FileMode;
 typedef void (*F80FileChosen)(const char *path, void *user);
 
@@ -29,6 +31,9 @@ typedef struct {
     const char *labels_for_list[F80_FILE_DIALOG_ITEMS];
     char display[F80_FILE_DIALOG_ITEMS][260];
     int count;
+    F80Autocomplete autocomplete;
+    const char *recent_items[F80_FILE_DIALOG_RECENT];
+    int recent_count;
 } F80FileDialog;
 
 /* Call layout each frame while active. The callback runs after the modal closes. */
@@ -40,5 +45,8 @@ int f80_file_dialog_key(F80FileDialog *dialog, int key);
 int f80_file_dialog_mouse(F80FileDialog *dialog, int x, int y, int wheel);
 int f80_file_dialog_active(const F80FileDialog *dialog);
 void f80_file_dialog_close(F80FileDialog *dialog);
+/* Optional per-application storage; without it history lasts for this process. */
+void f80_file_dialog_recent_storage(const char *path);
+void f80_file_dialog_recent_add(const char *path);
 
 #endif

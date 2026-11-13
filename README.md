@@ -87,10 +87,10 @@ Writes `build/emscripten/itch/turbo-tracker.zip` — a standalone archive with
 
 - The browser build starts on the first click/tap (Web Audio requires a user
   gesture).
-- In the browser, **File > Open track...** accepts `.ttt`, legacy `.song`, or a
-  packed track. **Save track...** downloads a text `.ttt` file; **Export packed
-  track...** downloads a `.ttt.zip` with its audio and SYX banks. You can drop
-  any of these formats onto the terminal. This works in the itch.io build too.
+- In the browser, **File > Open track...** accepts `.ttt`, legacy `.song`, and
+  older `.ttt.zip` packages. **Save track...** downloads one `.ttt` file with a
+  readable song header followed by packed WAV and SYX assets. You can drop
+  these formats onto the terminal. This works in the itch.io build too.
 - The vendored xterm.js assets are committed; refresh them by replacing the
   files in `wasm/vendor/` (the build does not run npm).
 
@@ -323,30 +323,26 @@ controls to switch layouts. The active pane has a white border.
 
 ### Track files
 
-**File > Save track...** saves the versioned text track as `.ttt` by default.
-This is the file to keep in Git: changes to its patterns, markers, settings,
-and FM patches produce ordinary text diffs. WAVs remain separate assets. The
-current FM patch is saved in the text; keep an original SYX bank separately if
-you need the full bank. Native builds use the file browser; browser builds use
-the download bridge.
+**File > Save track...** writes one `.ttt` file. The song is a readable text
+header at the start of the file; an appended ZIP holds the WAVs and any loaded
+SYX banks. Paths beginning with `!samples/` refer to the assets in that same
+file. The text header is authoritative when loading the track. Native builds
+use the file browser; browser builds use the download bridge.
 
-A `.ttt` file lists BPM, each instrument's name and source path, reference
-note, markers, slice offsets, named patterns, and play order. Pattern rows use
-the compact six-channel format with `|` separators. WAV paths are relative to
-the track file's directory, including `../` for parent and sibling folders.
-The built-in demo sample uses `builtin:demo` and is recreated on load.
+The text header lists BPM, instrument names and source paths, reference notes,
+markers, slice offsets, named patterns, and play order. Pattern rows use the
+compact six-channel format with `|` separators. A standalone text `.ttt` or
+legacy `.song` still loads; saving it produces the packed `.ttt` format. Older
+`.ttt.zip` and `.tts.zip` packages also load. The embedded
+[`default.ttt`](default.ttt) remains a standalone text track.
 
-**File > Export packed track...** creates a `.ttt.zip` containing `song.ttt`,
-WAV files under `samples/`, and original SYX banks still loaded in the current
-session under `banks/`.
-It is for moving or sharing a complete track; exporting does not change the
-current `.ttt` save path or clear unsaved edits. **File > Open track...** accepts
-both `.ttt` and `.ttt.zip`, plus older `.song` and `.tts.zip` files. The embedded
-[`default.ttt`](default.ttt) is a standalone track.
+Because the ZIP tail is binary, configure Git once in this checkout to diff only
+the authoritative header: `git config diff.ttt.textconv "python3 scripts/ttt_textconv.py"`.
+The tracked `.gitattributes` associates `.ttt` files with that diff driver.
 
-A missing WAV does not block loading a track or package. Its cells remain but
+A missing WAV does not block loading or saving a track. Its cells remain but
 play silently; the waveform pane turns red, shows the saved path, and offers
-Retry. Uploading a WAV with the same original filename restores it when frame
+Retry. Saving keeps its `!samples/` reference so the WAV can be restored later. Uploading a WAV with the same original filename restores it when frame
 count and rate match. In the browser, choose a `.ttt` and its WAV files together
 when opening a standalone track. The browser stores selected WAVs by filename
 in its virtual filesystem. It cannot read arbitrary local paths without the

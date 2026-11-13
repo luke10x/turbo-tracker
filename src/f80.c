@@ -145,7 +145,7 @@ F80Widget *f80_spacer(void) { return f80_widget(F80_SPACER); }
 F80Widget *f80_label(const char *text) { F80Widget *w = f80_widget(F80_LABEL); if (w) { w->text = text; w->height = f80_fit(); } return w; }
 F80Widget *f80_button(const char *text, F80Action action, void *user) {
     F80Widget *w = f80_widget(F80_BUTTON);
-    if (w) { w->text = text; w->action = action; w->user = user; w->width = w->height = f80_fit(); w->focusable = 1; }
+    if (w) { w->text = text; w->action = action; w->user = user; w->width = w->height = f80_fit(); w->focusable = 1; w->button_shadow = 1; }
     return w;
 }
 F80Widget *f80_listbox(const char **items, int count, F80Action action, void *user) {
@@ -1113,9 +1113,9 @@ void f80_draw(F80Widget *w) {
     case F80_BUTTON:
         {
         int pressed=w->app && w->app->tick<w->pressed_until;
-        int bx=r.x+(pressed?1:0);
+        int bx=r.x+(pressed && w->button_shadow?1:0);
         char label[256]; int hot;
-        int len=hot_label(w->text,label,sizeof(label),&hot), face=r.w-1;
+        int len=hot_label(w->text,label,sizeof(label),&hot), face=r.w-(w->button_shadow?1:0);
         int selected=w->app&&w->app->focus==w;
         int selected_pair=selected?F80_PAIR_BUTTON_SELECTED:5;
         f80_put(r.y,bx,"",face,selected_pair,1);
@@ -1125,7 +1125,7 @@ void f80_draw(F80Widget *w) {
             if(hot>=0 && hot<len)f80_put(r.y,bx+(face-len)/2+hot,label+hot,1,
                 selected?F80_PAIR_BUTTON_SELECTED:21,1);
         }
-        if(!pressed) {
+        if(w->button_shadow && !pressed) {
             int side_shadow=F80_COLOR_SHADOW;
             int bottom_shadow=F80_COLOR_BUTTON_SHADOW_BOTTOM;
             for(F80Widget *parent=w->parent;parent;parent=parent->parent)

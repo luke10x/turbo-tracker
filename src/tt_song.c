@@ -453,7 +453,17 @@ int tt_song_load(const char *path,TtSong *song,
     }
     if(valid && version>=2)for(int table=0;table<TT_SONG_TABLES;++table)
         next->table[table].length=next->table[0].length;
-    if(valid && (!READ(1) || strcmp(field[0],"END") || fgetc(file)!=EOF))valid=0;
+    if(valid && (!READ(1) || strcmp(field[0],"END")))valid=0;
+    if(valid) {
+        int first=fgetc(file);
+        if(first!=EOF) {
+            unsigned char signature[4]={(unsigned char)first,0,0,0};
+            if(fread(signature+1,1,3,file)!=3 || signature[0]!='P' ||
+               signature[1]!='K' ||
+               !((signature[2]==3 && signature[3]==4) ||
+                 (signature[2]==5 && signature[3]==6)))valid=0;
+        }
+    }
     if(ferror(file))valid=0;
     fclose(file);
 #undef READ
