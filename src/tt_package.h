@@ -2,7 +2,7 @@
 #define TT_PACKAGE_H
 #include "tt_song.h"
 
-/* A packed song contains song.song, samples/01.wav..08.wav, and optional
+/* A packed song contains song.ttt, samples/01.wav..08.wav, and optional
    banks/01.syx..08.syx. Names are fixed so no archive paths are trusted. */
 typedef struct {
     unsigned char data[TT_SYX_MAX_BYTES];

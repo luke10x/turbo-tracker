@@ -37,8 +37,8 @@ EM_JS(void, choose_web_wav, (), {
 EM_JS(void, choose_web_song, (), {
     if(window.f80ChooseSong)window.f80ChooseSong();
 });
-EM_JS(void, download_web_song, (const char *name), {
-    if(window.f80DownloadSong)window.f80DownloadSong(UTF8ToString(name));
+EM_JS(void, download_web_song, (const char *path, const char *name), {
+    if(window.f80DownloadSong)window.f80DownloadSong(UTF8ToString(path),UTF8ToString(name));
 });
 EM_JS(void, tt_web_grid_rect, (int x,int y,int width,int height), {
     Module.f80GridRect = {x,y,width,height};
@@ -1109,7 +1109,7 @@ static void previous_sample(F80Widget *button,void *user) {
 static void next_sample(F80Widget *button,void *user) {
     (void)button;(void)user;select_sample(1);
 }
-static int save_song_at(const char *path) {
+static int save_song_at(const char *path,int make_current) {
     TtSongSample meta[TT_HISTORY_MAX]={0};
     const char *sample_paths[TT_SONG_SAMPLES]={0};
     const TtWave *waves[TT_SONG_SAMPLES]={0};
@@ -1143,8 +1143,10 @@ static int save_song_at(const char *path) {
                         sample_paths,waves,error,sizeof(error)):
         tt_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error));
     if(!saved) { tt_tracker_message(error);return 0; }
-    snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
-    tracker.document_dirty=0;
+    if(make_current) {
+        snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
+        tracker.document_dirty=0;
+    }
     tt_tracker_message(packed?"Packed song saved with WAVs and SYX banks":
                              "Standalone song saved with sample paths");
     return 1;
@@ -1323,14 +1325,20 @@ EMSCRIPTEN_KEEPALIVE int tt_tracker_load_wav(const char *original_name) {
     return load_path("/sample-tracker-upload.wav",original_name);
 }
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_song(void) {
-    return load_song_at("/sample-tracker-import.song");
+    return load_song_at("/sample-tracker-import.ttt");
 }
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_package(void) {
-    return load_project_at("/sample-tracker-import.tts.zip");
+    return load_project_at("/sample-tracker-import.ttt.zip");
 }
 EMSCRIPTEN_KEEPALIVE int tt_tracker_save_song(void) {
-    if(!save_song_at("/sample-tracker-export.tts.zip"))return 0;
-    download_web_song("song.tts.zip");return 1;
+    const char *path="/sample-tracker-export.ttt";
+    if(!save_song_at(path,1))return 0;
+    download_web_song(path,"track.ttt");return 1;
+}
+EMSCRIPTEN_KEEPALIVE int tt_tracker_export_package(void) {
+    const char *path="/sample-tracker-export.ttt.zip";
+    if(!save_song_at(path,0))return 0;
+    download_web_song(path,"track.ttt.zip");return 1;
 }
 #endif
 #ifndef __EMSCRIPTEN__
@@ -1339,14 +1347,20 @@ static void file_chosen(const char *path,void *user) {
     if(tracker.path_action==PATH_DX7)load_dx7_at(path,tracker.sysex_voice);
     else if(tracker.path_action==PATH_WAV)load_path(path,NULL);
     else if(tracker.path_action==PATH_SONG_LOAD)load_project_at(path);
-    else if(tt_package_is_path(path) ||
-            (strlen(path)>=5 && !strcmp(path+strlen(path)-5,".song")))
-        save_song_at(path);
     else {
-        char packed[512];
-        if(snprintf(packed,sizeof(packed),"%s.tts.zip",path)<(int)sizeof(packed))
-            save_song_at(packed);
-        else tt_tracker_message("Package path too long");
+        int export_package=tracker.path_action==PATH_SONG_EXPORT;
+        size_t length=strlen(path);
+        int has_text_suffix=(length>=4 && !strcmp(path+length-4,".ttt")) ||
+                            (length>=5 && !strcmp(path+length-5,".song"));
+        if((export_package && tt_package_is_path(path)) ||
+           (!export_package && has_text_suffix))save_song_at(path,!export_package);
+        else {
+            char target[512];
+            const char *suffix=export_package?".ttt.zip":".ttt";
+            if(snprintf(target,sizeof(target),"%s%s",path,suffix)<(int)sizeof(target))
+                save_song_at(target,!export_package);
+            else tt_tracker_message("Song path too long");
+        }
     }
 }
 #endif
@@ -1355,16 +1369,33 @@ static void open_path_dialog(int action) {
     if(action==PATH_DX7)choose_web_dx7();
     else if(action==PATH_WAV)choose_web_wav();
     else if(action==PATH_SONG_LOAD)choose_web_song();
+    else if(action==PATH_SONG_EXPORT)tt_tracker_export_package();
     else tt_tracker_save_song();
 #else
     tracker.path_action=action;
-    int save=action==PATH_SONG_SAVE;
-    const char *title=action==PATH_DX7?"Import FM voice (.syx)":action==PATH_WAV?"Open WAV":save?"Save Packed Song As":"Open Song or Package";
-    const char *initial=action==PATH_WAV?tracker.loaded_path:
-        tracker.song_path[0] && tt_package_is_path(tracker.song_path)?
-            tracker.song_path:"song.tts.zip";
+    int save=action==PATH_SONG_SAVE || action==PATH_SONG_EXPORT;
+    const char *title=action==PATH_DX7?"Import FM voice (.syx)":
+        action==PATH_WAV?"Open WAV":action==PATH_SONG_EXPORT?
+        "Export Packed Track As":save?"Save Track As":"Open Track or Package";
+    char initial_path[512];
+    const char *initial=action==PATH_WAV?tracker.loaded_path:initial_path;
+    if(action!=PATH_WAV) {
+        const char *current=tracker.song_path;
+        size_t n=strlen(current);
+        const char *basename=strrchr(current,'/');
+        basename=basename?basename+1:current;
+        int user_track=n>=4 && !strcmp(current+n-4,".ttt") &&
+                       strcmp(basename,"default.ttt");
+        if(action==PATH_SONG_SAVE && user_track)
+            snprintf(initial_path,sizeof(initial_path),"%s",current);
+        else if(action==PATH_SONG_EXPORT && user_track)
+            snprintf(initial_path,sizeof(initial_path),"%s.zip",current);
+        else snprintf(initial_path,sizeof(initial_path),"track.%s",
+                      action==PATH_SONG_EXPORT?"ttt.zip":"ttt");
+    }
     const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav":
-        save?".tts.zip,.song":".tts.zip,.song,.txt";
+        action==PATH_SONG_EXPORT?".ttt.zip,.tts.zip":
+        action==PATH_SONG_SAVE?".ttt,.song":".ttt,.song,.ttt.zip,.tts.zip,.txt";
     if(!f80_file_dialog_show(&file_dialog,&tracker.app,
                              save?F80_FILE_SAVE:F80_FILE_OPEN,title,initial,
                              filter,file_chosen,NULL))
@@ -1379,6 +1410,9 @@ static void open_song(F80Widget *button,void *user) {
 }
 static void save_song(F80Widget *button,void *user) {
     (void)button;(void)user;open_path_dialog(PATH_SONG_SAVE);
+}
+static void export_package(F80Widget *button,void *user) {
+    (void)button;(void)user;open_path_dialog(PATH_SONG_EXPORT);
 }
 static void quit(F80Widget *button,void *user) {
     (void)button;(void)user;
@@ -2815,7 +2849,7 @@ static void show_table(F80Widget *button,void *user) {
 static void show_help(F80Widget *button,void *user) {
     (void)button;(void)user;
     static const char *lines[]={
-        "File > Load WAV adds a sample; Open/Save Song handles the whole song.",
+        "File > Load WAV adds a sample; Open/Save Track handles the whole song.",
         "Type ; then O for Orders, I for Instruments, or X for Main.",
         "Wave: F1/F2 previous/next sample; F3/F4 previous/next marker.",
         "Wave: Ctrl+Left/Right selects markers; Shift+Left/Right moves one.",
@@ -2971,8 +3005,9 @@ static void redo_edit(F80Widget *button,void *user) {
 static const F80MenuItem file_items[]={
     {"~L~oad WAV...",NULL,open_load,1},
     {"~N~ew FM",NULL,new_fm,1},
-    {"~O~pen song...",NULL,open_song,1},
-    {"~S~ave song...",NULL,save_song,1},
+    {"~O~pen track...",NULL,open_song,1},
+    {"~S~ave track...",NULL,save_song,1},
+    {"E~x~port packed track...",NULL,export_package,1},
     {"Song ~s~ettings...",NULL,show_settings,1},
     {"~Q~uit",NULL,quit,1}
 };
@@ -5621,7 +5656,7 @@ static int load_default_song(const char *executable) {
             selected=path;
         }
         if(!load_song_at(selected))return 0;
-    } else if(!load_song_at("/default.song"))return 0;
+    } else if(!load_song_at("/default.ttt"))return 0;
 #else
     char path[PATH_MAX],resolved[PATH_MAX],directory[PATH_MAX];
     if(initial_song && initial_song[0]) {
@@ -5632,20 +5667,20 @@ static int load_default_song(const char *executable) {
         char *slash=strrchr(directory,'/');
         if(slash) {
             *slash=0;
-            if(snprintf(path,sizeof(path),"%s/../../../default.song",directory)<
+            if(snprintf(path,sizeof(path),"%s/../../../default.ttt",directory)<
                (int)sizeof(path) && realpath(path,resolved)) {
                 if(!load_song_at(resolved))return 0;
                 goto loaded;
             }
-            if(snprintf(path,sizeof(path),"%s/default.song",directory)<
+            if(snprintf(path,sizeof(path),"%s/default.ttt",directory)<
                (int)sizeof(path) && realpath(path,resolved)) {
                 if(!load_song_at(resolved))return 0;
                 goto loaded;
             }
         }
     }
-    if(!realpath("default.song",resolved)) {
-        tt_tracker_message("default.song is missing");return 0;
+    if(!realpath("default.ttt",resolved)) {
+        tt_tracker_message("default.ttt is missing");return 0;
     }
     if(!load_song_at(resolved))return 0;
 loaded:
@@ -5673,7 +5708,7 @@ int main(int argc,char **argv) {
     tracker.edit_order=0;tracker.reveal_cursor=1;
     tracker.active_pattern_index=tracker.active_order_index=-1;
     if(!load_default_song(argv[0])) {
-        fprintf(stderr,"Could not load default.song: %s\n",tracker.message);
+        fprintf(stderr,"Could not load default.ttt: %s\n",tracker.message);
         tt_free(&tracker.wave);
         for(int i=0;i<tracker.sample_count;++i)tt_free(&tracker.samples[i].wave);
         return 1;

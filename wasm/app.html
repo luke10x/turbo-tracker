@@ -16,7 +16,7 @@
 <body>
   <div id="sample-toolbar" hidden><span id="sample-file-status"></span>
     <input id="sample-file" type="file" accept=".wav,audio/wav,audio/x-wav" hidden>
-    <input id="sample-song-file" type="file" accept=".tts.zip,.song,.txt,.wav" multiple hidden></div>
+    <input id="sample-song-file" type="file" accept=".ttt,.song,.ttt.zip,.tts.zip,.txt,.wav" multiple hidden></div>
   <div id="terminal"></div>
   <script src="./vendor/xterm.js"></script>
   <script src="./vendor/xterm-addon-fit.js"></script>
@@ -32,8 +32,9 @@
     const status = document.getElementById('sample-file-status');
     window.f80ChooseWav = () => input.click();
     window.f80ChooseSong = () => songInput.click();
-    window.f80DownloadSong = filename => {
-      const blob = new Blob([Module.FS.readFile('/sample-tracker-export.tts.zip')], { type: 'application/zip' });
+    window.f80DownloadSong = (path, filename) => {
+      const type = filename.endsWith('.zip') ? 'application/zip' : 'text/plain';
+      const blob = new Blob([Module.FS.readFile(path)], { type });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -62,11 +63,11 @@
       input.value = '';
     });
     async function loadSongFiles(files) {
-      const packed = files.find(file => /\.tts\.zip$/i.test(file.name));
+      const packed = files.find(file => /\.(?:ttt|tts)\.zip$/i.test(file.name));
       if (packed) {
         try {
           if (packed.size > 512 * 1024 * 1024) throw new Error('Package exceeds 512 MB');
-          Module.FS.writeFile('/sample-tracker-import.tts.zip',
+          Module.FS.writeFile('/sample-tracker-import.ttt.zip',
             new Uint8Array(await packed.arrayBuffer()));
           const loaded = Module.ccall('tt_tracker_load_package', 'number', [], []);
           status.textContent = loaded ? `Loaded ${packed.name}` : `Could not load ${packed.name}`;
@@ -75,15 +76,15 @@
         }
         return;
       }
-      const song = files.find(file => /\.(song|txt)$/i.test(file.name));
-      if (!song) { status.textContent = 'Choose a .tts.zip or .song file'; return; }
+      const song = files.find(file => /\.(ttt|song|txt)$/i.test(file.name));
+      if (!song) { status.textContent = 'Choose a .ttt track or packed .ttt.zip'; return; }
       try {
         for (const file of files.filter(file => /\.wav$/i.test(file.name))) {
           if (file.size > 64 * 1024 * 1024) throw new Error(`${file.name} exceeds 64 MB`);
           Module.FS.writeFile(`/${file.name}`, new Uint8Array(await file.arrayBuffer()));
           Module.ccall('tt_tracker_recover_wav', 'number', ['string'], [file.name]);
         }
-        Module.FS.writeFile('/sample-tracker-import.song', new Uint8Array(await song.arrayBuffer()));
+        Module.FS.writeFile('/sample-tracker-import.ttt', new Uint8Array(await song.arrayBuffer()));
         const loaded = Module.ccall('tt_tracker_load_song', 'number', [], []);
         status.textContent = loaded ? `Loaded ${song.name}; missing WAVs are marked in red` :
           `Could not parse ${song.name}`;
@@ -103,7 +104,7 @@
       const files = [...event.dataTransfer.files];
       const first = files[0];
       if (!first) return;
-      if (files.some(file => /\.tts\.zip$|\.(song|txt)$/i.test(file.name))) {
+      if (files.some(file => /\.(?:ttt|tts)\.zip$|\.(ttt|song|txt)$/i.test(file.name))) {
         await loadSongFiles(files);
       } else if (/\.syx$/i.test(first.name)) {
         try {

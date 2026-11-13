@@ -21,11 +21,12 @@ static PackageDir *package_dirs;
 
 static void remove_package_dir(const char *dir) {
     char path[PATH_MAX];
-    if(snprintf(path,sizeof(path),"%s/song.song",dir)<(int)sizeof(path))unlink(path);
+    if(snprintf(path,sizeof(path),"%s/song.ttt",dir)<(int)sizeof(path))unlink(path);
     for(int i=1;i<=TT_SONG_SAMPLES;++i) {
         if(snprintf(path,sizeof(path),"%s/samples/%02d.wav",dir,i)<(int)sizeof(path))unlink(path);
     }
     if(snprintf(path,sizeof(path),"%s/samples",dir)<(int)sizeof(path))rmdir(path);
+    if(snprintf(path,sizeof(path),"%s/song.song",dir)<(int)sizeof(path))unlink(path);
     rmdir(dir);
 }
 void tt_package_cleanup_all(void) {
@@ -37,7 +38,8 @@ void tt_package_cleanup_all(void) {
 }
 int tt_package_is_path(const char *path) {
     size_t n=strlen(path);
-    return n>=8 && !strcmp(path+n-8,".tts.zip");
+    return (n>=8 && !strcmp(path+n-8,".tts.zip")) ||
+           (n>=8 && !strcmp(path+n-8,".ttt.zip"));
 }
 static int zip_entry(mz_zip_archive *zip,const char *name,size_t maximum,
                      mz_uint *index,char *error,size_t error_size) {
@@ -87,7 +89,7 @@ int tt_package_save(const char *path,const TtSong *song,
     if(!mz_zip_writer_init_file(&zip,zip_tmp,0)) {
         snprintf(error,error_size,"Cannot start ZIP archive");goto done;
     }
-    if(!mz_zip_writer_add_file(&zip,"song.song",song_tmp,NULL,0,MZ_BEST_SPEED)) {
+    if(!mz_zip_writer_add_file(&zip,"song.ttt",song_tmp,NULL,0,MZ_BEST_SPEED)) {
         snprintf(error,error_size,"Cannot pack song data");goto done;
     }
     for(int i=0;i<count;++i) {
@@ -139,9 +141,14 @@ int tt_package_unpack(const char *path,char *song_path,size_t song_path_size,
         snprintf(error,error_size,"Cannot open packed song ZIP");return 0;
     }
     mz_uint song_index;
-    int exists=zip_entry(&zip,"song.song",8u*1024u*1024u,&song_index,error,error_size);
+    int legacy=0;
+    int exists=zip_entry(&zip,"song.ttt",8u*1024u*1024u,&song_index,error,error_size);
+    if(!exists) {
+        legacy=1;
+        exists=zip_entry(&zip,"song.song",8u*1024u*1024u,&song_index,error,error_size);
+    }
     if(exists<=0) {
-        if(!exists)snprintf(error,error_size,"Package has no song.song");
+        if(!exists)snprintf(error,error_size,"Package has no song.ttt");
         mz_zip_reader_end(&zip);return 0;
     }
     char dir[]="/tmp/tts-package-XXXXXX";
@@ -161,7 +168,7 @@ int tt_package_unpack(const char *path,char *song_path,size_t song_path_size,
        mkdir(samples_dir,0700)) {
         snprintf(error,error_size,"Cannot create sample workspace");goto done;
     }
-    if(snprintf(song_path,song_path_size,"%s/song.song",dir)>=(int)song_path_size ||
+    if(snprintf(song_path,song_path_size,"%s/%s",dir,legacy?"song.song":"song.ttt")>=(int)song_path_size ||
        !mz_zip_reader_extract_to_file(&zip,song_index,song_path,0)) {
         snprintf(error,error_size,"Cannot unpack song data");goto done;
     }

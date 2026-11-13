@@ -190,14 +190,16 @@ int main(void) {
     const char *sources[TT_SONG_SAMPLES]={"samples/sine-c4.wav"};
     const TtWave *waves[TT_SONG_SAMPLES]={&wav,&fm};
     char package_path[256],unpacked[512];
-    snprintf(package_path,sizeof(package_path),"%s.tts.zip",path);
+    snprintf(package_path,sizeof(package_path),"%s.ttt.zip",path);
     assert(tt_package_is_path(package_path));
+    assert(tt_package_is_path("older.tts.zip"));
     assert(!tt_package_save(package_path,&song,sample,2,
                             (const char *const *)((const char *[TT_SONG_SAMPLES]){"missing.wav"}),
                             waves,error,sizeof(error)));
     assert(tt_package_save(package_path,&song,sample,2,sources,waves,error,sizeof(error)));
     TtPackageBank banks[TT_SONG_SAMPLES];
     assert(tt_package_unpack(package_path,unpacked,sizeof(unpacked),banks,error,sizeof(error)));
+    assert(strstr(unpacked,"/song.ttt"));
     assert(tt_song_load(unpacked,&loaded,readback,&count,error,sizeof(error)));
     assert(count==2 && !strcmp(readback[0].path,"samples/01.wav"));
     assert(readback[1].instrument_type==TT_INSTRUMENT_DX7);

@@ -12,8 +12,8 @@ runs as:
 
 The app has six sample channels, 16–256 rows per pattern, up to 32 named
 patterns, up to 128 play-order entries, 16 markers per sample (15 slices),
-16 editable effect tables, a zoomable 2×2 waveform pane, packed `.tts.zip`
-songs, and live WAV loading in the browser.
+16 editable effect tables, a zoomable 2×2 waveform pane, Git-friendly
+`.ttt` tracks, and live WAV loading in the browser.
 
 ## Layout
 
@@ -27,7 +27,7 @@ songs, and live WAV loading in the browser.
 - `include/` — F80 headers, the curses-key adapter, and the webcurses shim
   (`include/web_curses/curses.h`)
 - `samples/` — four demo WAVs (`tgndshtn-part1..4.wav`) and a C-4 sine
-- `default.song` — the embedded demo song
+- `default.ttt` — the embedded demo song
 - `wasm/` — browser shell: `app.html`, `curses_terminal.js` (xterm.js wiring,
   keyboard/mouse/touch forwarding), vendored xterm.js files
 - `docs/turbo-tracker-effect-status.md` — per-command status of the effects
@@ -71,7 +71,7 @@ http://localhost:8001/app.html
 ```
 
 The generated site in `build/emscripten/www/` is disposable; `wasm/` holds the
-authored browser files. The demo WAVs and `default.song` are embedded into the
+authored browser files. The demo WAVs and `default.ttt` are embedded into the
 WASM filesystem at build time.
 
 ### itch.io
@@ -87,10 +87,10 @@ Writes `build/emscripten/itch/turbo-tracker.zip` — a standalone archive with
 
 - The browser build starts on the first click/tap (Web Audio requires a user
   gesture).
-- In the browser, **File > Open song...** accepts a `.tts.zip` package or a
-  standalone `.song` with its WAVs; **Save song...** downloads a `.tts.zip`
-  package. You can also drop a package onto the terminal. This works in the
-  itch.io build too.
+- In the browser, **File > Open track...** accepts `.ttt`, legacy `.song`, or a
+  packed track. **Save track...** downloads a text `.ttt` file; **Export packed
+  track...** downloads a `.ttt.zip` with its audio and SYX banks. You can drop
+  any of these formats onto the terminal. This works in the itch.io build too.
 - The vendored xterm.js assets are committed; refresh them by replacing the
   files in `wasm/vendor/` (the build does not run npm).
 
@@ -108,18 +108,18 @@ Page Up/Down, Home/End, or the mouse wheel scroll the log; Ctrl+O
 returns to the panels. The context and message line above the shortcut bar
 uses the same black console palette.
 
-The startup song is [`default.song`](default.song). It loads four `tgndshtn`
+The startup song is [`default.ttt`](default.ttt). It loads four `tgndshtn`
 WAVs, has 13 patterns and 28 play-order entries, and starts at BPM 157 with 16
 rows per pattern, 8 rows per beat, and 12 ticks per row. Its custom sample
 markers and slices are part of the song.
 
 `INIT_SONG` selects a different startup song; unset, the app uses
-`default.song`. `INIT_PLAY=1` starts playback automatically; playback is off
+`default.ttt`. `INIT_PLAY=1` starts playback automatically; playback is off
 by default. For example:
 
 ```sh
 make native
-INIT_SONG=examples/glide/glide.song INIT_PLAY=1 build/macos/bin/turbo-tracker
+INIT_SONG=examples/glide/glide.ttt INIT_PLAY=1 build/macos/bin/turbo-tracker
 ```
 
 The browser catalog passes the same settings through the app URL.
@@ -321,34 +321,40 @@ pans the waveform. Hold on it for one second to select the nearest marker, then
 drag to move that marker between its neighbors. Use the bottom perspective
 controls to switch layouts. The active pane has a white border.
 
-### Song files
+### Track files
 
-**File > Save song...** creates a `.tts.zip` package by default. It contains
-`song.song` (the versioned text song), the song's WAV files under `samples/`,
-and any imported original SYX banks under `banks/`. The package can be moved
-without breaking its sample paths. **File > Open song...** opens packages or
-standalone `.song` files. Native builds use the file browser; browser builds
-use the upload picker and download bridge. Dropping a package onto the web
-terminal opens it too. The embedded `default.song` remains a standalone song.
+**File > Save track...** saves the versioned text track as `.ttt` by default.
+This is the file to keep in Git: changes to its patterns, markers, settings,
+and FM patches produce ordinary text diffs. WAVs remain separate assets. The
+current FM patch is saved in the text; keep an original SYX bank separately if
+you need the full bank. Native builds use the file browser; browser builds use
+the download bridge.
 
-A standalone `.song` is still supported when you explicitly save with that
-extension. It lists BPM, each instrument's name and source path, reference
+A `.ttt` file lists BPM, each instrument's name and source path, reference
 note, markers, slice offsets, named patterns, and play order. Pattern rows use
-the compact six-channel format with `|` separators. WAVs are referenced by
-paths relative to the song file's directory, including `../` for parent and
-sibling folders. The built-in demo sample uses `builtin:demo` and is recreated
-on load.
+the compact six-channel format with `|` separators. WAV paths are relative to
+the track file's directory, including `../` for parent and sibling folders.
+The built-in demo sample uses `builtin:demo` and is recreated on load.
 
-A missing WAV does not block loading a standalone song or package. Its cells
-remain but play silently; the waveform pane turns red, shows the saved path,
-and offers Retry. Uploading a WAV with the same original filename restores it
-when frame count and rate match. For standalone songs in the browser, choose
-the `.song` and its WAV files together. The browser stores selected WAVs by
-filename in its virtual filesystem. It cannot read arbitrary local paths
-without the user choosing those files.
+**File > Export packed track...** creates a `.ttt.zip` containing `song.ttt`,
+WAV files under `samples/`, and original SYX banks still loaded in the current
+session under `banks/`.
+It is for moving or sharing a complete track; exporting does not change the
+current `.ttt` save path or clear unsaved edits. **File > Open track...** accepts
+both `.ttt` and `.ttt.zip`, plus older `.song` and `.tts.zip` files. The embedded
+[`default.ttt`](default.ttt) is a standalone track.
+
+A missing WAV does not block loading a track or package. Its cells remain but
+play silently; the waveform pane turns red, shows the saved path, and offers
+Retry. Uploading a WAV with the same original filename restores it when frame
+count and rate match. In the browser, choose a `.ttt` and its WAV files together
+when opening a standalone track. The browser stores selected WAVs by filename
+in its virtual filesystem. It cannot read arbitrary local paths without the
+user choosing those files. Dropping a track or package onto the web terminal
+opens it too.
 
 The older standalone slice CSV and single-pattern parsers remain in the source
-for compatibility tests; the File menu loads and saves entire songs.
+for compatibility tests; the File menu loads and saves entire tracks.
 
 ## FM synth instruments
 
