@@ -504,7 +504,12 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
             reject(doc,"Invalid DX7 patch");return 0;
         }
         TtWave *w=sample_wave(doc,index);
+        if(event->dx7_import.bank_size>TT_SYX_MAX_BYTES) {
+            reject(doc,"Invalid SYX bank size");return 0;
+        }
         w->instrument_type=TT_INSTRUMENT_DX7;w->dx7=event->dx7_import.patch;
+        w->syx_size=event->dx7_import.bank_size;
+        memcpy(w->syx_bank,event->dx7_import.bank,w->syx_size);
         snprintf(w->name,sizeof(w->name),"%.10s",w->dx7.data+145);return 1;
     }
     case TT_EDIT_CELL_SET:

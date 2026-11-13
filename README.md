@@ -12,8 +12,8 @@ runs as:
 
 The app has six sample channels, 16–256 rows per pattern, up to 32 named
 patterns, up to 128 play-order entries, 16 markers per sample (15 slices),
-16 editable effect tables, a zoomable 2×2 waveform pane, `.song` text files,
-and live WAV loading in the browser.
+16 editable effect tables, a zoomable 2×2 waveform pane, packed `.tts.zip`
+songs, and live WAV loading in the browser.
 
 ## Layout
 
@@ -87,9 +87,10 @@ Writes `build/emscripten/itch/turbo-tracker.zip` — a standalone archive with
 
 - The browser build starts on the first click/tap (Web Audio requires a user
   gesture).
-- In the browser, **File > Open song...** lets you pick a `.song` plus its WAVs
-  together; **Save song...** downloads the text file. This works in the itch.io
-  build too.
+- In the browser, **File > Open song...** accepts a `.tts.zip` package or a
+  standalone `.song` with its WAVs; **Save song...** downloads a `.tts.zip`
+  package. You can also drop a package onto the terminal. This works in the
+  itch.io build too.
 - The vendored xterm.js assets are committed; refresh them by replacing the
   files in `wasm/vendor/` (the build does not run npm).
 
@@ -322,28 +323,32 @@ controls to switch layouts. The active pane has a white border.
 
 ### Song files
 
-**File > Open song...** and **Save song...** use one text `.song` file. The
-versioned file lists BPM, each sample's display and original WAV names, source
-path, frame count, sample reference note, marker frames and slice note offsets,
-then each named pattern's sixteen rows, then the play order. Pattern rows keep
-the compact six-channel format with `|` separators. WAV audio is referenced, not
-embedded. Native saves WAV paths relative to the song file's directory,
-including `../` for parent and sibling folders, and resolves paths from there.
-The built-in demo sample is identified as `builtin:demo` and recreated on load.
-A missing WAV does not block the song. Its cells stay intact but play silently;
-the waveform pane turns red, shows the saved path, and offers Retry. A WAV with
-the same original filename is restored automatically on upload when frame count
-and rate match. A mismatched WAV still blocks loading.
+**File > Save song...** creates a `.tts.zip` package by default. It contains
+`song.song` (the versioned text song), the song's WAV files under `samples/`,
+and any imported original SYX banks under `banks/`. The package can be moved
+without breaking its sample paths. **File > Open song...** opens packages or
+standalone `.song` files. Native builds use the file browser; browser builds
+use the upload picker and download bridge. Dropping a package onto the web
+terminal opens it too. The embedded `default.song` remains a standalone song.
 
-In the browser, choose the `.song` and its referenced WAV files together in the
-Open Song picker. The browser places selected WAVs by filename into its virtual
-filesystem before the C song loader runs. The resulting `.song` uses WAV
-filenames as flat relative paths. Save Song downloads the complete text file.
-The browser cannot read arbitrary local paths without the user selecting the
-WAVs. This also works in the itch.io ZIP build.
+A standalone `.song` is still supported when you explicitly save with that
+extension. It lists BPM, each instrument's name and source path, reference
+note, markers, slice offsets, named patterns, and play order. Pattern rows use
+the compact six-channel format with `|` separators. WAVs are referenced by
+paths relative to the song file's directory, including `../` for parent and
+sibling folders. The built-in demo sample uses `builtin:demo` and is recreated
+on load.
+
+A missing WAV does not block loading a standalone song or package. Its cells
+remain but play silently; the waveform pane turns red, shows the saved path,
+and offers Retry. Uploading a WAV with the same original filename restores it
+when frame count and rate match. For standalone songs in the browser, choose
+the `.song` and its WAV files together. The browser stores selected WAVs by
+filename in its virtual filesystem. It cannot read arbitrary local paths
+without the user choosing those files.
 
 The older standalone slice CSV and single-pattern parsers remain in the source
-for compatibility tests; the File menu now loads and saves entire songs.
+for compatibility tests; the File menu loads and saves entire songs.
 
 ## FM synth instruments
 

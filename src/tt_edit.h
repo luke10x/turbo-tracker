@@ -164,7 +164,8 @@ typedef struct {
         TtEditSample sample;
         struct { int index,type; } instrument_type;
         struct { int index,parameter,value; } dx7_parameter;
-        struct { int index; TtDx7Patch patch; } dx7_import;
+        struct { int index; TtDx7Patch patch;
+                 unsigned char bank[TT_SYX_MAX_BYTES]; size_t bank_size; } dx7_import;
         TtEditMarker marker;
         TtEditSlice slice;
         TtEditLoadedWave loaded_wave;

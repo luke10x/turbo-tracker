@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tt_song.h"
+#include "tt_package.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,6 +172,42 @@ int main(void) {
     FILE *file=fopen(path,"w");assert(file);fputs("bad\n",file);fclose(file);
     assert(!tt_song_load(path,&loaded,readback,&count,error,sizeof(error)));
     assert(loaded.order_count==3);
-    unlink(path);puts("song patterns, order and sample metadata passed");
+    TtWave wav={0},fm={0},reopened={0};
+    assert(tt_load_wav("samples/sine-c4.wav",&wav,error,sizeof(error)));
+    sample[0].frames=wav.frames;sample[0].rate=wav.rate;
+    tt_phrase_init(&sample[0].phrase,wav.frames);
+    snprintf(sample[0].path,sizeof(sample[0].path),"samples/sine-c4.wav");
+    snprintf(sample[0].source_name,sizeof(sample[0].source_name),"sine-c4.wav");
+    snprintf(sample[1].name,sizeof(sample[1].name),"FM voice");
+    snprintf(sample[1].source_name,sizeof(sample[1].source_name),"bank.syx");
+    snprintf(sample[1].path,sizeof(sample[1].path),"builtin:dx7");
+    sample[1].instrument_type=TT_INSTRUMENT_DX7;
+    tt_dx7_init(&sample[1].dx7);
+    tt_phrase_init(&sample[1].phrase,0);
+    fm.instrument_type=TT_INSTRUMENT_DX7;
+    fm.syx_size=163;
+    for(size_t i=0;i<fm.syx_size;++i)fm.syx_bank[i]=(unsigned char)i;
+    const char *sources[TT_SONG_SAMPLES]={"samples/sine-c4.wav"};
+    const TtWave *waves[TT_SONG_SAMPLES]={&wav,&fm};
+    char package_path[256],unpacked[512];
+    snprintf(package_path,sizeof(package_path),"%s.tts.zip",path);
+    assert(tt_package_is_path(package_path));
+    assert(!tt_package_save(package_path,&song,sample,2,
+                            (const char *const *)((const char *[TT_SONG_SAMPLES]){"missing.wav"}),
+                            waves,error,sizeof(error)));
+    assert(tt_package_save(package_path,&song,sample,2,sources,waves,error,sizeof(error)));
+    TtPackageBank banks[TT_SONG_SAMPLES];
+    assert(tt_package_unpack(package_path,unpacked,sizeof(unpacked),banks,error,sizeof(error)));
+    assert(tt_song_load(unpacked,&loaded,readback,&count,error,sizeof(error)));
+    assert(count==2 && !strcmp(readback[0].path,"samples/01.wav"));
+    assert(readback[1].instrument_type==TT_INSTRUMENT_DX7);
+    assert(banks[1].size==fm.syx_size && !memcmp(banks[1].data,fm.syx_bank,fm.syx_size));
+    assert(tt_song_resolve_path(unpacked,readback[0].path,resolved,sizeof(resolved)));
+    assert(tt_load_wav(resolved,&reopened,error,sizeof(error)));
+    assert(reopened.frames==wav.frames && reopened.rate==wav.rate);
+    tt_free(&wav);tt_free(&reopened);
+    tt_package_cleanup_all();
+    unlink(package_path);
+    unlink(path);puts("song and packed ZIP round-trip passed");
     return 0;
 }

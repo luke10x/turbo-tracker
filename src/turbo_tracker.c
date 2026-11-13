@@ -22,6 +22,7 @@
 #include "tt_pattern.h"
 #include "tt_sample.h"
 #include "tt_song.h"
+#include "tt_package.h"
 #include "tt_edit.h"
 #include "tt_tracker_internal.h"
 
@@ -1110,12 +1111,15 @@ static void next_sample(F80Widget *button,void *user) {
 }
 static int save_song_at(const char *path) {
     TtSongSample meta[TT_HISTORY_MAX]={0};
+    const char *sample_paths[TT_SONG_SAMPLES]={0};
+    const TtWave *waves[TT_SONG_SAMPLES]={0};
     TtEditEvent sync={.type=TT_EDIT_PATTERN_SYNC};
     if(!emit_edit(&sync)) { tt_tracker_message(edit_message);return 0; }
     for(int i=0;i<tracker.sample_count;++i) {
         const TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
         const TtPhrase *phrase=i==tracker.sample_index?&tracker.phrase:&tracker.samples[i].phrase;
         const char *loaded=i==tracker.sample_index?tracker.loaded_path:tracker.samples[i].loaded_path;
+        sample_paths[i]=loaded;waves[i]=wave;
         TtSongSample *entry=&meta[i];
         snprintf(entry->name,sizeof(entry->name),"%s",wave->name);
         snprintf(entry->source_name,sizeof(entry->source_name),"%s",wave->source_name);
@@ -1133,15 +1137,20 @@ static int save_song_at(const char *path) {
         }
     }
     char error[192];
-    if(!tt_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error))) {
-        tt_tracker_message(error);return 0;
-    }
+    int packed=tt_package_is_path(path);
+    int saved=packed?
+        tt_package_save(path,&tracker.song,meta,tracker.sample_count,
+                        sample_paths,waves,error,sizeof(error)):
+        tt_song_save(path,&tracker.song,meta,tracker.sample_count,error,sizeof(error));
+    if(!saved) { tt_tracker_message(error);return 0; }
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
     tracker.document_dirty=0;
-    tt_tracker_message("Song saved with patterns, order, sample paths and slices");
+    tt_tracker_message(packed?"Packed song saved with WAVs and SYX banks":
+                             "Standalone song saved with sample paths");
     return 1;
 }
-static int load_song_at(const char *path) {
+static int load_song_at_with_banks(const char *path,
+                                   const TtPackageBank banks[TT_SONG_SAMPLES]) {
     TtSong *next=malloc(sizeof(*next));
     if(!next) { tt_tracker_message("Out of memory loading song");return 0; }
     TtSongSample meta[TT_HISTORY_MAX];
@@ -1149,6 +1158,16 @@ static int load_song_at(const char *path) {
     int count=0,missing=0;char error[192];
     if(!tt_song_load(path,next,meta,&count,error,sizeof(error))) {
         free(next);tt_tracker_message(error);return 0;
+    }
+    if(banks)for(int i=0;i<count;++i) {
+        char expected[32];
+        snprintf(expected,sizeof(expected),"samples/%02d.wav",i+1);
+        if(strcmp(meta[i].path,"builtin:demo") &&
+           strcmp(meta[i].path,"builtin:dx7") &&
+           strcmp(meta[i].path,expected)) {
+            snprintf(error,sizeof(error),"Invalid package sample path: %.100s",meta[i].path);
+            goto failed;
+        }
     }
     for(int i=0;i<count;++i) {
         if(meta[i].instrument_type==TT_INSTRUMENT_DX7 && !meta[i].frames) {
@@ -1193,6 +1212,10 @@ static int load_song_at(const char *path) {
         snprintf(loaded[i].wave.source_name,sizeof(loaded[i].wave.source_name),"%s",meta[i].source_name);
         loaded[i].phrase=meta[i].phrase;
     }
+    if(banks)for(int i=0;i<count;++i)if(banks[i].size) {
+        loaded[i].wave.syx_size=banks[i].size;
+        memcpy(loaded[i].wave.syx_bank,banks[i].data,banks[i].size);
+    }
     stop_playback(NULL,NULL);
     TtEditEvent event={.type=TT_EDIT_DOCUMENT_REPLACE};
     event.replacement=(TtEditDocumentReplace){next,loaded,count};
@@ -1215,6 +1238,26 @@ static int load_song_at(const char *path) {
 failed:
     for(int i=0;i<count;++i)tt_free(&loaded[i].wave);
     free(next);tt_tracker_message(error);return 0;
+}
+static int load_song_at(const char *path) {
+    return load_song_at_with_banks(path,NULL);
+}
+static int load_project_at(const char *path) {
+    if(!tt_package_is_path(path))return load_song_at(path);
+    TtPackageBank *banks=calloc(TT_SONG_SAMPLES,sizeof(*banks));
+    if(!banks) { tt_tracker_message("Out of memory opening packed song");return 0; }
+    char song_path[512],error[192];
+    if(!tt_package_unpack(path,song_path,sizeof(song_path),banks,
+                          error,sizeof(error))) {
+        free(banks);tt_tracker_message(error);return 0;
+    }
+    int loaded=load_song_at_with_banks(song_path,banks);
+    free(banks);
+    if(loaded) {
+        snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
+        tt_tracker_message("Packed song loaded");
+    }
+    return loaded;
 }
 static int recover_missing(const char *name) {
     int recovered=0;
@@ -1251,6 +1294,8 @@ static int load_dx7_at(const char *path,int voice) {
     if(!tt_dx7_import(bytes,size,size==163?0:voice,&e.dx7_import.patch)) {
         tt_tracker_message("Invalid FM SysEx: check format, parameter ranges and checksum");return 0;
     }
+    e.dx7_import.bank_size=size;
+    memcpy(e.dx7_import.bank,bytes,size);
     if(!emit_edit(&e)){tt_tracker_message(edit_message);return 0;}
     handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_REFRESH});
     manage_refresh();tt_tracker_message("FM voice imported; instrument edits are undoable");return 1;
@@ -1280,9 +1325,12 @@ EMSCRIPTEN_KEEPALIVE int tt_tracker_load_wav(const char *original_name) {
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_song(void) {
     return load_song_at("/sample-tracker-import.song");
 }
+EMSCRIPTEN_KEEPALIVE int tt_tracker_load_package(void) {
+    return load_project_at("/sample-tracker-import.tts.zip");
+}
 EMSCRIPTEN_KEEPALIVE int tt_tracker_save_song(void) {
-    if(!save_song_at("/sample-tracker-export.song"))return 0;
-    download_web_song("sample.song");return 1;
+    if(!save_song_at("/sample-tracker-export.tts.zip"))return 0;
+    download_web_song("song.tts.zip");return 1;
 }
 #endif
 #ifndef __EMSCRIPTEN__
@@ -1290,8 +1338,16 @@ static void file_chosen(const char *path,void *user) {
     (void)user;
     if(tracker.path_action==PATH_DX7)load_dx7_at(path,tracker.sysex_voice);
     else if(tracker.path_action==PATH_WAV)load_path(path,NULL);
-    else if(tracker.path_action==PATH_SONG_LOAD)load_song_at(path);
-    else save_song_at(path);
+    else if(tracker.path_action==PATH_SONG_LOAD)load_project_at(path);
+    else if(tt_package_is_path(path) ||
+            (strlen(path)>=5 && !strcmp(path+strlen(path)-5,".song")))
+        save_song_at(path);
+    else {
+        char packed[512];
+        if(snprintf(packed,sizeof(packed),"%s.tts.zip",path)<(int)sizeof(packed))
+            save_song_at(packed);
+        else tt_tracker_message("Package path too long");
+    }
 }
 #endif
 static void open_path_dialog(int action) {
@@ -1303,10 +1359,12 @@ static void open_path_dialog(int action) {
 #else
     tracker.path_action=action;
     int save=action==PATH_SONG_SAVE;
-    const char *title=action==PATH_DX7?"Import FM voice (.syx)":action==PATH_WAV?"Open WAV":save?"Save Song As":"Open Song";
+    const char *title=action==PATH_DX7?"Import FM voice (.syx)":action==PATH_WAV?"Open WAV":save?"Save Packed Song As":"Open Song or Package";
     const char *initial=action==PATH_WAV?tracker.loaded_path:
-        tracker.song_path[0]?tracker.song_path:"sample.song";
-    const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav":".song,.txt";
+        tracker.song_path[0] && tt_package_is_path(tracker.song_path)?
+            tracker.song_path:"song.tts.zip";
+    const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav":
+        save?".tts.zip,.song":".tts.zip,.song,.txt";
     if(!f80_file_dialog_show(&file_dialog,&tracker.app,
                              save?F80_FILE_SAVE:F80_FILE_OPEN,title,initial,
                              filter,file_chosen,NULL))
@@ -5214,6 +5272,7 @@ static int frame(void *user) {
                 tt_free(&tracker.samples[index].wave);
         }
         f80_free(tracker.root);tracker.root=NULL;
+        tt_package_cleanup_all();
         return 0;
     }
 #ifndef __EMSCRIPTEN__

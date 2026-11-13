@@ -6,7 +6,7 @@
 
 enum { TT_MARKERS=16, TT_SLICES=15, TT_STEPS=16,
        TT_MAX_STEPS=256, TT_CHANNELS=6,
-       TT_MAX_FRAMES=8000000 };
+       TT_MAX_FRAMES=8000000, TT_SYX_MAX_BYTES=4105 };
 enum { TT_SLICE_INHERIT=-1000 };
 enum { TT_PATTERN_EFFECTS=3 };
 enum { TT_NOTE_OFF=-2, TT_NOTE_REL_PLUS_BASE=-3,
@@ -81,6 +81,8 @@ typedef struct {
     int frames,rate,peak_count;
     char name[256];
     char source_name[256];
+    unsigned char syx_bank[TT_SYX_MAX_BYTES];
+    size_t syx_size;
 } TtWave;
 typedef struct {
     int marker[TT_MARKERS];
