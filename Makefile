@@ -19,7 +19,7 @@ F80_CORE_WASM_OBJS := build/emscripten/obj/f80-core/f80.o \
 	build/emscripten/obj/f80-core/f80_autocomplete.o
 
 # turbo-tracker application (our code, tt_ namespace)
-TT_APP_NATIVE_OBJS := $(addprefix $(PLATFORM_BUILD)/obj/tt-app/,tt_dx7.o tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_package.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
+TT_APP_NATIVE_OBJS := $(addprefix $(PLATFORM_BUILD)/obj/tt-app/,tt_dx7.o tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_package.o tt_zip_browse.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
 TT_APP_WASM_OBJS := $(addprefix build/emscripten/obj/tt-app/,tt_dx7.o tt_sample.o tt_csv.o tt_pattern.o tt_song.o tt_package.o tt_edit.o tt_play.o tt_audio.o turbo_tracker.o)
 
 SAMPLE_WAVS := samples/tgndshtn-part1.wav samples/tgndshtn-part2.wav \

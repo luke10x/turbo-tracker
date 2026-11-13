@@ -88,6 +88,10 @@ typedef struct {
     F80Widget *source_dialog,*source_info,*source_input,*source_internal,*source_browse,*source_apply,*source_cancel;
     int source_index;
     char source_details[512];
+    F80Widget *archive_dialog,*archive_list,*archive_open,*archive_cancel;
+    char archive_path[512],wav_archive_path[512],(*archive_entries)[512];
+    const char **archive_items;
+    int archive_count,archive_mode;
     F80Widget *slices_dialog,*slices_list_bg,*slices_list,*slices_note,*slices_info;
     F80Widget *order_dialog,*order_bank_label,*order_bank_bg,*order_bank;
     F80Widget *order_seq_label,*order_seq_bg,*order_seq,*order_name;

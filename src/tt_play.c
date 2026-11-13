@@ -3,10 +3,12 @@
 #include <string.h>
 #include "tt_audio.h"
 #include "tt_sample.h"
+#include "tt_package.h"
 #include "tt_tracker_internal.h"
 #include "tt_play.h"
 
 static void play_start_now(F80Widget *button,void *user);
+static void preview_stop_now(int resume);
 
 static const TtPattern *playing_pattern(void) {
     if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
@@ -413,8 +415,9 @@ static void play_audition_now(F80Widget *button,void *user) {
 }
 
 static void play_start_now(F80Widget *button,void *user) {
-    (void)button;(void)user;
+    preview_stop_now(0);
     tt_audio_stop();
+    (void)button;(void)user;
     tracker.playing=tracker.started=0;
     if(tracker.play_mode==PLAY_SONG && !tracker.order_range_active) {
         int at=tracker.order_list?tracker.order_list->cursor:0;
@@ -474,6 +477,93 @@ static void play_toggle_now(F80Widget *button,void *user) {
         tracker.display_head=tracker.display_tail=0;
         tt_tracker_message("Resumed");
     }
+}
+
+static int preview_active;
+static int preview_resume_playback;
+static Uint64 preview_deadline;
+static TtWave preview_loaded_wave;
+
+static void preview_stop_now(int resume) {
+    if(preview_active || preview_loaded_wave.pcm)tt_audio_stop();
+    preview_active=0;
+    tt_free(&preview_loaded_wave);
+    int should_resume=resume && preview_resume_playback;
+    preview_resume_playback=0;
+    if(should_resume && tracker.started && !tracker.playing &&
+       !tracker.song_finished)
+        tt_play_emit((TtPlayEvent){.type=TT_PLAY_TOGGLE});
+}
+
+static void preview_start_wave(const TtWave *wave) {
+    if(!wave || wave->instrument_type!=TT_INSTRUMENT_SAMPLE ||
+       !wave->pcm || wave->frames<=0 || wave->rate<=0)return;
+    int frames=wave->frames;
+    int limit=wave->rate*3;
+    if(frames>limit)frames=limit;
+    int reference=60;
+    if(wave==&tracker.wave)reference=tracker.phrase.reference_note;
+    if(!tt_audio_play(wave,0,frames,reference,reference)) {
+        tt_tracker_message("Audio unavailable: check the output device or browser permission");
+        return;
+    }
+    Uint64 duration=((Uint64)frames*1000+(Uint64)wave->rate-1)/
+                    (Uint64)wave->rate;
+    if(!duration)duration=1;
+    preview_deadline=SDL_GetTicks()+duration;
+    preview_active=1;
+    tt_tracker_message("Previewing sample");
+}
+
+static void preview_resume_if_needed(void) {
+    int resume=preview_resume_playback;
+    preview_resume_playback=0;
+    if(resume && tracker.started && !tracker.playing && !tracker.song_finished)
+        tt_play_emit((TtPlayEvent){.type=TT_PLAY_TOGGLE});
+}
+
+static void preview_sample_now(const TtPlayEvent *event) {
+    int resume=tracker.playing || (preview_active && preview_resume_playback);
+    preview_stop_now(0);
+    preview_resume_playback=resume;
+    if(tracker.playing)play_toggle_now(NULL,NULL);
+    TtWave loaded={0};
+    int file_preview=event->preview_sample.path[0]!=0;
+    if(file_preview) {
+        const char *loadable=event->preview_sample.path;
+        char extracted[1024],error[160];
+        int extracted_asset=0;
+        if(strchr(loadable,'!')) {
+            if(!tt_package_resolve_asset(tracker.song_path,loadable,extracted,
+                    sizeof(extracted),error,sizeof(error))) {
+                tt_tracker_message(error);preview_resume_if_needed();return;
+            }
+            loadable=extracted;extracted_asset=1;
+        }
+        if(!tt_load_wav(loadable,&loaded,error,sizeof(error))) {
+            if(extracted_asset)tt_package_release_asset(loadable);
+            tt_tracker_message(error);preview_resume_if_needed();return;
+        }
+        if(extracted_asset)tt_package_release_asset(loadable);
+    }
+    if(file_preview) {
+        preview_loaded_wave=loaded;
+        memset(&loaded,0,sizeof(loaded));
+        preview_start_wave(&preview_loaded_wave);
+    } else {
+        int index=event->preview_sample.instrument;
+        const TtWave *wave=index==tracker.sample_index?&tracker.wave:
+            index>=0 && index<tracker.sample_count?&tracker.samples[index].wave:NULL;
+        preview_start_wave(wave);
+    }
+    tt_free(&loaded);
+    if(!preview_active)preview_resume_if_needed();
+}
+
+static void advance_preview_now(void) {
+    if(!preview_active)return;
+    if(!tt_audio_voice_active(0) || SDL_GetTicks()>=preview_deadline)
+        preview_stop_now(1);
 }
 
 int tt_play_next_tick_frames(int divisor) {
@@ -589,6 +679,8 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_CLEAR_ORDER_RANGE:name="clear order range";break;
     case TT_PLAY_AUDITION:name="audition";break;
     case TT_PLAY_AUDITION_CELL:name="audition cell";break;
+    case TT_PLAY_PREVIEW_SAMPLE:name="preview sample";break;
+    case TT_PLAY_CANCEL_PREVIEW:name="cancel sample preview";break;
     case TT_PLAY_ROW_PLAYED:name="row played";break;
     case TT_PLAY_FINISHED:name="finished";break;
     case TT_PLAY_DOCUMENT_RESET:name="document reset";break;
@@ -656,9 +748,11 @@ void tt_play_flush(void) {
         --play_queue_count;
         memmove(play_queue,play_queue+1,(size_t)play_queue_count*sizeof(*play_queue));
         switch(event.type) {
-        case TT_PLAY_START:play_start_now(NULL,NULL);break;
-        case TT_PLAY_STOP:play_stop_now(NULL,NULL);break;
-        case TT_PLAY_TOGGLE:play_toggle_now(NULL,NULL);break;
+        case TT_PLAY_START:preview_stop_now(0);play_start_now(NULL,NULL);break;
+        case TT_PLAY_STOP:preview_stop_now(0);play_stop_now(NULL,NULL);break;
+        case TT_PLAY_TOGGLE:
+            if(preview_active)preview_stop_now(0);
+            play_toggle_now(NULL,NULL);break;
         case TT_PLAY_SET_MODE:
             tracker.play_mode=event.a;
             tracker.order_range_active=0;
@@ -787,6 +881,8 @@ void tt_play_flush(void) {
         case TT_PLAY_DX7_PATCH_UPDATE:
             tt_audio_update_dx7(event.dx7_patch.instrument,&event.dx7_patch.patch);
             break;
+        case TT_PLAY_PREVIEW_SAMPLE:preview_sample_now(&event);break;
+        case TT_PLAY_CANCEL_PREVIEW:preview_stop_now(1);break;
         case TT_PLAY_AUDITION:play_audition_now(NULL,NULL);break;
         case TT_PLAY_AUDITION_CELL:play_audition_cell_now(event.a,event.b);break;
         case TT_PLAY_ROW_PLAYED:
@@ -824,4 +920,6 @@ void tt_play_advance(void) {
     tt_play_flush();
     advance_playback_now();
     advance_audition_now();
+    advance_preview_now();
+    tt_play_flush();
 }

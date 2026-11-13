@@ -69,6 +69,11 @@ void f80_file_dialog_recent_add(const char *path) {
     save_recent_files();
 }
 
+void f80_file_dialog_set_preview(F80FileDialog *state,
+                                 F80FilePreviewChanged preview_changed) {
+    if(state)state->preview_changed=preview_changed;
+}
+
 static int smaller(int a, int b) { return a < b ? a : b; }
 static int larger(int a, int b) { return a > b ? a : b; }
 
@@ -83,6 +88,69 @@ static int full_path(char *out, size_t capacity, const char *directory,
     int written=name[0]=='/'?snprintf(out,capacity,"%s",name):
         snprintf(out,capacity,"%s/%s",directory,name);
     return written>=0 && (size_t)written<capacity;
+}
+
+static int local_browse_list(void *user,const char *directory,
+                             F80FileEntry *entries,int capacity,int *count,
+                             char *error,size_t error_size) {
+    (void)user;
+    DIR *dir=opendir(directory);
+    *count=0;
+    if(!dir) {
+        snprintf(error,error_size,"Cannot open directory: %s",strerror(errno));
+        return 0;
+    }
+    struct dirent *item;
+    while((item=readdir(dir)) && *count<capacity) {
+        if(!strcmp(item->d_name,".") || !strcmp(item->d_name,".."))continue;
+        char path[F80_FILE_DIALOG_PATH_MAX];
+        struct stat info;
+        if(!full_path(path,sizeof(path),directory,item->d_name) || stat(path,&info))continue;
+        if(!S_ISDIR(info.st_mode) && !S_ISREG(info.st_mode))continue;
+        F80FileEntry *entry=&entries[(*count)++];
+        snprintf(entry->name,sizeof(entry->name),"%s",item->d_name);
+        entry->directory=S_ISDIR(info.st_mode);
+        entry->size=entry->directory?0:(unsigned long long)info.st_size;
+    }
+    closedir(dir);
+    error[0]='\0';
+    return 1;
+}
+
+static int local_browse_join(void *user,const char *directory,const char *name,
+                             char *path,size_t path_size) {
+    (void)user;
+    return full_path(path,path_size,directory,name);
+}
+
+static int local_browse_parent(void *user,const char *directory,
+                               char *path,size_t path_size) {
+    (void)user;
+    if(!directory[0] || !strcmp(directory,"/"))return 0;
+    int written=snprintf(path,path_size,"%s",directory);
+    if(written<0 || (size_t)written>=path_size)return 0;
+    char *slash=strrchr(path,'/');
+    if(!slash)return 0;
+    if(slash==path)slash[1]='\0';
+    else *slash='\0';
+    return 1;
+}
+
+static int local_browse_stat(void *user,const char *path,int *directory,
+                             unsigned long long *size) {
+    (void)user;
+    struct stat info;
+    if(stat(path,&info))return 0;
+    if(directory)*directory=S_ISDIR(info.st_mode);
+    if(size)*size=S_ISREG(info.st_mode)?(unsigned long long)info.st_size:0;
+    return S_ISDIR(info.st_mode) || S_ISREG(info.st_mode);
+}
+
+static const F80FileBrowseApi local_browse_api={NULL,local_browse_list,
+    local_browse_join,local_browse_parent,local_browse_stat};
+
+const F80FileBrowseApi *f80_file_dialog_local_browse_api(void) {
+    return &local_browse_api;
 }
 
 static int matches_filter(const char *name, const char *filter) {
@@ -117,39 +185,41 @@ static void set_filename(F80FileDialog *state, const char *name) {
 }
 
 static void refresh_files(F80FileDialog *state) {
-    DIR *dir=opendir(state->directory);
     state->count=0;
-    if(!dir) {
-        snprintf(state->status,sizeof(state->status),"Cannot open directory: %s",strerror(errno));
-    } else {
-        if(strcmp(state->directory,"/")) {
+    const F80FileBrowseApi *browse=state->browse?state->browse:&local_browse_api;
+    char parent_path[F80_FILE_DIALOG_PATH_MAX];
+    int has_parent=browse->parent && browse->parent(browse->user,
+        state->directory,parent_path,sizeof(parent_path));
+    if(has_parent) {
             F80FileEntry *parent=&state->entries[state->count++];
             snprintf(parent->name,sizeof(parent->name),"..");
             parent->directory=1;parent->size=0;
-        }
-        int first=state->count;
-        struct dirent *item;
-        while((item=readdir(dir)) && state->count<F80_FILE_DIALOG_ITEMS) {
-            if(!strcmp(item->d_name,".") || !strcmp(item->d_name,".."))continue;
-            char path[F80_FILE_DIALOG_PATH_MAX];
-            struct stat info;
-            if(!full_path(path,sizeof(path),state->directory,item->d_name) ||
-               stat(path,&info))continue;
-            int directory=S_ISDIR(info.st_mode);
-            if(!directory && (!S_ISREG(info.st_mode) ||
-                              !matches_filter(item->d_name,state->filter)))continue;
-            F80FileEntry *entry=&state->entries[state->count++];
-            snprintf(entry->name,sizeof(entry->name),"%s",item->d_name);
-            entry->directory=directory;
-            entry->size=directory?0:(unsigned long long)info.st_size;
-        }
-        closedir(dir);
-        qsort(state->entries+first,(size_t)(state->count-first),
-              sizeof(state->entries[0]),entry_compare);
-        snprintf(state->status,sizeof(state->status),
+    }
+    int first=state->count,listed=0;
+    char error[160]="";
+    int capacity=F80_FILE_DIALOG_ITEMS-state->count;
+    if(!browse->list || !browse->list(browse->user,state->directory,
+            state->entries+state->count,capacity,&listed,error,sizeof(error))) {
+        snprintf(state->status,sizeof(state->status),"%s",
+                 error[0]?error:"Cannot browse this location");
+        listed=0;
+    }
+    if(listed>capacity)listed=capacity;
+    state->count+=listed;
+    int kept=first;
+    for(int i=first;i<state->count;++i) {
+        F80FileEntry entry=state->entries[i];
+        if(entry.directory || matches_filter(entry.name,state->filter))
+            state->entries[kept++]=entry;
+    }
+    state->count=kept;
+    if(error[0])snprintf(state->status,sizeof(state->status),"%s",error);
+    else snprintf(state->status,sizeof(state->status),
                  "Tab: file name / files / buttons   Enter: %s   Esc: cancel",
                  state->mode==F80_FILE_SAVE?"save":"open");
-    }
+    if(state->count>first)
+        qsort(state->entries+first,(size_t)(state->count-first),
+              sizeof(state->entries[0]),entry_compare);
     for(int i=0;i<state->count;++i) {
         snprintf(state->display[i],sizeof(state->display[i]),"%s%s",
                  state->entries[i].name,state->entries[i].directory?"/":"");
@@ -208,6 +278,7 @@ int f80_file_dialog_active(const F80FileDialog *state) {
 
 void f80_file_dialog_close(F80FileDialog *state) {
     if(!f80_file_dialog_active(state))return;
+    if(state->preview_changed)state->preview_changed(NULL,state->user);
     F80App *app=state->app;
     f80_autocomplete_close(&state->autocomplete);
     state->dialog=state->labels=state->list_background=state->list=NULL;
@@ -248,9 +319,34 @@ static void recent_chosen(int index, void *user) {
     F80FileDialog *state=user;
     if(index<0 || index>=state->recent_count)return;
     const char *path=state->recent_items[index];
-    set_filename(state,path);
+    const F80FileBrowseApi *browse=state->browse?state->browse:&local_browse_api;
+    int is_directory=0;
+    if(browse->stat && browse->stat(browse->user,path,&is_directory,NULL) &&
+       is_directory) {
+        if(strlen(path)<sizeof(state->directory)) {
+            snprintf(state->directory,sizeof(state->directory),"%s",path);
+            refresh_files(state);
+            set_filename(state,"");
+        }
+    } else {
+        char parent[F80_FILE_DIALOG_PATH_MAX];int parent_is_directory=0;
+        int navigated=browse->parent && browse->stat &&
+           browse->parent(browse->user,path,parent,sizeof(parent)) &&
+           browse->stat(browse->user,parent,&parent_is_directory,NULL) &&
+           parent_is_directory;
+        if(navigated) {
+            snprintf(state->directory,sizeof(state->directory),"%s",parent);
+            refresh_files(state);
+        }
+        const char *bang=strchr(path,'!');
+        const char *slash=strrchr(path,'/');
+        const char *name=!navigated?path:
+                         bang && (!slash || slash<bang)?bang+1:
+                         slash?slash+1:path;
+        set_filename(state,name);
+    }
     snprintf(state->status,sizeof(state->status),
-             "Recent path filled; edit it or press %s",
+             "Recent location opened; edit the name or press %s",
              state->mode==F80_FILE_SAVE?"Save":"Open");
     state->app->focus=state->input;
 }
@@ -274,11 +370,19 @@ static void filter_recent(F80FileDialog *state) {
 }
 
 static void enter_directory(F80FileDialog *state, const char *name) {
-    char path[F80_FILE_DIALOG_PATH_MAX], canonical[F80_FILE_DIALOG_PATH_MAX];
-    if(!full_path(path,sizeof(path),state->directory,name) || !realpath(path,canonical)) {
+    char path[F80_FILE_DIALOG_PATH_MAX];int directory=0;
+    const F80FileBrowseApi *browse=state->browse?state->browse:&local_browse_api;
+    int path_ok=!strcmp(name,"..")?
+        (browse->parent && browse->parent(browse->user,state->directory,
+                                          path,sizeof(path))):
+        (browse->join && browse->join(browse->user,state->directory,name,
+                                      path,sizeof(path)));
+    if(!path_ok || !browse->stat ||
+       !browse->stat(browse->user,path,&directory,NULL) || !directory) {
         snprintf(state->status,sizeof(state->status),"Cannot open directory");return;
     }
-    snprintf(state->directory,sizeof(state->directory),"%s",canonical);
+    if(state->preview_changed)state->preview_changed(NULL,state->user);
+    snprintf(state->directory,sizeof(state->directory),"%s",path);
     set_filename(state,"");
     refresh_files(state);
     state->app->focus=state->list;
@@ -293,19 +397,18 @@ static void accept_action(F80Widget *button, void *user) {
         snprintf(state->status,sizeof(state->status),"Enter a file name or select a file");return;
     }
     char path[F80_FILE_DIALOG_PATH_MAX];
-    if(!full_path(path,sizeof(path),state->directory,name)) {
+    const F80FileBrowseApi *browse=state->browse?state->browse:&local_browse_api;
+    if(!browse->join || !browse->stat ||
+       !browse->join(browse->user,state->directory,name,path,sizeof(path))) {
         snprintf(state->status,sizeof(state->status),"Path is too long");return;
     }
-    struct stat info;
-    int exists=stat(path,&info)==0;
-    if(exists && S_ISDIR(info.st_mode)) { enter_directory(state,name);return; }
-    if(state->mode==F80_FILE_OPEN && (!exists || !S_ISREG(info.st_mode))) {
+    int is_directory=0;unsigned long long file_size=0;
+    int exists=browse->stat(browse->user,path,&is_directory,&file_size);
+    if(exists && is_directory) { enter_directory(state,name);return; }
+    if(state->mode==F80_FILE_OPEN && !exists) {
         snprintf(state->status,sizeof(state->status),"File not found: %.120s",name);return;
     }
     if(state->mode==F80_FILE_SAVE) {
-        if(exists && !S_ISREG(info.st_mode)) {
-            snprintf(state->status,sizeof(state->status),"Cannot replace this path");return;
-        }
         if(exists && strcmp(state->overwrite_path,path)) {
             snprintf(state->overwrite_path,sizeof(state->overwrite_path),"%s",path);
             snprintf(state->status,sizeof(state->status),
@@ -323,8 +426,16 @@ static void accept_action(F80Widget *button, void *user) {
 static void list_changed(F80Widget *list, void *user) {
     F80FileDialog *state=user;
     if(list->cursor>=0 && list->cursor<state->count &&
-       !state->entries[list->cursor].directory)
+       !state->entries[list->cursor].directory) {
         set_filename(state,state->entries[list->cursor].name);
+        if(state->preview_changed) {
+            char path[F80_FILE_DIALOG_PATH_MAX];
+            const F80FileBrowseApi *browse=state->browse?state->browse:&local_browse_api;
+            if(browse->join && browse->join(browse->user,state->directory,
+                    state->entries[list->cursor].name,path,sizeof(path)))
+                state->preview_changed(path,state->user);
+        }
+    } else if(state->preview_changed)state->preview_changed(NULL,state->user);
 }
 
 static void list_activated(F80Widget *list, void *user) {
@@ -338,30 +449,41 @@ static void list_activated(F80Widget *list, void *user) {
     }
 }
 
-int f80_file_dialog_show(F80FileDialog *state, F80App *app, F80FileMode mode,
-                         const char *title, const char *initial_path,
-                         const char *extensions, F80FileChosen chosen, void *user) {
+int f80_file_dialog_show_browse(F80FileDialog *state,F80App *app,F80FileMode mode,
+                                const char *title,const char *initial_path,
+                                const char *extensions,
+                                const F80FileBrowseApi *browse,
+                                F80FileChosen chosen,void *user) {
     if(!state || !app || app->modal_depth>=8 || f80_file_dialog_active(state))return 0;
     memset(state,0,sizeof(*state));
-    state->app=app;state->mode=mode;state->chosen=chosen;state->user=user;
+    state->app=app;state->mode=mode;
+    state->browse=browse?browse:&local_browse_api;
+    if(!state->browse->list || !state->browse->join || !state->browse->stat)
+        return 0;
+    state->chosen=chosen;state->user=user;
     snprintf(state->title,sizeof(state->title),"%s",title?title:
              mode==F80_FILE_SAVE?"Save File As":"Open File");
     snprintf(state->filter,sizeof(state->filter),"%s",extensions?extensions:"");
     char current[F80_FILE_DIALOG_PATH_MAX];
     if(!getcwd(current,sizeof(current)))return 0;
-    const char *name=initial_path?initial_path:"";
-    char directory[F80_FILE_DIALOG_PATH_MAX];
-    snprintf(directory,sizeof(directory),"%s",current);
-    const char *slash=strrchr(name,'/');
-    if(slash) {
-        size_t length=(size_t)(slash-name);
-        if(length==0)snprintf(directory,sizeof(directory),"/");
-        else if(length<sizeof(directory)) {
-            memcpy(directory,name,length);directory[length]='\0';
+    const char *name="";
+    snprintf(state->directory,sizeof(state->directory),"%s",current);
+    if(initial_path && initial_path[0]) {
+        int directory=0;
+        if(state->browse->stat(state->browse->user,initial_path,&directory,NULL) && directory) {
+            if(strlen(initial_path)>=sizeof(state->directory))return 0;
+            snprintf(state->directory,sizeof(state->directory),"%s",initial_path);
+        } else {
+            char parent[F80_FILE_DIALOG_PATH_MAX];
+            if(state->browse->parent && state->browse->parent(state->browse->user,initial_path,
+                                     parent,sizeof(parent)))
+                snprintf(state->directory,sizeof(state->directory),"%s",parent);
+            const char *slash=strrchr(initial_path,'/');
+            name=slash?slash+1:initial_path;
         }
-        name=slash+1;
     }
-    if(!realpath(directory,state->directory) && !realpath(current,state->directory))return 0;
+    if(!state->browse->stat(state->browse->user,state->directory,&(int){0},NULL))
+        snprintf(state->directory,sizeof(state->directory),"%s",current);
     state->dialog=f80_dialog(state->title,NULL,NULL,0,0);
     if(!state->dialog)return 0;
     state->dialog->dialog_min_width=40;
@@ -390,6 +512,13 @@ int f80_file_dialog_show(F80FileDialog *state, F80App *app, F80FileMode mode,
     f80_show_modal(app,state->dialog);
     app->focus=state->input;
     return 1;
+}
+
+int f80_file_dialog_show(F80FileDialog *state,F80App *app,F80FileMode mode,
+                         const char *title,const char *initial_path,
+                         const char *extensions,F80FileChosen chosen,void *user) {
+    return f80_file_dialog_show_browse(state,app,mode,title,initial_path,
+        extensions,NULL,chosen,user);
 }
 
 void f80_file_dialog_layout(F80FileDialog *state, int columns, int rows) {

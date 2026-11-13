@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -18,6 +19,9 @@ typedef struct PackageDir {
     struct PackageDir *next;
 } PackageDir;
 static PackageDir *package_dirs;
+static void cleanup_asset_files(void);
+static int zip_entry(mz_zip_archive *zip,const char *name,size_t maximum,
+                     mz_uint *index,char *error,size_t error_size);
 
 static void remove_package_dir(const char *dir) {
     char path[PATH_MAX];
@@ -30,11 +34,104 @@ static void remove_package_dir(const char *dir) {
     rmdir(dir);
 }
 void tt_package_cleanup_all(void) {
+    cleanup_asset_files();
     while(package_dirs) {
         PackageDir *next=package_dirs->next;
         remove_package_dir(package_dirs->path);
         free(package_dirs);package_dirs=next;
     }
+}
+typedef struct AssetFile {
+    char path[PATH_MAX];
+    struct AssetFile *next;
+} AssetFile;
+static AssetFile *asset_files;
+void tt_package_release_asset(const char *loaded_path) {
+    if(!loaded_path || !loaded_path[0])return;
+    AssetFile **at=&asset_files;
+    while(*at) {
+        AssetFile *entry=*at;
+        if(!strcmp(entry->path,loaded_path)) {
+            *at=entry->next;unlink(entry->path);free(entry);return;
+        }
+        at=&entry->next;
+    }
+}
+static void cleanup_asset_files(void) {
+    while(asset_files) {
+        AssetFile *next=asset_files->next;
+        unlink(asset_files->path);free(asset_files);asset_files=next;
+    }
+}
+static int wav_entry_name(const char *name) {
+    size_t n=strlen(name);
+    return n>=4 && !strcasecmp(name+n-4,".wav") && name[0]!='/' &&
+           !strstr(name,"../") && strncmp(name,"..",2);
+}
+int tt_package_list_wavs(const char *archive,char entries[][512],int capacity,
+                         int *count,char *error,size_t error_size) {
+    if(count)*count=0;
+    if(!archive || !count || capacity<0 || (capacity && !entries))return 0;
+    mz_zip_archive zip={0};
+    if(!mz_zip_reader_init_file(&zip,archive,0)) {
+        snprintf(error,error_size,"Cannot open ZIP archive");return 0;
+    }
+    mz_uint total=mz_zip_reader_get_num_files(&zip);
+    for(mz_uint i=0;i<total;++i) {
+        mz_zip_archive_file_stat stat;
+        if(!mz_zip_reader_file_stat(&zip,i,&stat) || stat.m_is_directory ||
+           stat.m_uncomp_size>64u*1024u*1024u ||
+           strlen(stat.m_filename)>=512 || !wav_entry_name(stat.m_filename))continue;
+        if(*count<capacity)snprintf(entries[*count],512,"%s",stat.m_filename);
+        ++*count;
+    }
+    mz_zip_reader_end(&zip);
+    if(!*count)snprintf(error,error_size,"No WAV files in ZIP archive");
+    return *count>0;
+}
+int tt_package_resolve_asset(const char *song_path,const char *reference,
+                             char *loaded_path,size_t loaded_size,
+                             char *error,size_t error_size) {
+    const char *bang=reference[0]=='!'?NULL:strchr(reference,'!');
+    if(!bang) {
+        int ok=tt_song_resolve_path(song_path,reference,loaded_path,loaded_size);
+        if(!ok)snprintf(error,error_size,"Source path too long or HOME unavailable");
+        return ok;
+    }
+    char archive[512],resolved[PATH_MAX];
+    size_t prefix=(size_t)(bang-reference);
+    if(!prefix || prefix>=sizeof(archive) || !wav_entry_name(bang+1)) {
+        snprintf(error,error_size,"Invalid WAV archive reference");return 0;
+    }
+    memcpy(archive,reference,prefix);archive[prefix]=0;
+    if(!tt_song_resolve_path(song_path,archive,resolved,sizeof(resolved))) {
+        snprintf(error,error_size,"Archive path too long");return 0;
+    }
+    mz_zip_archive zip={0};
+    if(!mz_zip_reader_init_file(&zip,resolved,0)) {
+        snprintf(error,error_size,"Cannot open WAV archive: %.100s",archive);return 0;
+    }
+    mz_uint index;
+    int found=zip_entry(&zip,bang+1,64u*1024u*1024u,&index,error,error_size);
+    if(found<=0) {
+        if(!found)snprintf(error,error_size,"WAV missing in archive: %.100s",bang+1);
+        mz_zip_reader_end(&zip);return 0;
+    }
+    char temp[]="/tmp/tt-wav-XXXXXX";
+    int fd=mkstemp(temp);
+    if(fd<0) { snprintf(error,error_size,"Cannot prepare WAV workspace");mz_zip_reader_end(&zip);return 0; }
+    close(fd);
+    int extracted=mz_zip_reader_extract_to_file(&zip,index,temp,0);
+    mz_zip_reader_end(&zip);
+    if(!extracted || strlen(temp)>=loaded_size) {
+        unlink(temp);snprintf(error,error_size,"Cannot extract WAV from archive");return 0;
+    }
+    AssetFile *file=malloc(sizeof(*file));
+    if(!file) { unlink(temp);snprintf(error,error_size,"Out of memory loading WAV");return 0; }
+    snprintf(file->path,sizeof(file->path),"%s",temp);
+    file->next=asset_files;asset_files=file;
+    snprintf(loaded_path,loaded_size,"%s",temp);
+    return 1;
 }
 int tt_package_is_path(const char *path) {
     size_t n=strlen(path);

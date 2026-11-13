@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tt_song.h"
 #include "tt_package.h"
+#include "../third_party/miniz/miniz.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -243,6 +244,44 @@ int main(void) {
                              banks,error,sizeof(error)));
     assert(tt_song_load(unpacked_again,&loaded,readback,&count,error,sizeof(error)));
     assert(loaded.bpm==144 && !strcmp(readback[0].path,"!samples/01.wav"));
+    char archive_entries[8][512],archive_reference[768],archive_wav[512];
+    int archive_count=0;
+    assert(tt_package_list_wavs(repacked,NULL,0,&archive_count,
+                                error,sizeof(error)) && archive_count==1);
+    assert(tt_package_list_wavs(repacked,archive_entries,8,&archive_count,
+                                error,sizeof(error)));
+    assert(archive_count==1 && !strcmp(archive_entries[0],"samples/01.wav"));
+    assert(snprintf(archive_reference,sizeof(archive_reference),"%s!%s",
+                    repacked,archive_entries[0])<(int)sizeof(archive_reference));
+    assert(tt_package_resolve_asset(path,archive_reference,archive_wav,
+                                    sizeof(archive_wav),error,sizeof(error)));
+    TtWave archive_loaded={0};
+    assert(tt_load_wav(archive_wav,&archive_loaded,error,sizeof(error)));
+    assert(archive_loaded.frames==wav.frames && archive_loaded.rate==wav.rate);
+    tt_free(&archive_loaded);
+    assert(snprintf(archive_reference,sizeof(archive_reference),"%s!missing.wav",
+                    repacked)<(int)sizeof(archive_reference));
+    assert(!tt_package_resolve_asset(path,archive_reference,archive_wav,
+                                     sizeof(archive_wav),error,sizeof(error)));
+    char many_path[]="/tmp/f80-many-wavs-XXXXXX";
+    int many_fd=mkstemp(many_path);assert(many_fd>=0);close(many_fd);
+    mz_zip_archive many_zip={0};
+    assert(mz_zip_writer_init_file(&many_zip,many_path,0));
+    for(int i=0;i<300;++i) {
+        char name[32];snprintf(name,sizeof(name),"disc/%03d.wav",i);
+        assert(mz_zip_writer_add_mem(&many_zip,name,"W",1,MZ_NO_COMPRESSION));
+    }
+    assert(mz_zip_writer_finalize_archive(&many_zip));
+    assert(mz_zip_writer_end(&many_zip));
+    int many_count=0;
+    assert(tt_package_list_wavs(many_path,NULL,0,&many_count,error,sizeof(error)) &&
+           many_count==300);
+    char (*many_entries)[512]=calloc((size_t)many_count,sizeof(*many_entries));
+    assert(many_entries);
+    assert(tt_package_list_wavs(many_path,many_entries,many_count,&many_count,
+                                error,sizeof(error)) && many_count==300);
+    assert(!strcmp(many_entries[299],"disc/299.wav"));
+    free(many_entries);unlink(many_path);
     TtSongSample demo={0};
     snprintf(demo.name,sizeof(demo.name),"Demo");
     snprintf(demo.source_name,sizeof(demo.source_name),"demo.wav");

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #ifndef __EMSCRIPTEN__
 #include <termios.h>
@@ -23,6 +24,9 @@
 #include "tt_sample.h"
 #include "tt_song.h"
 #include "tt_package.h"
+#ifndef __EMSCRIPTEN__
+#include "tt_zip_browse.h"
+#endif
 #include "tt_edit.h"
 #include "tt_tracker_internal.h"
 
@@ -106,7 +110,7 @@ static char event_console_menu_label[32]="~S~how event console";
 static F80Wrap order_pattern_actions,order_play_actions;
 static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
 static F80Wrap manage_actions,sample_actions,fm_actions,slices_actions,source_actions;
-static F80Widget *manage_buttons[5],*sample_buttons[2],*fm_buttons[3],*slices_buttons[6];
+static F80Widget *manage_buttons[5],*sample_buttons[3],*fm_buttons[3],*slices_buttons[6];
 static int status_columns=80;
 enum { TT_CONTROLLER_MAX_DEVICES=8 };
 static struct {
@@ -131,6 +135,7 @@ static void perspective_main(F80Widget *,void *);
 static void slices_selected(F80Widget *,void *);
 static void manage_refresh(void);
 static void source_browsed(const char *path);
+static void open_archive_picker(const char *path,int mode);
 static void slices_apply(F80Widget *,void *);
 static void slices_inherit(F80Widget *,void *);
 static void slices_step(F80Widget *,void *);
@@ -312,6 +317,30 @@ static void toggle_play(F80Widget *button,void *user) {
 static void audition(F80Widget *button,void *user) {
     (void)button;(void)user;send_play(TT_PLAY_AUDITION,0,0);
 }
+static int request_sample_preview(int instrument) {
+    TtPlayEvent event={.type=TT_PLAY_PREVIEW_SAMPLE};
+    event.preview_sample.instrument=instrument;
+    if(!tt_play_emit(event))return 0;
+    tt_play_flush();return 1;
+}
+static void preview_selected_sample(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    request_sample_preview(tracker.sample_index);
+}
+#ifndef __EMSCRIPTEN__
+static void preview_file_selection(const char *path,void *user) {
+    (void)user;
+    if(!path) { send_play(TT_PLAY_CANCEL_PREVIEW,0,0);return; }
+    const char *name=strrchr(path,'/');name=name?name+1:path;
+    size_t length=strlen(name);
+    if(length<4 || strcasecmp(name+length-4,".wav")) {
+        send_play(TT_PLAY_CANCEL_PREVIEW,0,0);return;
+    }
+    TtPlayEvent event={.type=TT_PLAY_PREVIEW_SAMPLE};
+    snprintf(event.preview_sample.path,sizeof(event.preview_sample.path),"%s",path);
+    if(tt_play_emit(event))tt_play_flush();
+}
+#endif
 
 static int order_for_pattern(int pattern,int near) {
     int found=-1,best=TT_SONG_ORDER+1;
@@ -1077,13 +1106,28 @@ static int load_path(const char *path,const char *original_name) {
     }
     TtWave next={0};
     char error[160];
-    if(!tt_load_wav(path,&next,error,sizeof(error))) {
+    const char *loadable=path;
+    char extracted[512];
+    if(strchr(path,'!')) {
+        if(!tt_package_resolve_asset(tracker.song_path,path,extracted,
+                                      sizeof(extracted),error,sizeof(error))) {
+            tt_tracker_message(error);return 0;
+        }
+        loadable=extracted;
+    }
+    if(!tt_load_wav(loadable,&next,error,sizeof(error))) {
         tt_tracker_message(error);return 0;
     }
     stop_playback(NULL,NULL);
-    if(original_name && *original_name) {
-        snprintf(next.name,sizeof(next.name),"%s",original_name);
-        snprintf(next.source_name,sizeof(next.source_name),"%s",original_name);
+    const char *display_name=original_name;
+    if((!display_name || !*display_name) && strchr(path,'!')) {
+        const char *entry=strchr(path,'!')+1;
+        const char *slash=strrchr(entry,'/');
+        display_name=slash?slash+1:entry;
+    }
+    if(display_name && *display_name) {
+        snprintf(next.name,sizeof(next.name),"%s",display_name);
+        snprintf(next.source_name,sizeof(next.source_name),"%s",display_name);
     }
     TtEditEvent event={.type=TT_EDIT_SAMPLE_APPEND};
     event.loaded_wave=(TtEditLoadedWave){0,&next,path};
@@ -1136,10 +1180,24 @@ static int save_song_at(const char *path) {
 #ifndef __EMSCRIPTEN__
             if(!strncmp(source_ref,"./",2) || !strncmp(source_ref,"../",3)) {
                 char absolute[PATH_MAX];
-                const char *physical=realpath(loaded,absolute)?absolute:loaded;
-                if(tt_song_relative_path(path,physical,updated_refs[i],
-                                         sizeof(updated_refs[i])))
-                    saved_ref=updated_refs[i];
+                const char *bang=strchr(source_ref,'!');
+                if(bang) {
+                    char archive[512],rebased[512];
+                    size_t length=(size_t)(bang-source_ref);
+                    if(length<sizeof(archive)) {
+                        memcpy(archive,source_ref,length);archive[length]=0;
+                        char physical_archive[512];
+                        if(tt_song_resolve_path(tracker.song_path,archive,
+                                                physical_archive,sizeof(physical_archive)) &&
+                           tt_song_relative_path(path,physical_archive,rebased,sizeof(rebased)) &&
+                           snprintf(updated_refs[i],sizeof(updated_refs[i]),"%s!%s",rebased,bang+1)<
+                           (int)sizeof(updated_refs[i]))saved_ref=updated_refs[i];
+                    }
+                } else {
+                    const char *physical=realpath(loaded,absolute)?absolute:loaded;
+                    if(tt_song_relative_path(path,physical,updated_refs[i],
+                                             sizeof(updated_refs[i])))saved_ref=updated_refs[i];
+                }
             }
 #endif
             snprintf(entry->path,sizeof(entry->path),"%s",saved_ref);
@@ -1208,15 +1266,18 @@ static int load_song_at_with_banks(const char *path,const char *origin,
         const char *saved_asset=meta[i].path;
         if(internal && saved_asset[0]=='!')++saved_asset;
         const char *context=internal?path:origin;
-        if(!tt_song_resolve_path(context,saved_asset,resolved,sizeof(resolved))) {
+        int asset_ready=tt_package_resolve_asset(context,saved_asset,resolved,
+                                                 sizeof(resolved),error,sizeof(error));
+        if(!asset_ready && !strchr(saved_asset,'!')) {
             snprintf(error,sizeof(error),"Sample path too long");goto failed;
         }
+        if(!asset_ready)snprintf(resolved,sizeof(resolved),"%s",saved_asset);
         if(!strcmp(resolved,"builtin:demo")) {
             if(!tt_make_demo(&loaded[i].wave)) {
                 snprintf(error,sizeof(error),"Could not recreate demo sample");goto failed;
             }
         } else {
-            if(!tt_load_wav(resolved,&loaded[i].wave,error,sizeof(error))) {
+            if(!asset_ready || !tt_load_wav(resolved,&loaded[i].wave,error,sizeof(error))) {
 #ifdef __EMSCRIPTEN__
                 const char *basename=strrchr(resolved,'/');
                 if(basename && basename[1]) {
@@ -1377,6 +1438,9 @@ EMSCRIPTEN_KEEPALIVE int tt_tracker_load_wav(const char *original_name) {
     }
     return 1;
 }
+EMSCRIPTEN_KEEPALIVE int tt_tracker_preview_loaded_sample(void) {
+    return request_sample_preview(tracker.sample_index);
+}
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_song(void) {
     return load_project_at("/sample-tracker-import.ttt");
 }
@@ -1393,7 +1457,9 @@ EMSCRIPTEN_KEEPALIVE int tt_tracker_save_song(void) {
 static void file_chosen(const char *path,void *user) {
     (void)user;
     if(tracker.path_action==PATH_DX7)load_dx7_at(path,tracker.sysex_voice);
-    else if(tracker.path_action==PATH_WAV)load_path(path,NULL);
+    else if(tracker.path_action==PATH_WAV) {
+        load_path(path,NULL);
+    }
     else if(tracker.path_action==PATH_SONG_LOAD)load_project_at(path);
     else if(tracker.path_action==PATH_SOURCE)source_browsed(path);
     else {
@@ -1426,9 +1492,10 @@ static void open_path_dialog(int action) {
     tracker.path_action=action;
     int save=action==PATH_SONG_SAVE;
     const char *title=action==PATH_DX7?"Import FM voice (.syx)":
-        action==PATH_WAV?"Open WAV":save?"Save Track As":"Open Track";
+        action==PATH_WAV?"Open WAV or archive":save?"Save Track As":"Open Track";
     char initial_path[512];
-    const char *initial=action==PATH_WAV?tracker.loaded_path:initial_path;
+    const char *initial=action==PATH_WAV?
+        (tracker.wav_archive_path[0]?tracker.wav_archive_path:tracker.loaded_path):initial_path;
     if(action!=PATH_WAV) {
         const char *current=tracker.song_path;
         size_t n=strlen(current);
@@ -1444,11 +1511,16 @@ static void open_path_dialog(int action) {
             snprintf(initial_path,sizeof(initial_path),"%.*s.ttt",(int)(n-5),current);
         else snprintf(initial_path,sizeof(initial_path),"track.ttt");
     }
-    const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav":
+    const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav,.zip,.ttt":
         save?".ttt":".ttt,.song,.ttt.zip,.tts.zip,.txt";
-    if(!f80_file_dialog_show(&file_dialog,&tracker.app,
-                             save?F80_FILE_SAVE:F80_FILE_OPEN,title,initial,
-                             filter,file_chosen,NULL))
+    int shown=action==PATH_WAV?
+        f80_file_dialog_show_browse(&file_dialog,&tracker.app,F80_FILE_OPEN,
+            title,initial,filter,tt_zip_browse_api(),file_chosen,NULL):
+        f80_file_dialog_show(&file_dialog,&tracker.app,
+            save?F80_FILE_SAVE:F80_FILE_OPEN,title,initial,filter,file_chosen,NULL);
+    if(shown && action==PATH_WAV)
+        f80_file_dialog_set_preview(&file_dialog,preview_file_selection);
+    if(!shown)
         tt_tracker_message("Could not open file dialog");
 #endif
 }
@@ -2420,9 +2492,96 @@ static void source_close(F80Widget *button,void *user) {
     tracker.source_dialog=tracker.source_info=tracker.source_input=NULL;
     tracker.source_internal=tracker.source_browse=tracker.source_apply=tracker.source_cancel=NULL;
 }
+static void archive_close(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.app.modal==tracker.archive_dialog)f80_hide_modal(&tracker.app);
+    tracker.archive_dialog=tracker.archive_list=tracker.archive_open=tracker.archive_cancel=NULL;
+    free(tracker.archive_entries);tracker.archive_entries=NULL;
+    free(tracker.archive_items);tracker.archive_items=NULL;
+    tracker.archive_count=0;
+}
+static void archive_choose(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    int index=tracker.archive_list?tracker.archive_list->cursor:-1;
+    if(index<0 || index>=tracker.archive_count)return;
+    char reference[1024];
+    if(snprintf(reference,sizeof(reference),"%s!%s",tracker.archive_path,
+                tracker.archive_entries[index])>=(int)sizeof(reference)) {
+        tt_tracker_message("Archive reference is too long");return;
+    }
+    int mode=tracker.archive_mode;
+    char entry_name[512];
+    snprintf(entry_name,sizeof(entry_name),"%s",tracker.archive_entries[index]);
+    archive_close(NULL,NULL);
+    if(mode==PATH_SOURCE)source_browsed(reference);
+    else {
+        char extracted[512],error[160]={0};
+        if(!tt_package_resolve_asset(tracker.song_path,reference,extracted,
+                                     sizeof(extracted),error,sizeof(error))) {
+            tt_tracker_message(error);return;
+        }
+        const char *name=strrchr(entry_name,'/');
+        load_path(extracted,name?name+1:entry_name);
+    }
+}
+static int archive_entry_compare(const void *left,const void *right) {
+    return strcasecmp((const char *)left,(const char *)right);
+}
+static void open_archive_picker(const char *path,int mode) {
+    if(!path || tracker.archive_dialog)return;
+    char error[160]={0};int count=0;
+    if(!tt_package_list_wavs(path,NULL,0,&count,error,sizeof(error))) {
+        tt_tracker_message(error);return;
+    }
+    char (*entries)[512]=calloc((size_t)count,sizeof(*entries));
+    const char **items=calloc((size_t)count,sizeof(*items));
+    if(!entries || !items) {
+        free(entries);free(items);tt_tracker_message("Out of memory listing WAVs");return;
+    }
+    int listed=0;
+    if(!tt_package_list_wavs(path,entries,count,&listed,error,sizeof(error)) ||
+       listed!=count) {
+        free(entries);free(items);
+        tt_tracker_message(listed!=count?"Archive changed while browsing":error);return;
+    }
+    qsort(entries,(size_t)count,sizeof(*entries),archive_entry_compare);
+    if(mode==PATH_WAV)
+        snprintf(tracker.wav_archive_path,sizeof(tracker.wav_archive_path),"%s",path);
+    tracker.archive_entries=entries;tracker.archive_items=items;
+    tracker.archive_count=count;tracker.archive_mode=mode;
+        char relative[512];
+        const char *reference=path;
+        if(path[0]=='/' && tt_song_relative_path(tracker.song_path,path,
+                                                 relative,sizeof(relative)))reference=relative;
+        snprintf(tracker.archive_path,sizeof(tracker.archive_path),"%s",reference);
+        for(int i=0;i<count;++i)tracker.archive_items[i]=tracker.archive_entries[i];
+        F80Widget *dialog=f80_dialog("WAVs in archive",NULL,NULL,0,0);
+        if(!dialog) { archive_close(NULL,NULL);return; }
+        tracker.archive_dialog=dialog;
+        tracker.archive_list=f80_add(dialog,f80_listbox(tracker.archive_items,count,
+                                                       NULL,NULL));
+        tracker.archive_list->activate=archive_choose;
+        tracker.archive_list->window_role=F80_WINDOW_CYAN;
+        tracker.archive_open=f80_add(dialog,f80_button("Open",archive_choose,NULL));
+        tracker.archive_cancel=f80_add(dialog,f80_button("Cancel",archive_close,NULL));
+        f80_show_modal(&tracker.app,dialog);
+        tracker.app.focus=tracker.archive_list;
+}
 static void source_browsed(const char *path) {
     if(!tracker.source_dialog || !tracker.source_input || !path)return;
-    snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),"%s",path);
+    size_t length=strlen(path);
+    if(!strchr(path,'!') && length>=4 && !strcasecmp(path+length-4,".zip")) {
+        tt_tracker_message("Open the ZIP in the file list, then choose a WAV inside it");
+        return;
+    }
+    char relative[512];
+    const char *reference=path;
+    if(path[0]=='/' && tt_song_relative_path(tracker.song_path,path,
+                                             relative,sizeof(relative)))reference=relative;
+    if(strlen(reference)>=sizeof(tracker.source_input->input)) {
+        tt_tracker_message("Source path is too long");return;
+    }
+    snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),"%s",reference);
     tracker.source_input->input_pos=(int)strlen(tracker.source_input->input);
     tracker.source_input->input_scroll=0;
     tracker.app.focus=tracker.source_input;
@@ -2463,10 +2622,11 @@ static void source_browse(F80Widget *button,void *user) {
         if(slash)slash[1]=0;
         else initial[0]=0;
     }
-    if(!f80_file_dialog_show(&file_dialog,&tracker.app,F80_FILE_OPEN,
-                             "Choose external WAV",initial,".wav",
-                             file_chosen,NULL))
+    if(!f80_file_dialog_show_browse(&file_dialog,&tracker.app,F80_FILE_OPEN,
+                             "Choose WAV or archive",initial,".wav,.zip,.ttt",
+                             tt_zip_browse_api(),file_chosen,NULL))
         tt_tracker_message("Could not open source file dialog");
+    else f80_file_dialog_set_preview(&file_dialog,preview_file_selection);
 #endif
 }
 static void source_internal(F80Widget *button,void *user) {
@@ -2505,8 +2665,10 @@ static void source_apply(F80Widget *button,void *user) {
         &tracker.samples[index].wave;
     const char *loaded=current_loaded;
     if(!packed) {
-        if(!tt_song_resolve_path(tracker.song_path,ref,resolved,sizeof(resolved))) {
-            tt_tracker_message("Source path too long or HOME unavailable");return;
+        char asset_error[160]={0};
+        if(!tt_package_resolve_asset(tracker.song_path,ref,resolved,sizeof(resolved),
+                                      asset_error,sizeof(asset_error))) {
+            tt_tracker_message(asset_error[0]?asset_error:"Source path too long");return;
         }
         if(strcmp(resolved,current_loaded) || !current_wave->pcm) {
             char error[160];
@@ -2641,6 +2803,8 @@ static void build_manage_panel(void) {
         f80_button("Ref ~-~",manage_ref,(void *)(long)-1));
     sample_buttons[1]=f80_add(tracker.sample_settings_panel,
         f80_button("Ref ~+~",manage_ref,(void *)(long)1));
+    sample_buttons[2]=f80_add(tracker.sample_settings_panel,
+        f80_button("~P~review",preview_selected_sample,NULL));
     f80_wrap_init(&sample_actions,1,0);
     tracker.fm_settings_panel=f80_add(tracker.instrument_panels,
         f80_window(F80_WINDOW_GRAY,F80_COL));
@@ -4259,6 +4423,7 @@ static void handle_key(int key) {
             else if(tracker.app.modal==tracker.slices_dialog)close_slices(NULL,NULL);
             else if(tracker.app.modal==tracker.order_dialog)close_order(NULL,NULL);
             else if(tracker.app.modal==tracker.table_dialog)close_table(NULL,NULL);
+            else if(tracker.app.modal==tracker.archive_dialog)archive_close(NULL,NULL);
             else if(tracker.app.modal==tracker.source_dialog)source_close(NULL,NULL);
             else close_help(NULL,NULL);
         } else if(tracker.app.modal==tracker.source_dialog &&
@@ -5646,7 +5811,7 @@ static int frame(void *user) {
                            f80_rect(sample.x+1,sample.y+2,sample.w-2,1));
                 f80_wrap_layout(&sample_actions,
                     f80_rect(sample.x+1,sample.y+4,sample.w-2,sample.h-5),
-                    sample_buttons,2);
+                    sample_buttons,3);
             }
             layout_instrument_bottom(settings);
         }
@@ -5661,19 +5826,25 @@ static int frame(void *user) {
         int w,h;f80_fit_size(tracker.app.modal,&w,&h);
         if(tracker.app.modal==tracker.manage_dialog || tracker.app.modal==tracker.slices_dialog ||
            tracker.app.modal==tracker.order_dialog || tracker.app.modal==tracker.table_dialog ||
-           tracker.app.modal==tracker.settings_dialog) {
+           tracker.app.modal==tracker.settings_dialog || tracker.app.modal==tracker.archive_dialog) {
             w=tracker.app.modal==tracker.manage_dialog?66:72;
             h=tracker.app.modal==tracker.manage_dialog?19:24;
             if(tracker.app.modal==tracker.order_dialog) { w=cols>=92?90:50;h=30; }
             if(tracker.app.modal==tracker.table_dialog) { w=46;h=25; }
             if(tracker.app.modal==tracker.settings_dialog) { w=48;h=16; }
+            if(tracker.app.modal==tracker.archive_dialog) { w=72;h=22; }
             if(tracker.app.modal==tracker.source_dialog) { w=70;h=11; }
         }
         if(w>cols-2)w=cols-2;
         if(h>rows-2)h=rows-2;
         f80_layout(tracker.app.modal,f80_rect((cols-w)/2,(rows-h)/2,w,h));
         if(tracker.app.modal==tracker.order_dialog)order_refresh();
-        if(tracker.app.modal==tracker.source_dialog) {
+        if(tracker.app.modal==tracker.archive_dialog) {
+            F80Rect r=tracker.app.modal->rect;
+            f80_layout(tracker.archive_list,f80_rect(r.x+2,r.y+2,r.w-4,r.h-6));
+            f80_layout(tracker.archive_open,f80_rect(r.x+2,r.y+r.h-3,12,2));
+            f80_layout(tracker.archive_cancel,f80_rect(r.x+16,r.y+r.h-3,12,2));
+        } else if(tracker.app.modal==tracker.source_dialog) {
             F80Rect r=tracker.app.modal->rect;
             f80_layout(tracker.source_info,f80_rect(r.x+2,r.y+2,r.w-4,1));
             f80_layout(tracker.source_input,f80_rect(r.x+2,r.y+4,r.w-4,1));

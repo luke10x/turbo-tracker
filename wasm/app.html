@@ -54,6 +54,7 @@
         const restored = Module.ccall('tt_tracker_recover_wav', 'number', ['string'], [file.name]);
         const loaded = restored || Module.ccall('tt_tracker_load_wav', 'number', ['string'], [file.name]);
         status.textContent = loaded ? `${file.name}${restored ? ' restored' : ''}` : `Could not decode ${file.name}`;
+        if (loaded) Module.ccall('tt_tracker_preview_loaded_sample', 'number', [], []);
       } catch (error) {
         status.textContent = `Could not load WAV: ${error.message}`;
       }

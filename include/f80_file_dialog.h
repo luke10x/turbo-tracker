@@ -8,6 +8,7 @@ enum { F80_FILE_DIALOG_PATH_MAX = 1024, F80_FILE_DIALOG_ITEMS = 512,
        F80_FILE_DIALOG_RECENT = 10 };
 typedef enum { F80_FILE_OPEN, F80_FILE_SAVE } F80FileMode;
 typedef void (*F80FileChosen)(const char *path, void *user);
+typedef void (*F80FilePreviewChanged)(const char *path, void *user);
 
 typedef struct {
     char name[256];
@@ -15,12 +16,25 @@ typedef struct {
     unsigned long long size;
 } F80FileEntry;
 
+typedef struct F80FileBrowseApi {
+    void *user;
+    int (*list)(void *user,const char *directory,F80FileEntry *entries,
+                int capacity,int *count,char *error,size_t error_size);
+    int (*join)(void *user,const char *directory,const char *name,
+                char *path,size_t path_size);
+    int (*parent)(void *user,const char *directory,char *path,size_t path_size);
+    int (*stat)(void *user,const char *path,int *directory,
+                unsigned long long *size);
+} F80FileBrowseApi;
+
 typedef struct {
     F80App *app;
     F80Widget *dialog, *labels, *list_background, *list, *preview, *footer;
     F80Widget *input, *dropdown, *accept, *cancel, *help;
     F80FileMode mode;
+    const F80FileBrowseApi *browse;
     F80FileChosen chosen;
+    F80FilePreviewChanged preview_changed;
     void *user;
     char directory[F80_FILE_DIALOG_PATH_MAX];
     char filter[80];
@@ -40,6 +54,12 @@ typedef struct {
 int f80_file_dialog_show(F80FileDialog *dialog, F80App *app, F80FileMode mode,
                          const char *title, const char *initial_path,
                          const char *extensions, F80FileChosen chosen, void *user);
+int f80_file_dialog_show_browse(F80FileDialog *dialog,F80App *app,
+                                F80FileMode mode,const char *title,
+                                const char *initial_path,const char *extensions,
+                                const F80FileBrowseApi *browse,
+                                F80FileChosen chosen,void *user);
+const F80FileBrowseApi *f80_file_dialog_local_browse_api(void);
 void f80_file_dialog_layout(F80FileDialog *dialog, int columns, int rows);
 int f80_file_dialog_key(F80FileDialog *dialog, int key);
 int f80_file_dialog_mouse(F80FileDialog *dialog, int x, int y, int wheel);
@@ -48,5 +68,7 @@ void f80_file_dialog_close(F80FileDialog *dialog);
 /* Optional per-application storage; without it history lasts for this process. */
 void f80_file_dialog_recent_storage(const char *path);
 void f80_file_dialog_recent_add(const char *path);
+void f80_file_dialog_set_preview(F80FileDialog *dialog,
+                                 F80FilePreviewChanged preview_changed);
 
 #endif

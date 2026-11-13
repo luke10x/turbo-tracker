@@ -338,12 +338,22 @@ legacy `.song` still loads; saving it produces the packed `.ttt` format. Older
 
 In **Instruments > Instrument Settings > Source...**, **This track** selects
 `!samples/NN.wav`; Save Track packs that WAV into the `.ttt`. **Browse...**
-chooses an external WAV, and the editable path can also use `/`, `~/`, `./`, or
-`../`. External WAVs remain on disk and are never copied into the `.ttt`.
+chooses an external WAV or a `.zip`/packed `.ttt` archive. For an archive,
+choose a WAV entry from the list. Its source is saved as
+`./archive.zip!folder/sample.wav` (or `./other.ttt!samples/01.wav`); the
+editable path can also use `/`, `~/`, `./`, or `../`. External WAVs and archives
+remain on disk and are never copied into the current `.ttt`.
 Choose **This track** again to pack the currently loaded WAV on the next save.
 Saving to a new native location rebases relative external references to keep
 them pointing at the same file. The browser can use uploaded external WAVs in
 its virtual filesystem; they must be supplied again in a new browser session.
+The archive picker is available in the native build. The web Source browser
+continues to upload WAV files directly.
+Native **File > Load WAV** also accepts `.zip` and packed `.ttt` files. It lists
+the WAV entries inside and loads only the one you choose; the rest of the
+archive is not extracted. A WAV loaded this way is packed into the current
+track on save, like any WAV loaded from a directory. Use **Source...** if it
+should continue referring to the external archive instead.
 
 Because the ZIP tail is binary, configure Git once in this checkout to diff only
 the authoritative header: `git config diff.ttt.textconv "python3 scripts/ttt_textconv.py"`.

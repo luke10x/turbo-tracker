@@ -8,7 +8,8 @@ typedef enum {
     TT_PLAY_SET_MODE, TT_PLAY_TOGGLE_MODE,
     TT_PLAY_TOGGLE_LOOP, TT_PLAY_TOGGLE_FOLLOW,
     TT_PLAY_SELECT_ORDER, TT_PLAY_SELECT_PATTERN, TT_PLAY_SET_ORDER_RANGE,
-    TT_PLAY_AUDITION, TT_PLAY_AUDITION_CELL,
+    TT_PLAY_AUDITION, TT_PLAY_AUDITION_CELL, TT_PLAY_PREVIEW_SAMPLE,
+    TT_PLAY_CANCEL_PREVIEW,
     TT_PLAY_ROW_PLAYED, TT_PLAY_FINISHED, TT_PLAY_DOCUMENT_RESET,
     TT_PLAY_CLEAR_ORDER_RANGE, TT_PLAY_AUDIO_RECOVER,
     TT_PLAY_PATTERN_JUMP, TT_PLAY_ROW_JUMP, TT_PLAY_SET_TICKS_PER_ROW,
@@ -21,6 +22,7 @@ typedef struct {
     TtPlayType type;
     int a,b,c;
     struct { int instrument; TtDx7Patch patch; } dx7_patch;
+    struct { int instrument; char path[1024]; } preview_sample;
 } TtPlayEvent;
 
 /* Events are consumed by the playback scheduler. UI callers can flush before

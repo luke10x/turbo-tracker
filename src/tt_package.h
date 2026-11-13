@@ -19,5 +19,12 @@ int tt_package_save(const char *path,const TtSong *song,
 int tt_package_unpack(const char *path,char *song_path,size_t song_path_size,
                       TtPackageBank banks[TT_SONG_SAMPLES],
                       char *error,size_t error_size);
+/* Archive asset references use path.zip!directory/sample.wav. */
+int tt_package_list_wavs(const char *archive,char entries[][512],int capacity,
+                         int *count,char *error,size_t error_size);
+int tt_package_resolve_asset(const char *song_path,const char *reference,
+                             char *loaded_path,size_t loaded_size,
+                             char *error,size_t error_size);
+void tt_package_release_asset(const char *loaded_path);
 void tt_package_cleanup_all(void);
 #endif

@@ -2,6 +2,7 @@
 #include "turbo_tracker.c"
 #undef main
 #include <assert.h>
+#include "../third_party/miniz/miniz.h"
 static int header_clicks[5];
 static void count_header_click(F80Widget *button,void *user) {
     (void)button;
@@ -15,6 +16,68 @@ int main(void) {
     assert(setenv("INIT_PLAY","1",1)==0 && initial_play_requested());
     assert(setenv("INIT_PLAY","0",1)==0 && !initial_play_requested());
     assert(unsetenv("INIT_PLAY")==0);
+    char zip_dir[]="/tmp/tt-browse-XXXXXX";
+    assert(mkdtemp(zip_dir));
+    char zip_path[1024];assert(snprintf(zip_path,sizeof(zip_path),
+        "%s/archive.zip",zip_dir)<(int)sizeof(zip_path));
+    mz_zip_archive browse_zip={0};
+    assert(mz_zip_writer_init_file(&browse_zip,zip_path,0));
+    assert(mz_zip_writer_add_mem(&browse_zip,"root.wav","WAV",3,MZ_NO_COMPRESSION));
+    assert(mz_zip_writer_add_mem(&browse_zip,"nested.zip","ZIP",3,MZ_NO_COMPRESSION));
+    assert(mz_zip_writer_add_mem(&browse_zip,"drums/kick.wav","KCK",3,MZ_NO_COMPRESSION));
+    assert(mz_zip_writer_add_mem(&browse_zip,"drums/loops/snare.wav","SNR",3,MZ_NO_COMPRESSION));
+    assert(mz_zip_writer_finalize_archive(&browse_zip));
+    assert(mz_zip_writer_end(&browse_zip));
+    const F80FileBrowseApi *zip_browse=tt_zip_browse_api();
+    F80FileEntry browse_entries[16];int browse_count=0,is_directory=0;
+    unsigned long long browse_size=0;char browse_error[160],browse_subdir[1024];
+    assert(zip_browse->stat(zip_browse->user,zip_path,&is_directory,&browse_size));
+    assert(is_directory);
+    assert(zip_browse->list(zip_browse->user,zip_path,browse_entries,16,
+                            &browse_count,browse_error,sizeof(browse_error)));
+    assert(browse_count==2);
+    char nested_zip[1024];
+    assert(snprintf(nested_zip,sizeof(nested_zip),"%s!nested.zip",zip_path)<
+           (int)sizeof(nested_zip));
+    assert(!zip_browse->stat(zip_browse->user,nested_zip,&is_directory,NULL));
+    assert(zip_browse->join(zip_browse->user,zip_path,"drums",browse_subdir,
+                            sizeof(browse_subdir)));
+    assert(strstr(browse_subdir,".zip!drums"));
+    assert(zip_browse->stat(zip_browse->user,browse_subdir,&is_directory,NULL) &&
+           is_directory);
+    assert(zip_browse->list(zip_browse->user,browse_subdir,browse_entries,16,
+                            &browse_count,browse_error,sizeof(browse_error)));
+    assert(browse_count==2);
+    char browse_wav[1024],browse_parent[1024];
+    assert(zip_browse->join(zip_browse->user,browse_subdir,"kick.wav",browse_wav,
+                            sizeof(browse_wav)));
+    assert(zip_browse->stat(zip_browse->user,browse_wav,&is_directory,&browse_size));
+    assert(!is_directory && browse_size==3);
+    assert(zip_browse->parent(zip_browse->user,browse_subdir,browse_parent,
+                              sizeof(browse_parent)));
+    char expected_parent[1024];
+    assert(snprintf(expected_parent,sizeof(expected_parent),"%s!",zip_path)<
+           (int)sizeof(expected_parent));
+    assert(!strcmp(browse_parent,expected_parent));
+    char recent_path[]="/tmp/tt-recent-XXXXXX";
+    int recent_fd=mkstemp(recent_path);assert(recent_fd>=0);close(recent_fd);unlink(recent_path);
+    f80_file_dialog_recent_storage(recent_path);
+    f80_file_dialog_recent_add(browse_wav);
+    FILE *recent_file=fopen(recent_path,"r");assert(recent_file);
+    char recent_line[1200];assert(fgets(recent_line,sizeof(recent_line),recent_file));
+    fclose(recent_file);assert(strstr(recent_line,".zip!drums/kick.wav"));
+    F80App recent_app={0};F80Widget *recent_root=f80_box(F80_COL);
+    assert(recent_root);f80_set_root(&recent_app,recent_root);
+    F80FileDialog recent_dialog={0};
+    assert(f80_file_dialog_show_browse(&recent_dialog,&recent_app,F80_FILE_OPEN,
+        "Recent test",zip_path,".wav",zip_browse,NULL,NULL));
+    recent_dialog.recent_count=1;
+    recent_dialog.recent_items[0]=browse_wav;
+    recent_dialog.autocomplete.chosen(0,recent_dialog.autocomplete.user);
+    assert(!strcmp(recent_dialog.directory,browse_subdir));
+    assert(!strcmp(recent_dialog.input->input,"kick.wav"));
+    f80_file_dialog_close(&recent_dialog);f80_free(recent_root);
+    unlink(recent_path);unlink(zip_path);rmdir(zip_dir);
     TtSong demo;
     tt_song_make_demo(&demo);
     assert(demo.pattern_count==4 && demo.order_count==4);
@@ -1326,6 +1389,17 @@ int main(void) {
     assert(tt_load_wav("samples/sine-c4.wav",&tracker.wave,
                        source_error,sizeof(source_error)));
     tt_phrase_init(&tracker.phrase,tracker.wave.frames);
+    TtPlayEvent preview_event={.type=TT_PLAY_PREVIEW_SAMPLE};
+    preview_event.preview_sample.instrument=tracker.sample_index;
+    assert(tt_play_emit(preview_event));tt_play_flush();
+    assert(tt_audio_voice_pcm(0)==tracker.wave.pcm);
+    preview_event=(TtPlayEvent){.type=TT_PLAY_PREVIEW_SAMPLE};
+    snprintf(preview_event.preview_sample.path,
+             sizeof(preview_event.preview_sample.path),"samples/sine-c4.wav");
+    assert(tt_play_emit(preview_event));tt_play_flush();
+    assert(tt_audio_voice_pcm(0) && tt_audio_voice_pcm(0)!=tracker.wave.pcm);
+    send_play(TT_PLAY_STOP,0,0);
+    assert(!tt_audio_voice_active(0));
     snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s","samples/sine-c4.wav");
     snprintf(tracker.source_ref,sizeof(tracker.source_ref),"%s","./shared.wav");
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s","default.ttt");
@@ -1344,12 +1418,41 @@ int main(void) {
     manage_source(NULL,NULL);
     char source_absolute[512];assert(realpath("samples/sine-c4.wav",source_absolute));
     source_browsed(source_absolute);
-    assert(!strcmp(tracker.source_input->input,source_absolute));
+    assert(!strcmp(tracker.source_input->input,"./samples/sine-c4.wav"));
     source_apply(NULL,NULL);
-    assert(!tracker.app.modal && !strcmp(tracker.source_ref,source_absolute));
+    assert(!tracker.app.modal && !strcmp(tracker.source_ref,"./samples/sine-c4.wav"));
     assert(tt_edit_undo(edit_history,&source_doc) && !tracker.source_ref[0]);
     assert(tt_edit_redo(edit_history,&source_doc) &&
-           !strcmp(tracker.source_ref,source_absolute));
+           !strcmp(tracker.source_ref,"./samples/sine-c4.wav"));
+    TtSongSample archive_sample={0};
+    snprintf(archive_sample.name,sizeof(archive_sample.name),"Test WAV");
+    snprintf(archive_sample.source_name,sizeof(archive_sample.source_name),"sine-c4.wav");
+    archive_sample.frames=tracker.wave.frames;archive_sample.rate=tracker.wave.rate;
+    archive_sample.phrase=tracker.phrase;
+    char archive_path[]="/tmp/tt-source-XXXXXX.zip";
+    int archive_fd=mkstemps(archive_path,4);assert(archive_fd>=0);close(archive_fd);
+    const char *archive_sources[TT_SONG_SAMPLES]={"samples/sine-c4.wav"};
+    const TtWave *archive_waves[TT_SONG_SAMPLES]={&tracker.wave};
+    assert(tt_package_save(archive_path,&tracker.song,&archive_sample,1,
+                           archive_sources,archive_waves,source_error,sizeof(source_error)));
+    manage_source(NULL,NULL);
+    char archive_wav[512];
+    assert(snprintf(archive_wav,sizeof(archive_wav),"%s!samples/01.wav",
+                    archive_path)<(int)sizeof(archive_wav));
+    source_browsed(archive_path);
+    assert(tracker.app.modal==tracker.source_dialog);
+    source_browsed(archive_wav);
+    assert(tracker.app.modal==tracker.source_dialog &&
+           strstr(tracker.source_input->input,"!samples/01.wav"));
+    source_apply(NULL,NULL);
+    assert(!tracker.app.modal && strstr(tracker.source_ref,"!samples/01.wav") &&
+           tracker.wave.pcm);
+    tracker.path_action=PATH_WAV;
+    file_chosen(archive_wav,NULL);
+    assert(!tracker.app.modal && tracker.sample_count==2 &&
+           tracker.sample_index==1 && tracker.wave.pcm &&
+           !strcmp(tracker.wave.source_name,"01.wav") && !tracker.source_ref[0]);
+    unlink(archive_path);tt_package_cleanup_all();
     tt_edit_history_free(edit_history);edit_history=NULL;
     f80_free(source_root);
     puts("default song, ordered grid, playback follow and DX7 editor events passed");
