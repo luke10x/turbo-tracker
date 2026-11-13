@@ -90,7 +90,7 @@ int tt_package_save(const char *path,const TtSong *song,
     for(int i=0;i<count;++i) {
         if(packed[i].instrument_type==TT_INSTRUMENT_DX7 && !packed[i].frames)
             snprintf(packed[i].path,sizeof(packed[i].path),"builtin:dx7");
-        else if(strcmp(packed[i].path,"builtin:demo"))
+        else if(!packed[i].path_explicit && strcmp(packed[i].path,"builtin:demo"))
             snprintf(packed[i].path,sizeof(packed[i].path),"!samples/%02d.wav",i+1);
     }
     if(!tt_song_save(song_tmp,song,packed,count,error,error_size)) {
@@ -123,7 +123,7 @@ int tt_package_save(const char *path,const TtSong *song,
     for(int i=0;i<count;++i) {
         char entry[32];
         if(packed[i].instrument_type!=TT_INSTRUMENT_DX7 &&
-           strcmp(packed[i].path,"builtin:demo")) {
+           packed[i].path[0]=='!' && !packed[i].path_explicit) {
             snprintf(entry,sizeof(entry),"samples/%02d.wav",i+1);
             /* Keep missing samples in the song so edits can still be saved.
                Recovery can supply the WAV in a later session. */

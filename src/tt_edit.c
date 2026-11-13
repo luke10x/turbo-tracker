@@ -291,6 +291,7 @@ static void store_active_sample(TtEditDoc *doc) {
     TtStored *slot=&doc->samples[*doc->sample_index];
     slot->wave=*doc->active_wave;slot->phrase=*doc->active_phrase;
     snprintf(slot->loaded_path,sizeof(slot->loaded_path),"%s",doc->active_loaded_path);
+    snprintf(slot->source_ref,sizeof(slot->source_ref),"%s",doc->active_source_ref);
     snprintf(slot->csv_path,sizeof(slot->csv_path),"%s",doc->active_csv_path);
     memset(doc->active_wave,0,sizeof(*doc->active_wave));
 }
@@ -298,6 +299,7 @@ static void restore_active_sample(TtEditDoc *doc,int index) {
     TtStored *slot=&doc->samples[index];
     *doc->active_wave=slot->wave;*doc->active_phrase=slot->phrase;
     snprintf(doc->active_loaded_path,512,"%s",slot->loaded_path);
+    snprintf(doc->active_source_ref,512,"%s",slot->source_ref);
     snprintf(doc->active_csv_path,256,"%s",slot->csv_path);
     memset(slot,0,sizeof(*slot));
     *doc->sample_index=index;
@@ -417,6 +419,7 @@ static int apply_sample_append(TtEditDoc *doc,const TtEditLoadedWave *e) {
     tt_phrase_init(doc->active_phrase,doc->active_wave->frames);
     *doc->sample_index=(*doc->sample_count)++;
     snprintf(doc->active_loaded_path,512,"%s",e->path);
+    doc->active_source_ref[0]=0;
     doc->active_csv_path[0]=0;
     return 1;
 }
@@ -435,6 +438,35 @@ static int apply_sample_recover(TtEditDoc *doc,const TtEditLoadedWave *e) {
     char *path=e->index==*doc->sample_index?
         doc->active_loaded_path:doc->samples[e->index].loaded_path;
     snprintf(path,512,"%s",e->path);
+    return 1;
+}
+static int apply_sample_source(TtEditDoc *doc,const TtEditSource *e) {
+    if(!sample_ok(doc,e->index) || !doc->active_source_ref ||
+       !e->source_ref || !e->loaded_path ||
+       strlen(e->source_ref)>=512 || strlen(e->loaded_path)>=512) {
+        reject(doc,"Invalid instrument source");return 0;
+    }
+    TtWave *current=sample_wave(doc,e->index);
+    if(current->instrument_type!=TT_INSTRUMENT_SAMPLE) {
+        reject(doc,"Source is available for WAV instruments");return 0;
+    }
+    if(e->wave) {
+        if(!e->wave->pcm) { reject(doc,"Invalid replacement WAV");return 0; }
+        char name[256];snprintf(name,sizeof(name),"%s",current->name);
+        TtPhrase *phrase=sample_phrase(doc,e->index);
+        int reference=phrase->reference_note;
+        if(!doc->retain_waves)tt_free(current);
+        *current=*e->wave;memset(e->wave,0,sizeof(*e->wave));
+        snprintf(current->name,sizeof(current->name),"%s",name);
+        tt_phrase_init(phrase,current->frames);
+        tt_phrase_set_reference_note(phrase,reference);
+        char *loaded=e->index==*doc->sample_index?
+            doc->active_loaded_path:doc->samples[e->index].loaded_path;
+        snprintf(loaded,512,"%s",e->loaded_path);
+    }
+    char *ref=e->index==*doc->sample_index?
+        doc->active_source_ref:doc->samples[e->index].source_ref;
+    snprintf(ref,512,"%s",e->source_ref);
     return 1;
 }
 static int apply_document_replace(TtEditDoc *doc,const TtEditDocumentReplace *e) {
@@ -456,6 +488,7 @@ static int apply_document_replace(TtEditDoc *doc,const TtEditDocumentReplace *e)
     *doc->active_wave=e->samples[0].wave;
     *doc->active_phrase=e->samples[0].phrase;
     snprintf(doc->active_loaded_path,512,"%s",e->samples[0].loaded_path);
+    snprintf(doc->active_source_ref,512,"%s",e->samples[0].source_ref);
     doc->active_csv_path[0]=0;
     for(int i=1;i<e->count;++i)doc->samples[i]=e->samples[i];
     memset(e->samples,0,(size_t)e->count*sizeof(TtStored));
@@ -495,7 +528,7 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         snprintf(doc->active_wave->name,256,"INIT VOICE");
         snprintf(doc->active_wave->source_name,256,"DX7");
         tt_phrase_init(doc->active_phrase,0);
-        snprintf(doc->active_loaded_path,512,"builtin:dx7");doc->active_csv_path[0]=0;
+        snprintf(doc->active_loaded_path,512,"builtin:dx7");doc->active_source_ref[0]=0;doc->active_csv_path[0]=0;
         return 1;
     }
     case TT_EDIT_DX7_IMPORT: {
@@ -570,6 +603,8 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_sample_append(doc,&event->loaded_wave);
     case TT_EDIT_SAMPLE_RECOVER:
         return apply_sample_recover(doc,&event->loaded_wave);
+    case TT_EDIT_SAMPLE_SOURCE:
+        return apply_sample_source(doc,&event->source);
     case TT_EDIT_DOCUMENT_REPLACE:
         return apply_document_replace(doc,&event->replacement);
     default:
@@ -588,7 +623,7 @@ typedef struct {
     TtWave wave;
     TtPhrase phrase;
     int active_index,sample_count,sample_index,restore_song_path,dx7_patch_index;
-    char loaded_path[512],csv_path[256],song_path[512];
+    char loaded_path[512],source_ref[512],csv_path[256],song_path[512];
 } TtEditSnapshot;
 struct TtEditHistory {
     TtEditSnapshot *undo[TT_EDIT_HISTORY_LIMIT],*redo[TT_EDIT_HISTORY_LIMIT];
@@ -610,6 +645,7 @@ static TtEditSnapshot *snapshot_new(const TtEditDoc *doc) {
     s->sample_count=*doc->sample_count;s->sample_index=*doc->sample_index;
     s->restore_song_path=0;s->dx7_patch_index=-1;
     snprintf(s->loaded_path,sizeof(s->loaded_path),"%s",doc->active_loaded_path);
+    snprintf(s->source_ref,sizeof(s->source_ref),"%s",doc->active_source_ref);
     snprintf(s->csv_path,sizeof(s->csv_path),"%s",doc->active_csv_path);
     snprintf(s->song_path,sizeof(s->song_path),"%s",doc->song_path?doc->song_path:"");
     return s;
@@ -621,6 +657,7 @@ static void snapshot_restore(TtEditDoc *doc,const TtEditSnapshot *s) {
     *doc->active_index=s->active_index;
     *doc->sample_count=s->sample_count;*doc->sample_index=s->sample_index;
     snprintf(doc->active_loaded_path,512,"%s",s->loaded_path);
+    snprintf(doc->active_source_ref,512,"%s",s->source_ref);
     snprintf(doc->active_csv_path,256,"%s",s->csv_path);
     if(s->restore_song_path && doc->song_path)
         snprintf(doc->song_path,512,"%s",s->song_path);

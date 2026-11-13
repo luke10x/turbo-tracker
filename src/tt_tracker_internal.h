@@ -9,7 +9,7 @@ enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { TT_PERSPECTIVE_MAIN, TT_PERSPECTIVE_ORDERS,
        TT_PERSPECTIVE_INSTRUMENTS };
-enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE, PATH_DX7 };
+enum { PATH_WAV, PATH_SONG_LOAD, PATH_SONG_SAVE, PATH_DX7, PATH_SOURCE };
 enum { TT_HISTORY_MAX=8 };
 enum { SONG_LOOKAHEAD_FRAMES=16384, SONG_DISPLAY_ROWS=64 };
 typedef struct {
@@ -80,11 +80,14 @@ typedef struct {
     int table_clip_rows,table_clip_left,table_clip_right;
     char table_title[32];
     char header_text[256],bpm_text[16],details_text[256],wave_title[160],phrase_title[96];
-    char message[192],loaded_path[512],csv_path[256],song_path[512];
+    char message[192],loaded_path[512],source_ref[512],csv_path[256],song_path[512];
     int console_visible,console_scroll;
     TtStored samples[TT_HISTORY_MAX];
     int sample_count,sample_index;
     F80Widget *manage_dialog,*manage_list_bg,*manage_list,*manage_name,*manage_info;
+    F80Widget *source_dialog,*source_info,*source_input,*source_internal,*source_browse,*source_apply,*source_cancel;
+    int source_index;
+    char source_details[512];
     F80Widget *slices_dialog,*slices_list_bg,*slices_list,*slices_note,*slices_info;
     F80Widget *order_dialog,*order_bank_label,*order_bank_bg,*order_bank;
     F80Widget *order_seq_label,*order_seq_bg,*order_seq,*order_name;

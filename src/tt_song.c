@@ -126,7 +126,7 @@ static int fields(FILE *file,char *line,size_t cap,char **part,int count) {
 static void saved_path(const char *song_path,const TtSongSample *sample,
                        char out[512]) {
     const char *source=sample->path;
-    if(!strcmp(source,"builtin:demo") || source[0]!='/') {
+    if(sample->path_explicit || !strcmp(source,"builtin:demo") || source[0]!='/') {
         snprintf(out,512,"%s",source);return;
     }
     if(!strcmp(source,"/sample-tracker-upload.wav")) {
@@ -170,10 +170,57 @@ static void saved_path(const char *song_path,const TtSongSample *sample,
     else relative[0]=0;
     snprintf(out,512,"%s",relative[0]?relative:source);
 }
+static int normalize_absolute(const char *source,char *out,size_t capacity) {
+    if(!source || source[0]!='/' || capacity<2)return 0;
+    size_t length=1;out[0]='/';out[1]=0;
+    for(const char *part=source+1;*part;) {
+        while(*part=='/')++part;
+        if(!*part)break;
+        const char *end=strchr(part,'/');
+        size_t count=end?(size_t)(end-part):strlen(part);
+        if(count==1 && part[0]=='.') { part+=count;continue; }
+        if(count==2 && part[0]=='.' && part[1]=='.') {
+            while(length>1 && out[length-1]!='/')--length;
+            if(length>1)--length;
+            out[length]=0;part+=count;continue;
+        }
+        if(length+(length>1?1:0)+count>=capacity)return 0;
+        if(length>1)out[length++]='/';
+        memcpy(out+length,part,count);length+=count;out[length]=0;
+        part+=count;
+    }
+    return 1;
+}
+int tt_song_relative_path(const char *song_path,const char *absolute_path,
+                          char *relative,size_t size) {
+    if(!song_path || !absolute_path || absolute_path[0]!='/')return 0;
+    char source[512],destination[PATH_MAX],target[PATH_MAX];
+    if(!normalize_absolute(absolute_path,source,sizeof(source)))return 0;
+    if(song_path[0]=='/') {
+        if(!normalize_absolute(song_path,destination,sizeof(destination)))return 0;
+    } else {
+        char cwd[PATH_MAX],joined[PATH_MAX];
+        if(!getcwd(cwd,sizeof(cwd)) ||
+           snprintf(joined,sizeof(joined),"%s/%s",cwd,song_path)>=(int)sizeof(joined) ||
+           !normalize_absolute(joined,destination,sizeof(destination)))return 0;
+    }
+    TtSongSample sample={0};
+    snprintf(sample.path,sizeof(sample.path),"%s",source);
+    saved_path(destination,&sample,target);
+    if(target[0]!='/' && strncmp(target,"../",3) && strncmp(target,"./",2))
+        return snprintf(relative,size,"./%s",target)<(int)size;
+    return snprintf(relative,size,"%s",target)<(int)size;
+}
 int tt_song_resolve_path(const char *song_path,const char *saved,
                              char *resolved,size_t size) {
     if(!strcmp(saved,"builtin:demo") || saved[0]=='/')
         return snprintf(resolved,size,"%s",saved)<(int)size;
+    if(saved[0]=='~' && saved[1]=='/') {
+        const char *home=getenv("HOME");
+        return home && home[0]?
+            snprintf(resolved,size,"%s/%s",home,saved+2)<(int)size:
+            snprintf(resolved,size,"%s",saved)<(int)size;
+    }
     const char *slash=strrchr(song_path,'/');
     if(song_path[0]!='/') {
         char cwd[PATH_MAX];

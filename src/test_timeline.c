@@ -1246,7 +1246,8 @@ int main(void) {
         .active=&tracker.pattern,.active_index=&tracker.pattern_index,.samples=tracker.samples,
         .active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
         .sample_count=&tracker.sample_count,.sample_index=&tracker.sample_index,
-        .active_loaded_path=tracker.loaded_path,.active_csv_path=tracker.csv_path});
+        .active_loaded_path=tracker.loaded_path,
+        .active_source_ref=tracker.source_ref,.active_csv_path=tracker.csv_path});
     assert(edit_history);
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
     tracker.synth_canvas=&dx7_canvas;dx7_canvas.visible=1;
@@ -1319,6 +1320,38 @@ int main(void) {
     assert(!tracker.wave.pcm && tt_dx7_valid(&tracker.wave.dx7));
     assert(tt_edit_undo(edit_history,&synthdoc) && tracker.sample_count==1);
     tt_edit_history_free(edit_history);edit_history=NULL;tt_audio_close();
+    memset(&tracker,0,sizeof(tracker));tt_song_init(&tracker.song);
+    tracker.pattern=tracker.song.pattern[0];tracker.sample_count=1;
+    char source_error[160];
+    assert(tt_load_wav("samples/sine-c4.wav",&tracker.wave,
+                       source_error,sizeof(source_error)));
+    tt_phrase_init(&tracker.phrase,tracker.wave.frames);
+    snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s","samples/sine-c4.wav");
+    snprintf(tracker.source_ref,sizeof(tracker.source_ref),"%s","./shared.wav");
+    snprintf(tracker.song_path,sizeof(tracker.song_path),"%s","default.ttt");
+    F80Widget *source_root=f80_box(F80_COL);
+    f80_set_root(&tracker.app,source_root);
+    F80Widget source_list={.cursor=0};tracker.manage_list=&source_list;
+    TtEditDoc source_doc=edit_doc();
+    edit_history=tt_edit_history_new(&source_doc);assert(edit_history);
+    manage_source(NULL,NULL);
+    assert(tracker.app.modal==tracker.source_dialog &&
+           !strcmp(tracker.source_input->input,"./shared.wav"));
+    source_internal(NULL,NULL);
+    assert(!strcmp(tracker.source_input->input,"!samples/01.wav"));
+    source_apply(NULL,NULL);
+    assert(!tracker.app.modal && !tracker.source_ref[0]);
+    manage_source(NULL,NULL);
+    char source_absolute[512];assert(realpath("samples/sine-c4.wav",source_absolute));
+    source_browsed(source_absolute);
+    assert(!strcmp(tracker.source_input->input,source_absolute));
+    source_apply(NULL,NULL);
+    assert(!tracker.app.modal && !strcmp(tracker.source_ref,source_absolute));
+    assert(tt_edit_undo(edit_history,&source_doc) && !tracker.source_ref[0]);
+    assert(tt_edit_redo(edit_history,&source_doc) &&
+           !strcmp(tracker.source_ref,source_absolute));
+    tt_edit_history_free(edit_history);edit_history=NULL;
+    f80_free(source_root);
     puts("default song, ordered grid, playback follow and DX7 editor events passed");
     return 0;
 }

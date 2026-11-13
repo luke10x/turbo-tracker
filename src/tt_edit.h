@@ -8,7 +8,7 @@
 typedef struct {
     TtWave wave;
     TtPhrase phrase;
-    char loaded_path[512],csv_path[256];
+    char loaded_path[512],source_ref[512],csv_path[256];
 } TtStored;
 
 /* View over the document that song-edit events mutate.
@@ -23,6 +23,7 @@ typedef struct {
     int *sample_count;
     int *sample_index;
     char *active_loaded_path;
+    char *active_source_ref; /* empty means pack this instrument into the current .ttt */
     char *active_csv_path;
     char *song_path;            /* file association restored with document */
     int retain_waves;           /* history owns audio buffers across removals */
@@ -60,6 +61,7 @@ typedef enum {
     TT_EDIT_SAMPLE_SELECT,
     TT_EDIT_SAMPLE_APPEND,
     TT_EDIT_SAMPLE_RECOVER,
+    TT_EDIT_SAMPLE_SOURCE,
     TT_EDIT_DOCUMENT_REPLACE,
     TT_EDIT_PATTERN_SELECT,
     TT_EDIT_PATTERN_SYNC,
@@ -144,6 +146,13 @@ typedef struct {
 } TtEditLoadedWave;
 
 typedef struct {
+    int index;
+    TtWave *wave; /* optional replacement; ownership transfers on success */
+    const char *loaded_path;
+    const char *source_ref; /* empty for an internal packed asset */
+} TtEditSource;
+
+typedef struct {
     const TtSong *song;
     TtStored *samples;         /* ownership transfers on success */
     int count;
@@ -169,6 +178,7 @@ typedef struct {
         TtEditMarker marker;
         TtEditSlice slice;
         TtEditLoadedWave loaded_wave;
+        TtEditSource source;
         TtEditDocumentReplace replacement;
     };
 } TtEditEvent;

@@ -7,9 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #ifndef __EMSCRIPTEN__
 #include <termios.h>
-#include <unistd.h>
 #endif
 #include "f80.h"
 #include "f80_components.h"
@@ -105,8 +105,8 @@ static int event_log_head,event_log_count;
 static char event_console_menu_label[32]="~S~how event console";
 static F80Wrap order_pattern_actions,order_play_actions;
 static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
-static F80Wrap manage_actions,sample_actions,fm_actions,slices_actions;
-static F80Widget *manage_buttons[4],*sample_buttons[2],*fm_buttons[3],*slices_buttons[6];
+static F80Wrap manage_actions,sample_actions,fm_actions,slices_actions,source_actions;
+static F80Widget *manage_buttons[5],*sample_buttons[2],*fm_buttons[3],*slices_buttons[6];
 static int status_columns=80;
 enum { TT_CONTROLLER_MAX_DEVICES=8 };
 static struct {
@@ -130,6 +130,7 @@ static void perspective_instruments(F80Widget *,void *);
 static void perspective_main(F80Widget *,void *);
 static void slices_selected(F80Widget *,void *);
 static void manage_refresh(void);
+static void source_browsed(const char *path);
 static void slices_apply(F80Widget *,void *);
 static void slices_inherit(F80Widget *,void *);
 static void slices_step(F80Widget *,void *);
@@ -166,6 +167,7 @@ static const char *edit_event_name(TtEditType type) {
         [TT_EDIT_SAMPLE_SWAP]="sample swap",[TT_EDIT_SAMPLE_DELETE]="sample delete",
         [TT_EDIT_SAMPLE_SELECT]="sample select",[TT_EDIT_SAMPLE_APPEND]="sample append",
         [TT_EDIT_SAMPLE_RECOVER]="sample recover",
+        [TT_EDIT_SAMPLE_SOURCE]="sample source",
         [TT_EDIT_MARKER_MOVE]="marker move",[TT_EDIT_SLICE_NOTE]="slice note",
         [TT_EDIT_BEATS_AUTODETECT]="beats auto-detect",
         [TT_EDIT_TONES_AUTODETECT]="tones auto-detect",
@@ -190,7 +192,8 @@ static TtEditDoc edit_doc(void) {
         .song=&tracker.song,.active=&tracker.pattern,.active_index=&tracker.pattern_index,
         .samples=tracker.samples,.active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
         .sample_count=&tracker.sample_count,.sample_index=&tracker.sample_index,
-        .active_loaded_path=tracker.loaded_path,.active_csv_path=tracker.csv_path,
+        .active_loaded_path=tracker.loaded_path,.active_source_ref=tracker.source_ref,
+        .active_csv_path=tracker.csv_path,
         .song_path=tracker.song_path,
         .msg=edit_message,.msg_size=(int)sizeof(edit_message)
     };
@@ -1113,6 +1116,7 @@ static int save_song_at(const char *path) {
     TtSongSample meta[TT_HISTORY_MAX]={0};
     const char *sample_paths[TT_SONG_SAMPLES]={0};
     const TtWave *waves[TT_SONG_SAMPLES]={0};
+    char updated_refs[TT_SONG_SAMPLES][512]={{0}};
     TtEditEvent sync={.type=TT_EDIT_PATTERN_SYNC};
     if(!emit_edit(&sync)) { tt_tracker_message(edit_message);return 0; }
     for(int i=0;i<tracker.sample_count;++i) {
@@ -1125,7 +1129,22 @@ static int save_song_at(const char *path) {
         snprintf(entry->source_name,sizeof(entry->source_name),"%s",wave->source_name);
         entry->instrument_type=wave->instrument_type;entry->dx7=wave->dx7;
         entry->frames=wave->frames;entry->rate=wave->rate;entry->phrase=*phrase;
-        if(!loaded[0])snprintf(entry->path,sizeof(entry->path),"builtin:demo");
+        const char *source_ref=i==tracker.sample_index?tracker.source_ref:
+            tracker.samples[i].source_ref;
+        if(source_ref[0]) {
+            const char *saved_ref=source_ref;
+#ifndef __EMSCRIPTEN__
+            if(!strncmp(source_ref,"./",2) || !strncmp(source_ref,"../",3)) {
+                char absolute[PATH_MAX];
+                const char *physical=realpath(loaded,absolute)?absolute:loaded;
+                if(tt_song_relative_path(path,physical,updated_refs[i],
+                                         sizeof(updated_refs[i])))
+                    saved_ref=updated_refs[i];
+            }
+#endif
+            snprintf(entry->path,sizeof(entry->path),"%s",saved_ref);
+            entry->path_explicit=1;
+        } else if(!loaded[0])snprintf(entry->path,sizeof(entry->path),"builtin:demo");
         else {
 #ifdef __EMSCRIPTEN__
             loaded=wave->source_name;
@@ -1141,12 +1160,16 @@ static int save_song_at(const char *path) {
                         sample_paths,waves,error,sizeof(error))) {
         tt_tracker_message(error);return 0;
     }
+    for(int i=0;i<tracker.sample_count;++i)if(updated_refs[i][0]) {
+        char *ref=i==tracker.sample_index?tracker.source_ref:tracker.samples[i].source_ref;
+        snprintf(ref,512,"%s",updated_refs[i]);
+    }
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
     tracker.document_dirty=0;
     tt_tracker_message("Track saved with packed WAVs and SYX banks");
     return 1;
 }
-static int load_song_at_with_banks(const char *path,
+static int load_song_at_with_banks(const char *path,const char *origin,
                                    const TtPackageBank banks[TT_SONG_SAMPLES]) {
     TtSong *next=malloc(sizeof(*next));
     if(!next) { tt_tracker_message("Out of memory loading song");return 0; }
@@ -1159,11 +1182,14 @@ static int load_song_at_with_banks(const char *path,
     if(banks)for(int i=0;i<count;++i) {
         char expected[32];
         snprintf(expected,sizeof(expected),"samples/%02d.wav",i+1);
-        if(strcmp(meta[i].path,"builtin:demo") &&
-           strcmp(meta[i].path,"builtin:dx7") &&
-           strcmp(meta[i].path,expected) &&
-           !(meta[i].path[0]=='!' && !strcmp(meta[i].path+1,expected))) {
-            snprintf(error,sizeof(error),"Invalid package sample path: %.100s",meta[i].path);
+        const char *saved=meta[i].path;
+        int internal=!strcmp(saved,expected) ||
+                     (saved[0]=='!' && !strcmp(saved+1,expected));
+        int external=saved[0]=='/' || !strncmp(saved,"./",2) ||
+                     !strncmp(saved,"../",3) || !strncmp(saved,"~/",2);
+        if(strcmp(saved,"builtin:demo") && strcmp(saved,"builtin:dx7") &&
+           !internal && !external) {
+            snprintf(error,sizeof(error),"Invalid package sample path: %.100s",saved);
             goto failed;
         }
     }
@@ -1175,10 +1201,14 @@ static int load_song_at_with_banks(const char *path,
             loaded[i].phrase=meta[i].phrase;
             continue;
         }
-        char resolved[512];
+        char resolved[512],expected[32];
+        snprintf(expected,sizeof(expected),"samples/%02d.wav",i+1);
+        int internal=banks && (meta[i].path[0]=='!' ||
+                               !strcmp(meta[i].path,expected));
         const char *saved_asset=meta[i].path;
-        if(banks && saved_asset[0]=='!')++saved_asset;
-        if(!tt_song_resolve_path(path,saved_asset,resolved,sizeof(resolved))) {
+        if(internal && saved_asset[0]=='!')++saved_asset;
+        const char *context=internal?path:origin;
+        if(!tt_song_resolve_path(context,saved_asset,resolved,sizeof(resolved))) {
             snprintf(error,sizeof(error),"Sample path too long");goto failed;
         }
         if(!strcmp(resolved,"builtin:demo")) {
@@ -1199,6 +1229,10 @@ static int load_song_at_with_banks(const char *path,
             }
             snprintf(loaded[i].loaded_path,sizeof(loaded[i].loaded_path),"%s",resolved);
         }
+        if(!internal && (meta[i].path[0]=='/' ||
+           !strncmp(meta[i].path,"./",2) || !strncmp(meta[i].path,"../",3) ||
+           !strncmp(meta[i].path,"~/",2)))
+            snprintf(loaded[i].source_ref,sizeof(loaded[i].source_ref),"%s",meta[i].path);
         loaded[i].wave.instrument_type=meta[i].instrument_type;loaded[i].wave.dx7=meta[i].dx7;
         if(loaded[i].wave.pcm &&
            (loaded[i].wave.frames!=meta[i].frames || loaded[i].wave.rate!=meta[i].rate)) {
@@ -1240,7 +1274,7 @@ failed:
     free(next);tt_tracker_message(error);return 0;
 }
 static int load_song_at(const char *path) {
-    return load_song_at_with_banks(path,NULL);
+    return load_song_at_with_banks(path,path,NULL);
 }
 static int load_project_at(const char *path) {
     /* A .ttt can be a plain legacy text song or text followed by a ZIP.
@@ -1254,7 +1288,7 @@ static int load_project_at(const char *path) {
         if(!tt_package_is_path(path))return load_song_at(path);
         tt_tracker_message(error);return 0;
     }
-    int loaded=load_song_at_with_banks(song_path,banks);
+    int loaded=load_song_at_with_banks(song_path,path,banks);
     free(banks);
     if(loaded) {
         snprintf(tracker.song_path,sizeof(tracker.song_path),"%s",path);
@@ -1323,7 +1357,25 @@ EMSCRIPTEN_KEEPALIVE int tt_tracker_recover_wav(const char *name) {
     return recover_missing(name);
 }
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_wav(const char *original_name) {
-    return load_path("/sample-tracker-upload.wav",original_name);
+    static unsigned serial;
+    char stable[80];
+    snprintf(stable,sizeof(stable),"/sample-tracker-loaded-%u.wav",++serial);
+    FILE *input=fopen("/sample-tracker-upload.wav","rb");
+    FILE *output=fopen(stable,"wb");
+    if(!input || !output) {
+        if(input)fclose(input);
+        if(output)fclose(output);
+        tt_tracker_message("Cannot store uploaded WAV");return 0;
+    }
+    char buffer[8192];size_t amount;int copied=1;
+    while((amount=fread(buffer,1,sizeof(buffer),input))>0)
+        if(fwrite(buffer,1,amount,output)!=amount) { copied=0;break; }
+    if(ferror(input))copied=0;
+    if(fclose(input) || fclose(output))copied=0;
+    if(!copied || !load_path(stable,original_name)) {
+        unlink(stable);return 0;
+    }
+    return 1;
 }
 EMSCRIPTEN_KEEPALIVE int tt_tracker_load_song(void) {
     return load_project_at("/sample-tracker-import.ttt");
@@ -1343,6 +1395,7 @@ static void file_chosen(const char *path,void *user) {
     if(tracker.path_action==PATH_DX7)load_dx7_at(path,tracker.sysex_voice);
     else if(tracker.path_action==PATH_WAV)load_path(path,NULL);
     else if(tracker.path_action==PATH_SONG_LOAD)load_project_at(path);
+    else if(tracker.path_action==PATH_SOURCE)source_browsed(path);
     else {
         size_t length=strlen(path);
         char target[512];
@@ -2278,9 +2331,11 @@ static void manage_refresh(void) {
     const TtPhrase *phrase=selected==tracker.sample_index?&tracker.phrase:
         &tracker.samples[selected].phrase;
     char note[4];tt_note_name(phrase->reference_note,note);
+    const char *ref=selected==tracker.sample_index?tracker.source_ref:
+        tracker.samples[selected].source_ref;
     snprintf(tracker.manage_details,sizeof(tracker.manage_details),
-             "Base %s | %d Hz | %d frames | Source: %.50s",
-             note,wave->rate,wave->frames,wave->source_name);
+             "Base %s | %d Hz | %d frames | %.54s",
+             note,wave->rate,wave->frames,ref[0]?ref:"Packed in this track");
     if(wave->instrument_type==TT_INSTRUMENT_DX7)
         snprintf(tracker.manage_details,sizeof(tracker.manage_details),"FM instrument | SysEx voice %d/32",tracker.sysex_voice+1);
 }
@@ -2359,6 +2414,154 @@ static void manage_ref(F80Widget *button,void *user) {
     if(!emit_edit(&event)) { tt_tracker_message(edit_message);return; }
     manage_refresh();tt_tracker_message("Sample base changed; slice bases transposed");
 }
+static void source_close(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.app.modal==tracker.source_dialog)f80_hide_modal(&tracker.app);
+    tracker.source_dialog=tracker.source_info=tracker.source_input=NULL;
+    tracker.source_internal=tracker.source_browse=tracker.source_apply=tracker.source_cancel=NULL;
+}
+static void source_browsed(const char *path) {
+    if(!tracker.source_dialog || !tracker.source_input || !path)return;
+    snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),"%s",path);
+    tracker.source_input->input_pos=(int)strlen(tracker.source_input->input);
+    tracker.source_input->input_scroll=0;
+    tracker.app.focus=tracker.source_input;
+    tt_tracker_message("External WAV selected; edit its path or press Apply");
+}
+#ifdef __EMSCRIPTEN__
+EM_JS(void, choose_web_source, (), {
+    const input=document.createElement('input');input.type='file';input.accept='.wav';
+    input.onchange=async function() {
+        if(!input.files.length)return;
+        const file=input.files[0];
+        if(file.size>64*1024*1024)return;
+        const name=file.name.replace(/[\\/]/g,'_');
+        const path='/'+name;
+        FS.writeFile(path,new Uint8Array(await file.arrayBuffer()));
+        Module.ccall('tt_tracker_source_browsed',null,['string'],['./'+name]);
+    };
+    input.click();
+});
+EMSCRIPTEN_KEEPALIVE void tt_tracker_source_browsed(const char *path) {
+    source_browsed(path);
+}
+#endif
+static void source_browse(F80Widget *button,void *user) {
+    (void)button;(void)user;
+#ifdef __EMSCRIPTEN__
+    choose_web_source();
+#else
+    tracker.path_action=PATH_SOURCE;
+    const char *ref=tracker.source_index==tracker.sample_index?
+        tracker.source_ref:tracker.samples[tracker.source_index].source_ref;
+    const char *loaded=tracker.source_index==tracker.sample_index?
+        tracker.loaded_path:tracker.samples[tracker.source_index].loaded_path;
+    char initial[512];
+    snprintf(initial,sizeof(initial),"%s",ref[0]?loaded:tracker.song_path);
+    if(!ref[0]) {
+        char *slash=strrchr(initial,'/');
+        if(slash)slash[1]=0;
+        else initial[0]=0;
+    }
+    if(!f80_file_dialog_show(&file_dialog,&tracker.app,F80_FILE_OPEN,
+                             "Choose external WAV",initial,".wav",
+                             file_chosen,NULL))
+        tt_tracker_message("Could not open source file dialog");
+#endif
+}
+static void source_internal(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(!tracker.source_input)return;
+    snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),
+             "!samples/%02d.wav",tracker.source_index+1);
+    tracker.source_input->input_pos=(int)strlen(tracker.source_input->input);
+    tracker.app.focus=tracker.source_input;
+}
+static void source_apply(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(!tracker.source_input)return;
+    int index=tracker.source_index;
+    if(index<0 || index>=tracker.sample_count)return;
+    char ref[512],resolved[512];
+    snprintf(ref,sizeof(ref),"%s",tracker.source_input->input);
+    if(!ref[0]) { tt_tracker_message("Enter a source path or select This track");return; }
+    char internal[32];snprintf(internal,sizeof(internal),"!samples/%02d.wav",index+1);
+    int packed=!strcmp(ref,internal);
+    if(ref[0]=='!' && !packed) {
+        tt_tracker_message("This track uses the shown !samples/ path for this instrument");return;
+    }
+    if(!packed && ref[0]!='/' && strncmp(ref,"./",2) &&
+       strncmp(ref,"../",3) && strncmp(ref,"~/",2)) {
+        char explicit_ref[512];
+        if(snprintf(explicit_ref,sizeof(explicit_ref),"./%s",ref)>=(int)sizeof(explicit_ref)) {
+            tt_tracker_message("Source path too long");return;
+        }
+        snprintf(ref,sizeof(ref),"%s",explicit_ref);
+    }
+    TtWave next={0};TtWave *replacement=NULL;
+    const char *current_loaded=index==tracker.sample_index?tracker.loaded_path:
+        tracker.samples[index].loaded_path;
+    const TtWave *current_wave=index==tracker.sample_index?&tracker.wave:
+        &tracker.samples[index].wave;
+    const char *loaded=current_loaded;
+    if(!packed) {
+        if(!tt_song_resolve_path(tracker.song_path,ref,resolved,sizeof(resolved))) {
+            tt_tracker_message("Source path too long or HOME unavailable");return;
+        }
+        if(strcmp(resolved,current_loaded) || !current_wave->pcm) {
+            char error[160];
+            if(!tt_load_wav(resolved,&next,error,sizeof(error))) {
+                tt_tracker_message(error);return;
+            }
+            replacement=&next;
+        }
+        loaded=resolved;
+    }
+    stop_playback(NULL,NULL);
+    TtEditEvent event={.type=TT_EDIT_SAMPLE_SOURCE};
+    event.source=(TtEditSource){index,replacement,loaded,packed?"":ref};
+    if(!emit_edit(&event)) {
+        tt_free(&next);tt_tracker_message(edit_message);return;
+    }
+    tracker.zoom=tracker.view_start=tracker.marker=0;
+    source_close(NULL,NULL);
+    handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_REFRESH});
+    manage_refresh();
+    tt_tracker_message(packed?"WAV will be packed into this track":
+                             "External WAV source set; it will remain outside the track");
+}
+static void manage_source(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    int index=tracker.manage_list?tracker.manage_list->cursor:tracker.sample_index;
+    if(index<0 || index>=tracker.sample_count)return;
+    const TtWave *wave=index==tracker.sample_index?&tracker.wave:
+        &tracker.samples[index].wave;
+    if(wave->instrument_type!=TT_INSTRUMENT_SAMPLE) {
+        tt_tracker_message("FM voices use Import .syx in FM Settings");return;
+    }
+    tracker.source_index=index;
+    const char *ref=index==tracker.sample_index?tracker.source_ref:
+        tracker.samples[index].source_ref;
+    snprintf(tracker.source_details,sizeof(tracker.source_details),
+             "Current: %.480s",ref[0]?ref:"packed in this .ttt");
+    F80Widget *dialog=f80_dialog("Instrument source",NULL,NULL,0,0);
+    if(!dialog)return;
+    tracker.source_dialog=dialog;
+    tracker.source_info=f80_add(dialog,f80_label(tracker.source_details));
+    tracker.source_info->style=F80_COLOR_TEXT;
+    tracker.source_input=f80_add(dialog,f80_input());
+    if(ref[0])snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),"%s",ref);
+    else snprintf(tracker.source_input->input,sizeof(tracker.source_input->input),
+                  "!samples/%02d.wav",index+1);
+    tracker.source_input->input_pos=(int)strlen(tracker.source_input->input);
+    tracker.source_internal=f80_add(dialog,f80_button("This track",source_internal,NULL));
+    tracker.source_browse=f80_add(dialog,f80_button("Browse...",source_browse,NULL));
+    tracker.source_apply=f80_add(dialog,f80_button("Apply",source_apply,NULL));
+    tracker.source_cancel=f80_add(dialog,f80_button("Cancel",source_close,NULL));
+    f80_wrap_init(&source_actions,1,0);
+    f80_show_modal(&tracker.app,dialog);
+    tracker.app.focus=tracker.source_input;
+}
 static void build_slices_panel(void);
 static void build_manage_panel(void);
 static void close_manage(F80Widget *button,void *user) {
@@ -2425,6 +2628,7 @@ static void build_manage_panel(void) {
     manage_buttons[1]=f80_add(dialog,f80_button("Dow~n~",manage_move,(void *)(long)1));
     manage_buttons[2]=f80_add(dialog,f80_button("~D~elete",manage_delete,NULL));
     manage_buttons[3]=f80_add(dialog,f80_button("~R~ename",manage_rename,NULL));
+    manage_buttons[4]=f80_add(dialog,f80_button("~S~ource...",manage_source,NULL));
     f80_wrap_init(&manage_actions,1,0);
     tracker.sample_settings_panel=f80_add(tracker.instrument_panels,
         f80_window(F80_WINDOW_GRAY,F80_COL));
@@ -2856,7 +3060,7 @@ static void show_help(F80Widget *button,void *user) {
         "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "File > Song settings changes BPM, pattern rows, and table ticks.",
-        "Instruments contains sample management and slice settings.",
+        "Instruments > Source packs WAVs or selects an external shared file.",
         "Select TBLxx or its value, then use F7 to expand its inline table.",
         "Table ticks show note, instrument, and six FX slots."
     };
@@ -4055,7 +4259,11 @@ static void handle_key(int key) {
             else if(tracker.app.modal==tracker.slices_dialog)close_slices(NULL,NULL);
             else if(tracker.app.modal==tracker.order_dialog)close_order(NULL,NULL);
             else if(tracker.app.modal==tracker.table_dialog)close_table(NULL,NULL);
+            else if(tracker.app.modal==tracker.source_dialog)source_close(NULL,NULL);
             else close_help(NULL,NULL);
+        } else if(tracker.app.modal==tracker.source_dialog &&
+                  tracker.app.focus==tracker.source_input && (key==10 || key==13)) {
+            source_apply(NULL,NULL);
         } else if(tracker.app.modal==tracker.table_dialog) {
             handle_table_key(key);
         } else if(tracker.app.modal==tracker.manage_dialog &&
@@ -5280,8 +5488,13 @@ static void layout_instrument_bottom(F80Rect row) {
     }
     if(tracker.manage_dialog) {
         f80_layout(tracker.manage_dialog,settings);
+        int source_w,source_h;
+        f80_fit_size(manage_buttons[4],&source_w,&source_h);
+        if(source_w>settings.w/2)source_w=settings.w/2;
         f80_layout(tracker.manage_name,
-                   f80_rect(settings.x+1,settings.y+1,settings.w-2,1));
+                   f80_rect(settings.x+1,settings.y+1,settings.w-source_w-3,1));
+        f80_layout(manage_buttons[4],f80_rect(settings.x+settings.w-source_w-1,
+                                              settings.y+1,source_w,2));
         f80_wrap_layout(&manage_actions,
             f80_rect(settings.x+1,settings.y+3,settings.w-2,
                      settings.h-4),manage_buttons,4);
@@ -5454,12 +5667,21 @@ static int frame(void *user) {
             if(tracker.app.modal==tracker.order_dialog) { w=cols>=92?90:50;h=30; }
             if(tracker.app.modal==tracker.table_dialog) { w=46;h=25; }
             if(tracker.app.modal==tracker.settings_dialog) { w=48;h=16; }
+            if(tracker.app.modal==tracker.source_dialog) { w=70;h=11; }
         }
         if(w>cols-2)w=cols-2;
         if(h>rows-2)h=rows-2;
         f80_layout(tracker.app.modal,f80_rect((cols-w)/2,(rows-h)/2,w,h));
         if(tracker.app.modal==tracker.order_dialog)order_refresh();
-        if(tracker.app.modal==tracker.settings_dialog) {
+        if(tracker.app.modal==tracker.source_dialog) {
+            F80Rect r=tracker.app.modal->rect;
+            f80_layout(tracker.source_info,f80_rect(r.x+2,r.y+2,r.w-4,1));
+            f80_layout(tracker.source_input,f80_rect(r.x+2,r.y+4,r.w-4,1));
+            F80Widget *buttons[]={tracker.source_internal,tracker.source_browse,
+                                  tracker.source_apply,tracker.source_cancel};
+            f80_wrap_layout(&source_actions,
+                f80_rect(r.x+2,r.y+6,r.w-4,r.h-7),buttons,4);
+        } else if(tracker.app.modal==tracker.settings_dialog) {
             F80Rect r=tracker.app.modal->rect;
             int left=r.x+2,label_w=r.w>=30?21:r.w/2;
             int input_w=r.w-label_w-5;

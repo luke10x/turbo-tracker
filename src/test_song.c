@@ -152,6 +152,16 @@ int main(void) {
     assert(tt_song_resolve_path("/tmp/project/song.song",readback[0].path,
                                     resolved,sizeof(resolved)));
     assert(!strcmp(resolved,"/tmp/project/samples/break.wav"));
+    assert(tt_song_relative_path("/tmp/project/song.ttt",
+                                 "/tmp/project/shared.wav",resolved,sizeof(resolved)));
+    assert(!strcmp(resolved,"./shared.wav"));
+    assert(tt_song_relative_path("/tmp/project/song.ttt",
+                                 "/tmp/wavs/shared.wav",resolved,sizeof(resolved)));
+    assert(!strcmp(resolved,"../wavs/shared.wav"));
+    assert(tt_song_relative_path("/tmp/new/song.ttt",
+                                 "/tmp/project/songs/../missing.wav",
+                                 resolved,sizeof(resolved)));
+    assert(!strcmp(resolved,"../project/missing.wav"));
     char root[]="/tmp/f80-song-path-XXXXXX";
     int root_fd=mkstemp(root);assert(root_fd>=0);close(root_fd);unlink(root);
     assert(!mkdir(root,0700));
@@ -257,6 +267,21 @@ int main(void) {
     assert(tt_song_resolve_path(unpacked_again,readback[0].path+1,
                                 resolved,sizeof(resolved)));
     assert(access(resolved,F_OK)!=0); /* recovery remains possible */
+    char external[512];assert(realpath("samples/sine-c4.wav",external));
+    snprintf(sample[0].path,sizeof(sample[0].path),"%s",external);
+    sample[0].path_explicit=1;
+    assert(tt_package_save(repacked,&song,sample,2,sources,waves,
+                           error,sizeof(error)));
+    assert(tt_package_unpack(repacked,unpacked_again,sizeof(unpacked_again),
+                             banks,error,sizeof(error)));
+    assert(tt_song_load(unpacked_again,&loaded,readback,&count,error,sizeof(error)));
+    assert(!strcmp(readback[0].path,external));
+    assert(tt_song_resolve_path(unpacked_again,"samples/01.wav",
+                                resolved,sizeof(resolved)));
+    assert(access(resolved,F_OK)!=0); /* external WAV was not embedded */
+    assert(tt_song_resolve_path(unpacked_again,readback[0].path,
+                                resolved,sizeof(resolved)));
+    assert(!strcmp(resolved,external));
     tt_free(&wav);tt_free(&reopened);
     tt_package_cleanup_all();
     unlink(repacked);

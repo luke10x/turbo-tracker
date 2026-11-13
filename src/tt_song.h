@@ -35,6 +35,7 @@ typedef struct {
     char name[256],source_name[256],path[512];
     int frames,rate;
     int instrument_type;
+    int path_explicit; /* preserve an external source instead of relativizing it */
     TtDx7Patch dx7;
     TtPhrase phrase;
 } TtSongSample;
@@ -49,5 +50,7 @@ int tt_song_load(const char *path,TtSong *song,
                      char *error,size_t error_size);
 int tt_song_resolve_path(const char *song_path,const char *saved_path,
                              char *resolved,size_t size);
+int tt_song_relative_path(const char *song_path,const char *absolute_path,
+                          char *relative,size_t size);
 
 #endif

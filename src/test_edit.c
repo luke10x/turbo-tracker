@@ -11,7 +11,7 @@ static TtStored samples[TT_SONG_SAMPLES];
 static TtWave wave;
 static TtPhrase phrase;
 static int active_index,sample_count,sample_index;
-static char loaded_path[512],csv_path[256],song_path[512],message[192];
+static char loaded_path[512],source_ref[512],csv_path[256],song_path[512],message[192];
 static TtEditDoc doc;
 
 static void setup(void) {
@@ -23,12 +23,13 @@ static void setup(void) {
     sample_count=2;sample_index=0;
     strcpy(samples[1].wave.name,"Two");samples[1].wave.frames=1600;
     tt_phrase_init(&samples[1].phrase,1600);
-    strcpy(loaded_path,"one.wav");csv_path[0]=0;
+    strcpy(loaded_path,"one.wav");source_ref[0]=0;csv_path[0]=0;
     strcpy(song_path,"old.song");message[0]=0;
     doc=(TtEditDoc){.song=&song,.active=&active,.active_index=&active_index,
         .samples=samples,.active_wave=&wave,.active_phrase=&phrase,
         .sample_count=&sample_count,.sample_index=&sample_index,
-        .active_loaded_path=loaded_path,.active_csv_path=csv_path,
+        .active_loaded_path=loaded_path,.active_source_ref=source_ref,
+        .active_csv_path=csv_path,
         .song_path=song_path,
         .msg=message,.msg_size=sizeof(message)};
 }
@@ -318,6 +319,12 @@ int main(void) {
     assert(tt_edit_undo(history,&doc));
     assert(sample_index==0 && active.cell[0][0].instrument==1 && wave.pcm==original_pcm);
     assert(tt_edit_redo(history,&doc) && sample_index==1);
+    e=(TtEditEvent){.type=TT_EDIT_SAMPLE_SOURCE};
+    e.source=(TtEditSource){1,NULL,"/tmp/shared.wav","/tmp/shared.wav"};
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(!strcmp(source_ref,"/tmp/shared.wav"));
+    assert(tt_edit_undo(history,&doc) && !source_ref[0]);
+    assert(tt_edit_redo(history,&doc) && !strcmp(source_ref,"/tmp/shared.wav"));
     e=(TtEditEvent){.type=TT_EDIT_SAMPLE_DELETE};e.sample.index=1;
     assert(tt_edit_apply_recorded(history,&doc,&e) && sample_count==1);
     assert(tt_edit_undo(history,&doc) && sample_count==2);

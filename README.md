@@ -336,6 +336,15 @@ legacy `.song` still loads; saving it produces the packed `.ttt` format. Older
 `.ttt.zip` and `.tts.zip` packages also load. The embedded
 [`default.ttt`](default.ttt) remains a standalone text track.
 
+In **Instruments > Instrument Settings > Source...**, **This track** selects
+`!samples/NN.wav`; Save Track packs that WAV into the `.ttt`. **Browse...**
+chooses an external WAV, and the editable path can also use `/`, `~/`, `./`, or
+`../`. External WAVs remain on disk and are never copied into the `.ttt`.
+Choose **This track** again to pack the currently loaded WAV on the next save.
+Saving to a new native location rebases relative external references to keep
+them pointing at the same file. The browser can use uploaded external WAVs in
+its virtual filesystem; they must be supplied again in a new browser session.
+
 Because the ZIP tail is binary, configure Git once in this checkout to diff only
 the authoritative header: `git config diff.ttt.textconv "python3 scripts/ttt_textconv.py"`.
 The tracked `.gitattributes` associates `.ttt` files with that diff driver.

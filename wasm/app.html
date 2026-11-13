@@ -33,7 +33,7 @@
     window.f80ChooseWav = () => input.click();
     window.f80ChooseSong = () => songInput.click();
     window.f80DownloadSong = (path, filename) => {
-      const type = filename.endsWith('.zip') ? 'application/zip' : 'text/plain';
+      const type = 'application/octet-stream';
       const blob = new Blob([Module.FS.readFile(path)], { type });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
