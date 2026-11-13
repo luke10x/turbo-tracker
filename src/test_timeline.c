@@ -634,12 +634,14 @@ int main(void) {
     tracker.play_mode=PLAY_PATTERN;
     assert(strcmp(current_status()[0].label,"Pt-")==0 &&
            current_status()[0].action==prev_pattern);
-    F80Widget fake_wave_row={.visible=1},fake_phrase_frame={.visible=1};
+    F80Widget fake_wave_row={.visible=1},fake_grid_row={.visible=1},
+        fake_phrase_frame={.visible=1};
     F80Widget fake_instrument_panels={.visible=0},fake_order_frame={.visible=1};
     F80Widget fake_wave_frame={.visible=1};
     F80Widget fake_wave_canvas={.visible=1},fake_order_dialog={.visible=0};
     F80Widget fake_manage_dialog={.visible=1},fake_slices_dialog={.visible=1};
-    tracker.wave_row=&fake_wave_row;tracker.phrase_frame=&fake_phrase_frame;
+    tracker.wave_row=&fake_wave_row;tracker.grid_row=&fake_grid_row;
+    tracker.phrase_frame=&fake_phrase_frame;
     tracker.instrument_panels=&fake_instrument_panels;tracker.order_frame=&fake_order_frame;
     tracker.wave_frame=&fake_wave_frame;
     tracker.wave_canvas=&fake_wave_canvas;tracker.order_dialog=&fake_order_dialog;
@@ -659,7 +661,7 @@ int main(void) {
     handle_key(';');handle_key('x');
     assert(!tracker.leader_pending &&
            tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.playing);
-    tracker.wave_row=tracker.phrase_frame=tracker.instrument_panels=NULL;
+    tracker.wave_row=tracker.grid_row=tracker.phrase_frame=tracker.instrument_panels=NULL;
     tracker.order_frame=tracker.wave_frame=tracker.wave_canvas=tracker.order_dialog=NULL;
     tracker.manage_dialog=tracker.slices_dialog=NULL;
     tracker.playing=0;
@@ -1245,12 +1247,14 @@ int main(void) {
     assert(tracker.pattern.cell[0][4].note==72);
     tt_edit_history_free(edit_history);edit_history=NULL;
     F80Widget root={.visible=1,.window_role=F80_WINDOW_BLUE};
-    F80Widget gap={.visible=1},wave_row={.visible=1},phrase_frame={.visible=1};
+    F80Widget gap={.visible=1},wave_row={.visible=1},grid_row={.visible=1},
+        phrase_frame={.visible=1};
     F80Widget details={.visible=1},status={.visible=1};
     F80Widget console={.rect={0,1,80,10}};
     header.visible=1;
     tracker.root=&root;tracker.header_gap=&gap;tracker.header=&header;
-    tracker.wave_row=&wave_row;tracker.phrase_frame=&phrase_frame;
+    tracker.wave_row=&wave_row;tracker.grid_row=&grid_row;
+    tracker.phrase_frame=&phrase_frame;
     tracker.details=&details;tracker.status=&status;tracker.console=&console;
     int logged=event_log_count;
     view_items[5].action(NULL,NULL);

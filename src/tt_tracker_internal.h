@@ -26,7 +26,7 @@ typedef struct {
     TtPhrase phrase;
     TtPattern pattern;
     TtSong song;
-    F80Widget *root,*header_gap,*console,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
+    F80Widget *root,*header_gap,*console,*wave_row,*grid_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
     F80Widget *instrument_selector_frame,*instrument_panels,*synth_canvas;
     F80Widget *dx7_globals_panel,*dx7_globals_canvas,*dx7_operators_panel;

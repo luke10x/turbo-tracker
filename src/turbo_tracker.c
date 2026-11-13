@@ -616,6 +616,8 @@ static int handle_ui_event(TtUiEvent event) {
             return 0;
         tracker.perspective=event.a;
         tracker.wave_row->visible=!tracker.console_visible;
+        tracker.grid_row->visible=!tracker.console_visible &&
+            tracker.perspective!=TT_PERSPECTIVE_INSTRUMENTS;
         if(tracker.instrument_selector_frame)
             tracker.instrument_selector_frame->visible=!tracker.console_visible &&
                 tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
@@ -625,8 +627,7 @@ static int handle_ui_event(TtUiEvent event) {
             tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
         tracker.order_frame->visible=tracker.perspective!=TT_PERSPECTIVE_INSTRUMENTS;
         tracker.wave_canvas->visible=tracker.perspective!=TT_PERSPECTIVE_ORDERS;
-        tracker.wave_frame->title=tracker.perspective==TT_PERSPECTIVE_ORDERS?
-            "Patterns and Play Order":tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+        tracker.wave_frame->title=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
             "Wave sample":NULL;
         if(tracker.order_dialog)tracker.order_dialog->visible=
             tracker.perspective==TT_PERSPECTIVE_ORDERS;
@@ -3090,7 +3091,7 @@ static void show_order(F80Widget *button,void *user) {
     f80_sized(dialog,f80_grow(),f80_grow());
     dialog->dialog_default=1;
     tracker.order_dialog=dialog;
-    f80_add(tracker.wave_frame,dialog);
+    f80_add(tracker.grid_row,dialog);
     dialog->visible=0;
     tracker.order_bank_label=f80_add(dialog,f80_label("PATTERN BANK"));
     tracker.order_bank_label->style=F80_COLOR_TEXT;
@@ -3284,6 +3285,8 @@ static void toggle_console(F80Widget *button,void *user) {
     tracker.header_gap->visible=panels_visible;
     tracker.header->visible=panels_visible;
     tracker.wave_row->visible=panels_visible;
+    tracker.grid_row->visible=panels_visible &&
+        tracker.perspective!=TT_PERSPECTIVE_INSTRUMENTS;
     if(tracker.instrument_selector_frame)
         tracker.instrument_selector_frame->visible=panels_visible &&
             tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
@@ -5701,16 +5704,17 @@ static int frame(void *user) {
     tracker.compact_editing=editing;
     int wide_header=header_is_wide(cols);
     tracker.header->height=f80_fixed(wide_header?2:4);
-    tracker.wave_row->height=tracker.perspective==TT_PERSPECTIVE_ORDERS?f80_grow():
+    tracker.wave_row->height=tracker.perspective==TT_PERSPECTIVE_ORDERS?f80_fixed(0):
         tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
             (tracker.wave.instrument_type==TT_INSTRUMENT_DX7?f80_fixed(0):f80_percent(.35f)):
         f80_fixed(editing?3:rows>=32?14:rows>=23?10:6);
+    tracker.grid_row->height=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+        f80_fixed(0):f80_grow();
     tracker.instrument_panels->height=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
         f80_grow():f80_fixed(0);
     f80_layout(tracker.root,f80_rect(0,0,cols,rows));
     if(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.order_dialog) {
-        F80Rect r=tracker.wave_frame->rect;
-        f80_layout(tracker.order_dialog,r);
+        F80Rect r=tracker.order_dialog->rect;
         int inner=r.w-4,left=r.x+2,top=r.y+2;
         if(inner<4)inner=4;
         if(r.w>=58) {
@@ -6177,7 +6181,13 @@ int main(int argc,char **argv) {
         f80_button("~L~ock",toggle_pattern_lock,NULL));
     tracker.wave_row=f80_add(tracker.root,f80_box(F80_ROW));
     f80_sized(tracker.wave_row,f80_grow(),f80_fixed(14));
-    tracker.order_frame=f80_add(tracker.wave_row,f80_box(F80_COL));
+    tracker.wave_frame=f80_add(tracker.wave_row,f80_box(F80_COL));
+    tracker.wave_frame->frame=1;
+    f80_sized(tracker.wave_frame,f80_grow(),f80_grow());
+    tracker.wave_canvas=f80_add(tracker.wave_frame,f80_canvas(paint_wave,NULL));
+    tracker.grid_row=f80_add(tracker.root,f80_box(F80_ROW));
+    f80_sized(tracker.grid_row,f80_grow(),f80_grow());
+    tracker.order_frame=f80_add(tracker.grid_row,f80_box(F80_COL));
     tracker.order_frame->frame=1;
     tracker.order_frame->title="ORD";
     f80_sized(tracker.order_frame,f80_fixed(19),f80_grow());
@@ -6186,11 +6196,7 @@ int main(int argc,char **argv) {
                     order_panel_selected,NULL));
     tracker.order_list->range_cursor_pair=F80_PAIR_RANGE_CURSOR;
     f80_sized(tracker.order_list,f80_grow(),f80_grow());
-    tracker.wave_frame=f80_add(tracker.wave_row,f80_box(F80_COL));
-    tracker.wave_frame->frame=1;
-    f80_sized(tracker.wave_frame,f80_grow(),f80_grow());
-    tracker.wave_canvas=f80_add(tracker.wave_frame,f80_canvas(paint_wave,NULL));
-    tracker.phrase_frame=f80_add(tracker.root,f80_box(F80_COL));
+    tracker.phrase_frame=f80_add(tracker.grid_row,f80_box(F80_COL));
     tracker.phrase_frame->frame=1;
     tracker.phrase_canvas=f80_add(tracker.phrase_frame,f80_canvas(paint_phrase,NULL));
     tracker.instrument_panels=f80_add(tracker.root,f80_box(F80_COL));
