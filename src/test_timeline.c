@@ -660,6 +660,9 @@ int main(void) {
     tracker.playing=0;
     handle_key(13);
     assert(tracker.grid_value_editing && !tracker.playing);
+    tracker.app.tick=0;assert(grid_value_edit_pair()==7);
+    tracker.app.tick=9;assert(grid_value_edit_pair()==3);
+    tracker.app.tick=0;
     handle_key(F80_KEY_UP);handle_key(F80_KEY_RIGHT);
     assert(tracker.pattern.cell[10][0].note==61 && !tracker.playing);
     handle_key(F80_KEY_DOWN);handle_key(F80_KEY_LEFT);
@@ -1226,6 +1229,7 @@ int main(void) {
            tracker.song.order_active[0]==!was_active);
     /* Editor inputs must emit validated edits; navigation remains UI-only. */
     memset(&tracker,0,sizeof(tracker));tt_song_init(&tracker.song);
+    dx7_grids_init();
     tracker.pattern=tracker.song.pattern[0];tracker.sample_count=1;
     tt_phrase_init(&tracker.phrase,0);tracker.wave.instrument_type=TT_INSTRUMENT_DX7;
     tt_dx7_init(&tracker.wave.dx7);
@@ -1235,7 +1239,9 @@ int main(void) {
     tracker.wave.instrument_type=TT_INSTRUMENT_DX7;
     F80Widget dx7_canvas={.rect={0,0,120,20}};
     tracker.wave_canvas=&dx7_canvas;tracker.app.focus=&dx7_canvas;
-    tracker.focus=FOCUS_WAVE;tracker.synth_field=0;
+    tracker.focus=FOCUS_WAVE;tracker.dx7_grid_kind=0;
+    F80Widget global_canvas={.rect={0,0,48,12},.visible=1};
+    tracker.dx7_globals_canvas=&global_canvas;
     edit_history=tt_edit_history_new(&(TtEditDoc){.song=&tracker.song,
         .active=&tracker.pattern,.active_index=&tracker.pattern_index,.samples=tracker.samples,
         .active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
@@ -1252,14 +1258,61 @@ int main(void) {
     redo_edit(NULL,NULL);assert(tracker.wave.dx7.data[134]==1 && tt_audio_voice_active(0));
     TtEditDoc synthdoc=edit_doc();assert(tt_edit_undo(edit_history,&synthdoc));
     assert(tracker.wave.dx7.data[134]==0);
-    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_CURSOR,.index=144}));
-    assert(tracker.synth_field==144 && tracker.synth_scroll>0);
-    assert(!handle_ui_event((TtUiEvent){.type=TT_UI_DX7_CURSOR,.index=145}));
+    f80_grid_layout(&tracker.dx7_operators_grid,f80_rect(0,0,24,9));
+    assert(tracker.dx7_operators_grid.fields==22 &&
+           tracker.dx7_operators_grid.show_h &&
+           tracker.dx7_operators_grid.read_only[0]);
+    assert(tracker.dx7_pitch_grid.rows==1 && tracker.dx7_pitch_grid.fields==8 &&
+           tracker.dx7_pitch_grid.gutter_width==16 &&
+           !strcmp(tracker.dx7_pitch_grid.corner,""));
+    char operator_gutter[16];
+    dx7_operator_row_text(NULL,1,-1,operator_gutter,sizeof(operator_gutter));
+    assert(!strcmp(operator_gutter,"OP2"));
+    char pitch_gutter[24];
+    dx7_pitch_row_text(NULL,0,-1,pitch_gutter,sizeof(pitch_gutter));
+    assert(!strcmp(pitch_gutter,"Pitch Envelope: "));
+    int global_columns=dx7_global_columns(global_canvas.rect.w);
+    tracker.dx7_globals_grid.field=0;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=0,.a=F80_KEY_DOWN}));
+    assert(tracker.dx7_globals_grid.field==global_columns);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=0,.a=F80_KEY_UP}));
+    assert(tracker.dx7_globals_grid.field==0);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=1,.a=F80_KEY_RIGHT}));
+    assert(tracker.dx7_grid_kind==1 && tracker.dx7_operators_grid.field==1);
+    for(int i=0;i<7;++i)
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+            .index=1,.a=F80_KEY_RIGHT}));
+    assert(tracker.dx7_operators_grid.scroll_x>0);
     assert(tt_edit_can_redo(edit_history)); /* cursor did not touch history */
-    tracker.synth_scroll=0;
-    int dx,dy;dx7_position(0,120,&dx,&dy);dx7_mouse(dx7_canvas.rect,dx,dy,0);
-    assert(tracker.synth_field==0);
-    dx7_mouse(dx7_canvas.rect,7,19,0);assert(tracker.wave.dx7.data[134]==1);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=1,.a=F80_KEY_HOME}));
+    while(tracker.dx7_operators_grid.field>1)
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+            .index=1,.a=F80_KEY_LEFT}));
+    tracker.app.focus=&dx7_canvas;
+    int parameter=dx7_operator_parameter(0,tracker.dx7_operators_grid.field);
+    int old_value=tracker.wave.dx7.data[parameter];
+    handle_key(13);assert(dx7_grid_is_editing());
+    handle_key(F80_KEY_UP);
+    assert(tracker.wave.dx7.data[parameter]==
+           clamp(old_value+10,0,tt_dx7_max(parameter)));
+    handle_key(F80_KEY_RIGHT);
+    assert(tracker.wave.dx7.data[parameter]==
+           clamp(old_value+11,0,tt_dx7_max(parameter)));
+    handle_key(13);assert(!dx7_grid_is_editing());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=2,.a=F80_KEY_RIGHT}));
+    assert(tracker.dx7_grid_kind==2 && tracker.dx7_pitch_grid.field==1);
+    int pitch_parameter=dx7_pitch_parameter(tracker.dx7_pitch_grid.field);
+    int old_pitch=tracker.wave.dx7.data[pitch_parameter];
+    handle_key(13);assert(dx7_grid_is_editing());
+    handle_key(F80_KEY_UP);
+    assert(tracker.wave.dx7.data[pitch_parameter]==
+           clamp(old_pitch+10,0,tt_dx7_max(pitch_parameter)));
+    handle_key(13);assert(!dx7_grid_is_editing());
     tt_play_emit((TtPlayEvent){.type=TT_PLAY_AUDITION});
     TtEditEvent new_synth={.type=TT_EDIT_DX7_APPEND};assert(emit_edit(&new_synth));
     assert(!tracker.playing && tracker.sample_count==2 && tracker.sample_index==1);

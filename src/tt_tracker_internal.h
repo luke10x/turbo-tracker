@@ -29,7 +29,12 @@ typedef struct {
     F80Widget *root,*header_gap,*console,*wave_row,*order_frame,*order_list,*wave_frame,*wave_canvas;
     F80Widget *phrase_frame,*phrase_canvas;
     F80Widget *instrument_selector_frame,*instrument_panels,*synth_canvas;
-    int synth_field,synth_scroll,sysex_voice;
+    F80Widget *dx7_globals_panel,*dx7_globals_canvas,*dx7_operators_panel;
+    F80Widget *sample_settings_panel,*sample_settings_info;
+    F80Widget *fm_settings_panel,*fm_settings_info;
+    int sysex_voice;
+    F80Grid dx7_globals_grid,dx7_pitch_grid,dx7_operators_grid;
+    int dx7_grid_kind;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;
     F80Widget *pattern_lock_button;
     F80Widget *progress,*bpm_label,*details,*status;

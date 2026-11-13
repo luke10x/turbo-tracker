@@ -345,16 +345,18 @@ WAVs. This also works in the itch.io ZIP build.
 The older standalone slice CSV and single-pattern parsers remain in the source
 for compatibility tests; the File menu now loads and saves entire songs.
 
-## DX7 synth instruments
+## FM synth instruments
 
 Every channel can play either a sample or an MSFA DX7 instrument, and can switch
 between them on successive notes. Channels remain monophonic. Instrument numbers
 and table instrument references work for both types.
 
-Open Instruments (`; I`), then **New DX7** to add a synth without a WAV, or
-**Type: WAV/DX7** to switch the selected instrument. The existing eight-slot bank
-limit applies to samples and synths together. Switching types retains a sample
-asset when present; undo/redo restores instrument type and patch edits.
+Choose **File → New FM** to add a synth without a WAV and open its editor.
+The existing eight-slot bank limit applies to samples and synths together.
+Sample instruments show Markers beside Sample Settings, with reference-note
+controls in Sample Settings. FM instruments show FM Settings above the shared
+Instrument settings panel. The Instrument list sits to the left of shared settings
+and shows each instrument's type, number, and name. Undo/redo restores FM patch edits.
 
 The DX7 editor replaces sample/marker controls with global settings and six
 operator panels. Click a parameter or use arrows to select it; `+`/`-` changes

@@ -1,12 +1,16 @@
 #include "f80_components.h"
 #include <stdio.h>
 #include <string.h>
+enum { GRID_GUTTER_WIDTH=4 };
 
 static int bound(int value,int low,int high) {
     return value<low?low:value>high?high:value;
 }
+static int grid_gutter_width(const F80Grid *g) {
+    return g->gutter_width>0?g->gutter_width:GRID_GUTTER_WIDTH;
+}
 static int grid_body_width(const F80Grid *g) {
-    int width=g->rect.w-g->show_v;
+    int width=g->rect.w-grid_gutter_width(g)-g->show_v;
     return width>0?width:1;
 }
 static int grid_body_height(const F80Grid *g) {
@@ -14,14 +18,14 @@ static int grid_body_height(const F80Grid *g) {
     return height>0?height:1;
 }
 static int grid_field_start(const F80Grid *g,int field) {
-    int x=4;
+    int x=0;
     for(int i=0;i<field;++i)x+=g->width[i]+1;
     return x;
 }
 int f80_grid_content_width(const F80Grid *g) {
-    int x=4;
-    for(int i=0;i<g->fields;++i)x+=g->width[i]+1;
-    return x>4?x-1:x;
+    int width=0;
+    for(int i=0;i<g->fields;++i)width+=g->width[i]+1;
+    return width>0?width-1:0;
 }
 static void grid_scrollbars(F80Grid *g) {
     g->show_h=g->show_v=0;
@@ -44,11 +48,39 @@ void f80_grid_init(F80Grid *g,int rows,int fields,const int *width,
     memset(g,0,sizeof(*g));
     g->rows=rows>0?rows:0;
     g->fields=bound(fields,0,F80_GRID_MAX_FIELDS);
+    g->corner="TCK";
+    g->focused=1;
     for(int i=0;i<g->fields;++i) {
         g->width[i]=width[i]>0?width[i]:1;
         g->heading[i]=heading?heading[i]:"";
     }
 }
+void f80_grid_corner(F80Grid *g,const char *label) {
+    if(g)g->corner=label?label:"";
+}
+void f80_grid_gutter(F80Grid *g,int width) {
+    if(g)g->gutter_width=width>0?width:GRID_GUTTER_WIDTH;
+}
+void f80_grid_row_text(F80Grid *g,F80GridText row_text) {
+    if(g)g->row_text=row_text;
+}
+void f80_grid_read_only(F80Grid *g,int field,int read_only) {
+    if(g && field>=0 && field<g->fields)
+        g->read_only[field]=!!read_only;
+}
+void f80_grid_focus(F80Grid *g,int focused) {
+    if(g)g->focused=!!focused;
+}
+void f80_grid_enable_edit(F80Grid *g,int enabled) {
+    if(g) { g->edit_enabled=!!enabled;if(!enabled)g->editing=0; }
+}
+void f80_grid_set_editing(F80Grid *g,int editing) {
+    if(g)g->editing=g->edit_enabled && !!editing;
+}
+void f80_grid_blink(F80Grid *g,int visible) {
+    if(g)g->blink_on=!!visible;
+}
+int f80_grid_is_editing(const F80Grid *g) { return g && g->editing; }
 void f80_grid_layout(F80Grid *g,F80Rect rect) {
     g->rect=rect;
     grid_scrollbars(g);
@@ -78,6 +110,12 @@ static void grid_reveal(F80Grid *g) {
 }
 int f80_grid_key(F80Grid *g,int key) {
     if(!g->rows || !g->fields)return 0;
+    if(g->edit_enabled && (key==10 || key==13)) {
+        g->editing=!g->editing;return F80_GRID_KEY_HANDLED;
+    }
+    if(g->editing && (key==F80_KEY_UP || key==F80_KEY_DOWN ||
+                      key==F80_KEY_LEFT || key==F80_KEY_RIGHT))
+        return F80_GRID_KEY_EDIT_VALUE;
     int shift=key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
               key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT;
     if(shift && !g->selecting) {
@@ -116,13 +154,13 @@ int f80_grid_mouse(F80Grid *g,int x,int y,int wheel) {
     if(x<r.x || y<r.y || x>=r.x+r.w || y>=r.y+r.h)return 0;
     if(wheel) { f80_grid_scroll(g,0,wheel*3);return 1; }
     if(g->show_h && g->show_v && x==r.x+r.w-1 && y==r.y+r.h-1)return 1;
-    if(g->show_h && y==r.y+r.h-1 && x<r.x+r.w-g->show_v) {
-        int width=r.w-g->show_v;
-        if(x==r.x)f80_grid_scroll(g,-1,0);
-        else if(x==r.x+width-1)f80_grid_scroll(g,1,0);
-        else if(width>3) {
+    int data_x=r.x+grid_gutter_width(g),data_width=grid_body_width(g);
+    if(g->show_h && y==r.y+r.h-1 && x>=data_x && x<data_x+data_width) {
+        if(x==data_x)f80_grid_scroll(g,-1,0);
+        else if(x==data_x+data_width-1)f80_grid_scroll(g,1,0);
+        else if(data_width>3) {
             int maximum=grid_max_x(g);
-            g->scroll_x=bound((x-r.x-1)*maximum/(width-3),0,maximum);
+            g->scroll_x=bound((x-data_x-1)*maximum/(data_width-3),0,maximum);
         }
         return 1;
     }
@@ -138,7 +176,8 @@ int f80_grid_mouse(F80Grid *g,int x,int y,int wheel) {
     }
     if(y>r.y && g->rows && g->fields) {
         g->row=bound(g->scroll_y+y-r.y-1,0,g->rows-1);
-        g->field=grid_field_at(g,g->scroll_x+x-r.x);
+        if(x>=data_x && x<data_x+data_width)
+            g->field=grid_field_at(g,g->scroll_x+x-data_x);
         g->selecting=0;
     }
     return 1;
@@ -150,7 +189,8 @@ void f80_grid_drag(F80Grid *g,int x,int y) {
     if(!g->selecting || !g->rows || !g->fields)return;
     F80Rect r=g->rect;
     g->row=bound(g->scroll_y+y-r.y-1,0,g->rows-1);
-    g->field=grid_field_at(g,g->scroll_x+x-r.x);
+    int data_x=r.x+grid_gutter_width(g);
+    if(x>=data_x)g->field=grid_field_at(g,g->scroll_x+x-data_x);
     grid_reveal(g);
 }
 int f80_grid_selected(const F80Grid *g,int row,int field) {
@@ -179,41 +219,54 @@ static void grid_put_clipped(const F80Grid *g,int y,int start,const char *text,
     }
     if(x>=visible || width<=0)return;
     if(width>visible-x)width=visible-x;
-    f80_put(y,g->rect.x+x,text,width,pair,bold);
+    f80_put(y,g->rect.x+grid_gutter_width(g)+x,text,width,pair,bold);
+}
+static void grid_put_gutter(const F80Grid *g,int y,const char *text,
+                            int pair,int bold) {
+    int gutter=grid_gutter_width(g);
+    int width=g->rect.w<gutter?g->rect.w:gutter;
+    if(width>0)f80_put(y,g->rect.x,text,width,pair,bold);
 }
 void f80_grid_draw(F80Grid *g,F80GridText text,void *user) {
     F80Rect r=g->rect;
     if(r.w<1 || r.h<2)return;
     f80_fill(r,1);
-    grid_put_clipped(g,r.y,0,"TCK",3,8,1);
+    grid_put_gutter(g,r.y,g->corner?g->corner:"TCK",8,1);
     for(int field=0;field<g->fields;++field)
         grid_put_clipped(g,r.y,grid_field_start(g,field),g->heading[field],
                          g->width[field],8,1);
     int body=grid_body_height(g);
     for(int line=0;line<body && g->scroll_y+line<g->rows;++line) {
         int row=g->scroll_y+line,y=r.y+1+line;
-        char gutter[5];snprintf(gutter,sizeof(gutter),"%02X  ",row);
-        grid_put_clipped(g,y,0,gutter,4,row==g->row?4:8,row==g->row);
+        char gutter[64];
+        if(g->row_text)g->row_text(user,row,-1,gutter,sizeof(gutter));
+        else snprintf(gutter,sizeof(gutter),"%02X",row);
+        grid_put_gutter(g,y,gutter,row==g->row?4:8,row==g->row);
         for(int field=0;field<g->fields;++field) {
             char value[256];value[0]=0;
             if(text)text(user,row,field,value,sizeof(value));
-            int pair=f80_grid_selected(g,row,field)?65:
-                     row==g->row && field==g->field?3:2;
+            int pair=g->editing && row==g->row && field==g->field?
+                         (g->blink_on?7:3):
+                     f80_grid_selected(g,row,field)?65:
+                     row==g->row && field==g->field?
+                         (g->read_only[field]?10:(g->focused?3:8)):
+                     g->read_only[field]?10:2;
             grid_put_clipped(g,y,grid_field_start(g,field),value,
                              g->width[field],pair,row==g->row);
         }
     }
-    int max_x=grid_max_x(g),track=r.w-g->show_v-2;
+    int max_x=grid_max_x(g),data_x=r.x+grid_gutter_width(g);
+    int data_width=grid_body_width(g),track=data_width-2;
     if(g->show_h) {
-    f80_put(r.y+r.h-1,r.x,"◄",1,10,1);
+    f80_put(r.y+r.h-1,data_x,"◄",1,10,1);
     if(track>0) {
         int thumb=max_x?track*grid_body_width(g)/f80_grid_content_width(g):track;
         if(thumb<1)thumb=1;
         int at=max_x?(track-thumb)*g->scroll_x/max_x:0;
         for(int i=0;i<track;++i)
-            f80_put(r.y+r.h-1,r.x+1+i,i>=at && i<at+thumb?"█":"▒",1,10,0);
+            f80_put(r.y+r.h-1,data_x+1+i,i>=at && i<at+thumb?"█":"▒",1,10,0);
     }
-    f80_put(r.y+r.h-1,r.x+r.w-g->show_v-1,"►",1,10,1);
+    f80_put(r.y+r.h-1,data_x+data_width-1,"►",1,10,1);
     }
     int max_y=grid_max_y(g),vertical=r.h-g->show_h-2;
     if(g->show_v) {

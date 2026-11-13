@@ -104,8 +104,8 @@ static int event_log_head,event_log_count;
 static char event_console_menu_label[32]="~S~how event console";
 static F80Wrap order_pattern_actions,order_play_actions;
 static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
-static F80Wrap manage_actions,slices_actions;
-static F80Widget *manage_buttons[11],*slices_buttons[6];
+static F80Wrap manage_actions,sample_actions,fm_actions,slices_actions;
+static F80Widget *manage_buttons[4],*sample_buttons[2],*fm_buttons[3],*slices_buttons[6];
 static int status_columns=80;
 enum { TT_CONTROLLER_MAX_DEVICES=8 };
 static struct {
@@ -128,6 +128,7 @@ static void perspective_orders(F80Widget *,void *);
 static void perspective_instruments(F80Widget *,void *);
 static void perspective_main(F80Widget *,void *);
 static void slices_selected(F80Widget *,void *);
+static void manage_refresh(void);
 static void slices_apply(F80Widget *,void *);
 static void slices_inherit(F80Widget *,void *);
 static void slices_step(F80Widget *,void *);
@@ -168,7 +169,7 @@ static const char *edit_event_name(TtEditType type) {
         [TT_EDIT_BEATS_AUTODETECT]="beats auto-detect",
         [TT_EDIT_TONES_AUTODETECT]="tones auto-detect",
         [TT_EDIT_INSTRUMENT_TYPE]="instrument type",[TT_EDIT_DX7_PARAMETER]="DX7 parameter",
-        [TT_EDIT_DX7_IMPORT]="DX7 import",[TT_EDIT_DX7_APPEND]="new DX7 instrument",
+        [TT_EDIT_DX7_IMPORT]="FM import",[TT_EDIT_DX7_APPEND]="new FM instrument",
         [TT_EDIT_DOCUMENT_REPLACE]="document replace"
     };
     return type>TT_EDIT_NONE && type<TT_EDIT_COUNT && names[type]?names[type]:"unknown";
@@ -379,19 +380,23 @@ typedef enum {
     TT_UI_CONTROLLER_SCREEN_NAV_START, TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
     TT_UI_CONTROLLER_SCREEN_NAV_EXIT,
     TT_UI_EXIT_REQUEST,
-    TT_UI_INSTRUMENT_FOCUS_RECONCILE, TT_UI_INSTRUMENT_VISIBILITY, TT_UI_INSTRUMENT_REFRESH, TT_UI_DX7_CURSOR, TT_UI_DX7_SCROLL, TT_UI_DX7_BANK_VOICE, TT_UI_DX7_OPEN_IMPORT,
+    TT_UI_INSTRUMENT_FOCUS_RECONCILE, TT_UI_INSTRUMENT_VISIBILITY, TT_UI_INSTRUMENT_REFRESH,
+    TT_UI_DX7_GRID_KEY, TT_UI_DX7_GRID_MOUSE, TT_UI_DX7_GRID_SCROLL,
+    TT_UI_DX7_GRID_EDITING, TT_UI_DX7_GLOBAL_SELECT,
+    TT_UI_DX7_BANK_VOICE, TT_UI_DX7_OPEN_IMPORT,
     TT_UI_EXIT_CONFIRM, TT_UI_EXIT_CANCEL
 } TtUiType;
 typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
 static int handle_ui_event(TtUiEvent event);
-static void dx7_position(int field,int width,int *x,int *y);
-static F80Rect dx7_rect(void);
 static int widget_is_inside(F80Widget *widget,F80Widget *parent);
 static void open_path_dialog(int action);
 static void leave_follow(void);
 static void controller_screen_focus_step(int direction);
 static int select_sample_index(int index);
 static void manage_selected(F80Widget *list,void *user);
+static void dx7_adjust(int delta);
+static int dx7_global_columns(int width);
+static int dx7_grid_is_editing(void);
 static void confirm_exit(F80Widget *button,void *user) {
     (void)button;(void)user;
     handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CONFIRM});
@@ -416,9 +421,15 @@ static int handle_ui_event(TtUiEvent event) {
             snprintf(tracker.manage_name->input,sizeof(tracker.manage_name->input),"%s",tracker.wave.name);
             tracker.manage_name->input_pos=(int)strlen(tracker.manage_name->input);
         }
-        if(manage_buttons[4])manage_buttons[4]->visible=!synth;
-        if(manage_buttons[5])manage_buttons[5]->visible=!synth;
-        if(tracker.synth_canvas)tracker.synth_canvas->visible=synth && tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        if(tracker.sample_settings_panel)tracker.sample_settings_panel->visible=
+            !synth && tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        if(tracker.fm_settings_panel)tracker.fm_settings_panel->visible=
+            synth && tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        int show_dx7=synth && tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
+        if(tracker.synth_canvas)tracker.synth_canvas->visible=show_dx7;
+        if(tracker.dx7_globals_canvas)tracker.dx7_globals_canvas->visible=show_dx7;
+        if(tracker.dx7_globals_panel)tracker.dx7_globals_panel->visible=show_dx7;
+        if(tracker.dx7_operators_panel)tracker.dx7_operators_panel->visible=show_dx7;
         if(tracker.slices_dialog)tracker.slices_dialog->visible=!synth && tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS;
         return 1;
     }
@@ -427,24 +438,116 @@ static int handle_ui_event(TtUiEvent event) {
     }
     if(event.type==TT_UI_DX7_BANK_VOICE) {
         tracker.sysex_voice=clamp(tracker.sysex_voice+event.a,0,31);
+        if(tracker.manage_dialog)manage_refresh();
         char msg[80];snprintf(msg,sizeof(msg),"SysEx bank voice %d (1..32); Import loads this voice",tracker.sysex_voice+1);
         tt_tracker_message(msg);return 1;
     }
-    if(event.type==TT_UI_DX7_CURSOR || event.type==TT_UI_DX7_SCROLL) {
-        if(tracker.wave.instrument_type!=TT_INSTRUMENT_DX7)return 0;
-        F80Rect r=dx7_rect();int x,y;
-        if(event.type==TT_UI_DX7_CURSOR) {
-            if(event.index<0 || event.index>=145)return 0;
-            tracker.synth_field=event.index;
-            tracker.focus=FOCUS_WAVE;tracker.app.focus=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?tracker.synth_canvas:tracker.wave_canvas;
-            dx7_position(event.index,r.w,&x,&y);
-            if(r.h<3){tracker.synth_scroll=0;return 1;}
-            if(y-tracker.synth_scroll<1)tracker.synth_scroll=y-1;
-            if(y-tracker.synth_scroll>=r.h-1)tracker.synth_scroll=y-r.h+2;
-        } else {
-            dx7_position(144,r.w,&x,&y);
-            tracker.synth_scroll=clamp(tracker.synth_scroll+event.a,0,y>r.h-3?y-r.h+3:0);
+    if(event.type==TT_UI_DX7_GLOBAL_SELECT) {
+        if(tracker.wave.instrument_type!=TT_INSTRUMENT_DX7 ||
+           event.index<0 || event.index>=11)return 0;
+        F80Grid *previous=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                          tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                                  &tracker.dx7_globals_grid;
+        if(f80_grid_is_editing(previous)) {
+            f80_grid_set_editing(previous,0);
+            tt_tracker_log_event("UI","DX7 grid value edit ended");
         }
+        tracker.dx7_grid_kind=0;
+        tracker.dx7_globals_grid.row=0;
+        tracker.dx7_globals_grid.field=event.index;
+        f80_grid_focus(&tracker.dx7_globals_grid,1);
+        f80_grid_focus(&tracker.dx7_pitch_grid,0);
+        f80_grid_focus(&tracker.dx7_operators_grid,0);
+        tracker.app.focus=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+            tracker.synth_canvas:tracker.wave_canvas;
+        tracker.focus=FOCUS_WAVE;
+        return 1;
+    }
+    if(event.type==TT_UI_DX7_GRID_KEY || event.type==TT_UI_DX7_GRID_MOUSE ||
+       event.type==TT_UI_DX7_GRID_SCROLL || event.type==TT_UI_DX7_GRID_EDITING) {
+        if(tracker.wave.instrument_type!=TT_INSTRUMENT_DX7)return 0;
+        if(event.type==TT_UI_DX7_GRID_EDITING) {
+            F80Grid *active=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                            tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                                    &tracker.dx7_globals_grid;
+            int editing=!!event.a;
+            if(f80_grid_is_editing(active)==editing)return 0;
+            f80_grid_set_editing(active,editing);
+            tt_tracker_log_event("UI",editing?"DX7 grid value edit started":"DX7 grid value edit ended");
+            return 1;
+        }
+        if(event.index<0 || event.index>2)return 0;
+        if(event.index!=tracker.dx7_grid_kind) {
+            F80Grid *previous=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                              tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                                      &tracker.dx7_globals_grid;
+            if(f80_grid_is_editing(previous)) {
+                f80_grid_set_editing(previous,0);
+                tt_tracker_log_event("UI","DX7 grid value edit ended");
+            }
+        }
+        tracker.dx7_grid_kind=event.index;
+        F80Grid *grid=event.index==1?&tracker.dx7_operators_grid:
+                      event.index==2?&tracker.dx7_pitch_grid:
+                                     &tracker.dx7_globals_grid;
+        f80_grid_focus(&tracker.dx7_globals_grid,event.index==0);
+        f80_grid_focus(&tracker.dx7_pitch_grid,event.index==2);
+        f80_grid_focus(&tracker.dx7_operators_grid,event.index==1);
+        if(event.type==TT_UI_DX7_GRID_KEY) {
+            tracker.app.focus=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+                tracker.synth_canvas:tracker.wave_canvas;
+            tracker.focus=FOCUS_WAVE;
+            if((event.a==10 || event.a==13) && event.index==1 &&
+               grid->field<1)return 0;
+            if(event.index==0 && !f80_grid_is_editing(grid) &&
+               (event.a==F80_KEY_UP || event.a==F80_KEY_DOWN ||
+                event.a==F80_KEY_SHIFT_UP || event.a==F80_KEY_SHIFT_DOWN)) {
+                int columns=dx7_global_columns(
+                    tracker.dx7_globals_canvas && tracker.dx7_globals_canvas->visible?
+                    tracker.dx7_globals_canvas->rect.w:
+                    tracker.wave_canvas?tracker.wave_canvas->rect.w:1);
+                int shift=event.a==F80_KEY_SHIFT_UP ||
+                          event.a==F80_KEY_SHIFT_DOWN;
+                if(shift && !grid->selecting) {
+                    grid->anchor_row=grid->row;
+                    grid->anchor_field=grid->field;
+                    grid->selecting=1;
+                } else if(!shift)grid->selecting=0;
+                int direction=(event.a==F80_KEY_UP ||
+                               event.a==F80_KEY_SHIFT_UP)?-1:1;
+                int row=grid->field/columns+direction;
+                int rows=(grid->fields+columns-1)/columns;
+                if(row<0)row=0;
+                if(row>=rows)row=rows-1;
+                int target=row*columns+grid->field%columns;
+                if(target>=grid->fields)target=grid->fields-1;
+                grid->field=target;
+                return 1;
+            }
+            int result=f80_grid_key(grid,event.a);
+            if(event.a==10 || event.a==13)
+                tt_tracker_log_event("UI",f80_grid_is_editing(grid)?
+                    "DX7 grid value edit started":"DX7 grid value edit ended");
+            if(result==F80_GRID_KEY_EDIT_VALUE) {
+                int delta=event.a==F80_KEY_UP?10:event.a==F80_KEY_DOWN?-10:
+                          event.a==F80_KEY_RIGHT?1:-1;
+                dx7_adjust(delta);return 1;
+            }
+            return result;
+        }
+        if(event.type==TT_UI_DX7_GRID_MOUSE) {
+            tracker.app.focus=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+                tracker.synth_canvas:tracker.wave_canvas;
+            tracker.focus=FOCUS_WAVE;
+            f80_grid_set_editing(&tracker.dx7_globals_grid,0);
+            f80_grid_set_editing(&tracker.dx7_pitch_grid,0);
+            f80_grid_set_editing(&tracker.dx7_operators_grid,0);
+            return f80_grid_mouse(grid,event.a,event.b,0);
+        }
+        tracker.app.focus=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
+            tracker.synth_canvas:tracker.wave_canvas;
+        tracker.focus=FOCUS_WAVE;
+        f80_grid_scroll(grid,event.a,event.b);
         return 1;
     }
     if(event.type==TT_UI_LEADER_START) {
@@ -630,6 +733,10 @@ static int handle_ui_event(TtUiEvent event) {
         if(tracker.focus==FOCUS_PHRASE && event.index!=FOCUS_PHRASE)
             compact_pattern_effects_if_needed();
         if(event.index!=FOCUS_PHRASE)tracker.grid_value_editing=0;
+        if(event.index!=FOCUS_WAVE) {
+            f80_grid_set_editing(&tracker.dx7_globals_grid,0);
+            f80_grid_set_editing(&tracker.dx7_operators_grid,0);
+        }
         tracker.focus=event.index;
         if(event.index!=FOCUS_PHRASE)tracker.inline_table_selected=0;
         if(event.index!=FOCUS_PHRASE)
@@ -1138,15 +1245,15 @@ static int recover_missing(const char *name) {
 static void manage_refresh(void);
 static int load_dx7_at(const char *path,int voice) {
     uint8_t bytes[4105];FILE *f=fopen(path,"rb");
-    if(!f){tt_tracker_message("Cannot open DX7 SysEx file");return 0;}
+    if(!f){tt_tracker_message("Cannot open FM SysEx file");return 0;}
     size_t size=fread(bytes,1,sizeof(bytes),f);fclose(f);
     TtEditEvent e={.type=TT_EDIT_DX7_IMPORT};e.dx7_import.index=tracker.sample_index;
     if(!tt_dx7_import(bytes,size,size==163?0:voice,&e.dx7_import.patch)) {
-        tt_tracker_message("Invalid DX7 SysEx: check format, parameter ranges and checksum");return 0;
+        tt_tracker_message("Invalid FM SysEx: check format, parameter ranges and checksum");return 0;
     }
     if(!emit_edit(&e)){tt_tracker_message(edit_message);return 0;}
     handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_REFRESH});
-    manage_refresh();tt_tracker_message("DX7 voice imported; instrument edits are undoable");return 1;
+    manage_refresh();tt_tracker_message("FM voice imported; instrument edits are undoable");return 1;
 }
 #ifdef __EMSCRIPTEN__
 EM_JS(void, choose_web_dx7, (), {
@@ -1196,7 +1303,7 @@ static void open_path_dialog(int action) {
 #else
     tracker.path_action=action;
     int save=action==PATH_SONG_SAVE;
-    const char *title=action==PATH_DX7?"Import DX7 voice (.syx)":action==PATH_WAV?"Open WAV":save?"Save Song As":"Open Song";
+    const char *title=action==PATH_DX7?"Import FM voice (.syx)":action==PATH_WAV?"Open WAV":save?"Save Song As":"Open Song";
     const char *initial=action==PATH_WAV?tracker.loaded_path:
         tracker.song_path[0]?tracker.song_path:"sample.song";
     const char *filter=action==PATH_DX7?".syx":action==PATH_WAV?".wav":".song,.txt";
@@ -1359,108 +1466,277 @@ static int wave_marker_at(int x) {
 static const int dx7_globals[19]={134,135,136,144,137,138,139,140,141,142,143,126,130,127,131,128,132,129,133};
 static const char *dx7_global_names[19]={"Algorithm","Feedback","Osc sync","Transpose","LFO speed","LFO delay","Pitch depth","Amp depth","LFO sync","LFO wave","Pitch sens","Pitch R1","Pitch L1","Pitch R2","Pitch L2","Pitch R3","Pitch L3","Pitch R4","Pitch L4"};
 static const int dx7_ops[21]={18,19,20,15,14,13,16,17,0,4,1,5,2,6,3,7,8,9,10,11,12};
-static const char *dx7_op_names[21]={"Coarse","Fine","Detune","Velocity","Amp sens","Rate scale","Output","Mode","R1","L1","R2","L2","R3","L3","R4","L4","Breakpt","L depth","R depth","L curve","R curve"};
-static int dx7_parameter(int field) {
-    return field<19?dx7_globals[field]:(5-(field-19)/21)*21+dx7_ops[(field-19)%21];
+static const int dx7_global_widths[19]={9,8,8,9,9,9,11,9,9,9,11,8,8,8,8,8,8,8,8};
+static const char *dx7_pitch_headings[8]={"R1","L1","R2","L2","R3","L3","R4","L4"};
+static const int dx7_pitch_widths[8]={4,4,4,4,4,4,4,4};
+static const char *dx7_operator_headings[22]={"Role","Coarse","Fine","Detune","Velocity","Amp sens","Rate scale","Output","Mode","R1","L1","R2","L2","R3","L3","R4","L4","Breakpt","L depth","R depth","L curve","R curve"};
+static const int dx7_operator_widths[22]={7,6,4,6,8,8,10,6,5,2,2,2,2,2,2,2,2,7,7,7,7,7};
+static void dx7_pitch_row_text(void *user,int row,int field,char *out,size_t size);
+static void dx7_operator_row_text(void *user,int row,int field,char *out,size_t size) {
+    (void)user;(void)field;
+    snprintf(out,size,"OP%d",row+1);
 }
-static void dx7_position(int field,int width,int *x,int *y) {
-    int globals=width/18;if(globals<1)globals=1;
-    int cols=width/30;if(cols<1)cols=1;if(cols>3)cols=3;
-    if(field<19){*x=(field%globals)*(width/globals);*y=2+field/globals;return;}
-    int op=(field-19)/21,item=(field-19)%21;
-    *x=(op%cols)*(width/cols)+(item%2)*(width/cols/2);
-    *y=4+(19+globals-1)/globals+(op/cols)*15+item/2;
+static void dx7_grids_init(void) {
+    f80_grid_init(&tracker.dx7_globals_grid,1,11,dx7_global_widths,
+                  dx7_global_names);
+    f80_grid_corner(&tracker.dx7_globals_grid,"GLB");
+    f80_grid_enable_edit(&tracker.dx7_globals_grid,1);
+    f80_grid_init(&tracker.dx7_pitch_grid,1,8,dx7_pitch_widths,
+                  dx7_pitch_headings);
+    f80_grid_corner(&tracker.dx7_pitch_grid,"");
+    f80_grid_gutter(&tracker.dx7_pitch_grid,16);
+    f80_grid_row_text(&tracker.dx7_pitch_grid,dx7_pitch_row_text);
+    f80_grid_enable_edit(&tracker.dx7_pitch_grid,1);
+    f80_grid_init(&tracker.dx7_operators_grid,6,22,dx7_operator_widths,
+                  dx7_operator_headings);
+    f80_grid_corner(&tracker.dx7_operators_grid,"OP");
+    f80_grid_row_text(&tracker.dx7_operators_grid,dx7_operator_row_text);
+    f80_grid_enable_edit(&tracker.dx7_operators_grid,1);
+    f80_grid_read_only(&tracker.dx7_operators_grid,0,1);
+    tracker.dx7_grid_kind=0;
+    f80_grid_focus(&tracker.dx7_globals_grid,1);
+    f80_grid_focus(&tracker.dx7_operators_grid,0);
 }
-static F80Rect dx7_rect(void) {
-    return tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS && tracker.synth_canvas?
-        tracker.synth_canvas->rect:tracker.wave_canvas->rect;
+static int dx7_global_parameter(int field) {
+    return field>=0 && field<11?dx7_globals[field]:-1;
 }
-static void dx7_put(F80Rect r,int y,int x,const char *text,int width,int color) {
-    y+=r.y-tracker.synth_scroll;
-    if(y<r.y+1 || y>=r.y+r.h-1 || x>=r.w)return;
-    if(width>r.w-x)width=r.w-x;
-    if(width>0)f80_put(y,r.x+x,text,width,color,color==3 || color==4);
+static int dx7_pitch_parameter(int field) {
+    return field>=0 && field<8?dx7_globals[field+11]:-1;
+}
+static int dx7_operator_parameter(int row,int field) {
+    if(field<1 || field>=22)return -1;
+    return (5-row)*21+dx7_ops[field-1];
+}
+static int dx7_grid_is_editing(void) {
+    F80Grid *grid=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                  tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                          &tracker.dx7_globals_grid;
+    return f80_grid_is_editing(grid);
+}
+static void dx7_value_text(int parameter,int value,char *out,size_t size) {
+    if(parameter==144 || (parameter<126 && parameter%21==20))
+        snprintf(out,size,"%+d",value-(parameter==144?24:7));
+    else if(parameter==142) {
+        static const char *waves[]={"Tri","Saw-","Saw+","Sqr","Sine","S&H"};
+        snprintf(out,size,"%s",value<6?waves[value]:"?");
+    } else if(parameter==136 || parameter==141 ||
+              (parameter<126 && parameter%21==17))
+        snprintf(out,size,"%s",parameter<126?(value?"Fixed":"Ratio"):
+                                         (value?"On":"Off"));
+    else snprintf(out,size,"%d",value);
+}
+static void dx7_operator_cell(void *user,int row,int field,char *out,size_t size) {
+    (void)user;
+    if(field==0)snprintf(out,size,"%s",
+        tt_dx7_carrier(tracker.wave.dx7.data[134],row)?"Carrier":"Mod");
+    else {
+        int parameter=dx7_operator_parameter(row,field);
+        dx7_value_text(parameter,tracker.wave.dx7.data[parameter],out,size);
+    }
+}
+static void dx7_pitch_cell(void *user,int row,int field,char *out,size_t size) {
+    (void)user;(void)row;
+    int parameter=dx7_pitch_parameter(field);
+    dx7_value_text(parameter,tracker.wave.dx7.data[parameter],out,size);
+}
+static void dx7_pitch_row_text(void *user,int row,int field,char *out,size_t size) {
+    (void)user;(void)row;(void)field;
+    snprintf(out,size,"Pitch Envelope: ");
+}
+static int dx7_global_item_width(int field) {
+    int parameter=dx7_global_parameter(field);
+    char low[24],high[24];
+    dx7_value_text(parameter,0,low,sizeof(low));
+    dx7_value_text(parameter,tt_dx7_max(parameter),high,sizeof(high));
+    int value_width=(int)strlen(low);
+    if((int)strlen(high)>value_width)value_width=(int)strlen(high);
+    return (int)strlen(dx7_global_names[field])+2+value_width+2;
+}
+static int dx7_global_columns(int width) {
+    int widest=1;
+    for(int field=0;field<11;++field) {
+        int item_width=dx7_global_item_width(field);
+        if(item_width>widest)widest=item_width;
+    }
+    int columns=width/widest;
+    if(columns<1)columns=1;
+    return columns>11?11:columns;
+}
+static int dx7_global_panel_height(int width) {
+    int rows=(11+dx7_global_columns(width)-1)/dx7_global_columns(width);
+    return rows+5; /* rows, gap, two pitch-table rows, and frame */
+}
+static int dx7_global_items(F80Rect r,int first_y,F80Rect items[11],
+                            int label_width[11],int value_width[11]) {
+    int columns=dx7_global_columns(r.w);
+    int cell_width=r.w/columns;
+    int y=first_y;
+    for(int field=0;field<11;++field) {
+        char value[24];
+        int parameter=dx7_global_parameter(field);
+        dx7_value_text(parameter,tracker.wave.dx7.data[parameter],
+                       value,sizeof(value));
+        label_width[field]=(int)strlen(dx7_global_names[field]);
+        value_width[field]=(int)strlen(value);
+        int column=field%columns,row=field/columns;
+        items[field]=f80_rect(r.x+column*cell_width,
+                              first_y+row,cell_width,1);
+        if(row+1>y-first_y)y=first_y+row+1;
+    }
+    return y;
+}
+static void paint_dx7_globals(F80Widget *canvas,void *user) {
+    (void)user;F80Rect r=canvas->rect;
+    if(r.w<8 || r.h<2)return;
+    f80_fill(r,1);
+    F80Rect global_items[11];int label_width[11],value_width[11];
+    int global_bottom=dx7_global_items(r,r.y,global_items,
+                                       label_width,value_width);
+    int pitch_y=global_bottom+1;
+    F80Rect pitch=f80_rect(r.x,pitch_y,r.w,2);
+    for(int field=0;field<11;++field) {
+        char value[24];int x=global_items[field].x,y=global_items[field].y;
+        int parameter=dx7_global_parameter(field);
+        int cell_width=global_items[field].w;
+        dx7_value_text(parameter,tracker.wave.dx7.data[parameter],
+                       value,sizeof(value));
+        f80_put(y,x,dx7_global_names[field],label_width[field],10,0);
+        f80_put(y,x+label_width[field],":",1,8,0);
+        int value_x=x+cell_width-value_width[field]-1;
+        int selected=tracker.dx7_grid_kind==0 &&
+                     tracker.dx7_globals_grid.field==field;
+        int pair=selected?(f80_grid_is_editing(&tracker.dx7_globals_grid)?
+            (SDL_GetTicks()/250%2?3:7):3):4;
+        f80_put(y,value_x,value,value_width[field],
+            pair,1);
+    }
+    f80_grid_blink(&tracker.dx7_pitch_grid,SDL_GetTicks()/250%2==0);
+    f80_grid_layout(&tracker.dx7_pitch_grid,pitch);
+    f80_grid_draw(&tracker.dx7_pitch_grid,dx7_pitch_cell,NULL);
+}
+static void paint_dx7_operators(F80Widget *canvas,void *user) {
+    (void)user;
+    f80_fill(canvas->rect,1);
+    f80_grid_blink(&tracker.dx7_operators_grid,SDL_GetTicks()/250%2==0);
+    f80_grid_layout(&tracker.dx7_operators_grid,canvas->rect);
+    f80_grid_draw(&tracker.dx7_operators_grid,dx7_operator_cell,NULL);
 }
 static void paint_dx7(F80Widget *canvas,void *user) {
     (void)user;F80Rect r=canvas->rect;
-    if(r.w<15 || r.h<3)return;
-    f80_fill(r,2);
-    f80_put(r.y,r.x,"DX7 / MSFA   Global + pitch envelope",r.w,8,1);
-    int globals=r.w/18;if(globals<1)globals=1;
-    int cols=r.w/30;if(cols<1)cols=1;if(cols>3)cols=3;
-    for(int op=0;op<6;++op) {
-        int x=(op%cols)*(r.w/cols),y=3+(19+globals-1)/globals+(op/cols)*15;
-        char label[64];int off=(5-op)*21;
-        const uint8_t *d=tracker.wave.dx7.data+off;
-        double freq=d[17]?pow(10.0,(d[18]%4)+d[19]/100.0):(d[18]?d[18]:.5)*(1+d[19]/100.0);
-        snprintf(label,sizeof(label),"OP %d %s | %s %.2f",op+1,
-            tt_dx7_carrier(tracker.wave.dx7.data[134],op)?"CAR":"MOD",d[17]?"Hz":"Ratio",freq);
-        dx7_put(r,y,x,label,r.w/cols,4);
-        /* Schematic amplitude envelope, with all four levels visible. */
-        int width=r.w/cols-2;if(width>36)width=36;
-        if(width>4)for(int column=0;column<width;++column) {
-            double position=column*4.0/(width-1);int stage=(int)position;
-            if(stage>3)stage=3;
-            double a=d[stage?4+stage-1:7],b=d[4+stage];
-            int level=(int)(a+(b-a)*(position-stage));
-            int row=2-clamp(level,0,99)*2/99;
-            dx7_put(r,y+12+row,x+column,column==0 || column==width-1?"o":"*",1,10);
-        }
-    }
-    for(int f=0;f<145;++f) {
-        int x,y;dx7_position(f,r.w,&x,&y);
-        int p=dx7_parameter(f),v=tracker.wave.dx7.data[p];
-        const char *name=f<19?dx7_global_names[f]:dx7_op_names[(f-19)%21];
-        char value[24],text[64];snprintf(value,sizeof(value),"%d",v);
-        if(p==144 || (p<126 && p%21==20))snprintf(value,sizeof(value),"%+d",v-(p==144?24:7));
-        if(p==142){const char *waves[]={"Tri","Saw-","Saw+","Sqr","Sine","S&H"};snprintf(value,sizeof(value),"%s",waves[v]);}
-        if(p==136 || p==141 || (p<126 && p%21==17))snprintf(value,sizeof(value),"%s",p<126?(v?"Fixed":"Ratio"):(v?"On":"Off"));
-        snprintf(text,sizeof(text),"%-10s %s",name,value);
-        int w=f<19?r.w/globals:r.w/cols/2;
-        dx7_put(r,y,x,text,w,f==tracker.synth_field?3:2);
-    }
-    f80_put(r.y+r.h-1,r.x,"[ - ] [ + ] [ C4 ] [Stop]  Arrows select; +/- edit; PgUp/Dn scroll",r.w,10,0);
+    f80_fill(r,1);
+    if(r.w<8 || r.h<5)return;
+    int global_h=dx7_global_panel_height(r.w);
+    int global_content_h=global_h-2;
+    if(global_content_h>r.h-3)global_content_h=r.h-3;
+    f80_put(r.y,r.x,"Global Settings",r.w,4,1);
+    F80Widget global_content={.rect={r.x,r.y+1,r.w,global_content_h}};
+    paint_dx7_globals(&global_content,NULL);
+    int operators_y=r.y+global_content_h+1;
+    if(operators_y>=r.y+r.h)return;
+    f80_put(operators_y,r.x,"Operators",r.w,4,1);
+    F80Widget operators={.rect={r.x,operators_y+1,r.w,
+                                r.y+r.h-operators_y-1}};
+    paint_dx7_operators(&operators,NULL);
 }
 static void dx7_adjust(int delta) {
-    int p=dx7_parameter(tracker.synth_field);
+    F80Grid *grid=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                  tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                          &tracker.dx7_globals_grid;
+    int p=tracker.dx7_grid_kind==1?
+        dx7_operator_parameter(grid->row,grid->field):
+        tracker.dx7_grid_kind==2?dx7_pitch_parameter(grid->field):
+                                 dx7_global_parameter(grid->field);
+    if(p<0)return;
     TtEditEvent e={.type=TT_EDIT_DX7_PARAMETER};
     e.dx7_parameter.index=tracker.sample_index;e.dx7_parameter.parameter=p;
     e.dx7_parameter.value=clamp(tracker.wave.dx7.data[p]+delta,0,tt_dx7_max(p));
     if(!emit_edit(&e))tt_tracker_message(edit_message);
 }
 static int dx7_key(int key) {
+    if(key==27 && dx7_grid_is_editing()) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=0});return 1;
+    }
     if(key=='+' || key=='=' || key=='-' || key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
         dx7_adjust(key=='-' || key==F80_KEY_SHIFT_LEFT?-1:1);return 1;
     }
-    if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT || key==F80_KEY_RIGHT || key==9) {
-        int delta=key==F80_KEY_UP?-2:key==F80_KEY_DOWN?2:key==F80_KEY_LEFT?-1:1;
-        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_CURSOR,.index=(tracker.synth_field+delta+145)%145});return 1;
+    if(dx7_grid_is_editing() && (key==9 || key==F80_KEY_BTAB))return 1;
+    if(key==10 || key==13 || key==F80_KEY_UP || key==F80_KEY_DOWN ||
+       key==F80_KEY_LEFT || key==F80_KEY_RIGHT ||
+       key==F80_KEY_PPAGE || key==F80_KEY_NPAGE) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+            .index=tracker.dx7_grid_kind,.a=key});return 1;
     }
-    if(key==F80_KEY_PPAGE || key==F80_KEY_NPAGE) {
-        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_SCROLL,.a=key==F80_KEY_PPAGE?-8:8});return 1;
+    if(key==9 || key==F80_KEY_BTAB) {
+        int direction=key==9?1:-1;
+        F80Grid *grid=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                      tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                              &tracker.dx7_globals_grid;
+        if(tracker.dx7_grid_kind==0 && direction>0 &&
+           grid->field==grid->fields-1) {
+            F80Grid *pitch=&tracker.dx7_pitch_grid;
+            for(int i=pitch->field;i>0;--i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=2,.a=F80_KEY_LEFT});
+            return 1;
+        }
+        if(tracker.dx7_grid_kind==2 && direction>0 &&
+           grid->field==grid->fields-1) {
+            F80Grid *operators=&tracker.dx7_operators_grid;
+            for(int i=operators->field;i>0;--i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=1,.a=F80_KEY_LEFT});
+            handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                .index=1,.a=F80_KEY_RIGHT});
+            return 1;
+        }
+        if(tracker.dx7_grid_kind==1 && direction<0 &&
+           grid->row==0 && grid->field<=1) {
+            F80Grid *pitch=&tracker.dx7_pitch_grid;
+            for(int i=pitch->field;i>0;--i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=2,.a=F80_KEY_LEFT});
+            for(int i=0;i<7;++i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=2,.a=F80_KEY_RIGHT});
+            return 1;
+        }
+        if(tracker.dx7_grid_kind==2 && direction<0 && grid->field==0) {
+            F80Grid *globals=&tracker.dx7_globals_grid;
+            for(int i=globals->field;i>0;--i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=0,.a=F80_KEY_LEFT});
+            for(int i=0;i<10;++i)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+                    .index=0,.a=F80_KEY_RIGHT});
+            return 1;
+        }
+        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+            .index=tracker.dx7_grid_kind,.a=direction>0?F80_KEY_RIGHT:F80_KEY_LEFT});return 1;
     }
-    if(key==10 || key==13){send_play(TT_PLAY_AUDITION,0,0);return 1;}
     if(key==' '){send_play(TT_PLAY_STOP,0,0);return 1;}
     return 0;
 }
 static void dx7_mouse(F80Rect r,int x,int y,int wheel) {
-    handle_ui_event((TtUiEvent){.type=TT_UI_FOCUS,.index=FOCUS_WAVE});
-    if(wheel){handle_ui_event((TtUiEvent){.type=TT_UI_DX7_SCROLL,.a=-wheel*3});return;}
-    if(y==r.y+r.h-1) {
-        int local=x-r.x;
-        if(local<5)dx7_adjust(-1);else if(local<11)dx7_adjust(1);
-        else if(local<18)send_play(TT_PLAY_AUDITION,0,0);
-        else if(local<25)send_play(TT_PLAY_STOP,0,0);
+    int kind=f80_contains(tracker.dx7_operators_grid.rect,x,y)?1:
+             f80_contains(tracker.dx7_pitch_grid.rect,x,y)?2:0;
+    if(wheel) {
+        if(kind)handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_SCROLL,
+                                             .index=kind,.b=-wheel*3});
         return;
     }
-    for(int f=0;f<145;++f) {
-        int fx,fy;dx7_position(f,r.w,&fx,&fy);
-        int cols=f<19?r.w/18:r.w/30;if(cols<1)cols=1;if(f>=19 && cols>3)cols=3;
-        int w=r.w/cols/(f<19?1:2);
-        if(y-r.y+tracker.synth_scroll==fy && x-r.x>=fx && x-r.x<fx+w) {
-            handle_ui_event((TtUiEvent){.type=TT_UI_DX7_CURSOR,.index=f});return;
-        }
+    if(kind) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_MOUSE,
+                                    .index=kind,.a=x,.b=y});
+        return;
     }
+    F80Rect items[11];int labels[11],values[11];
+    dx7_global_items(r,r.y,items,labels,values);
+    for(int field=0;field<11;++field)
+        if(f80_contains(items[field],x,y)) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GLOBAL_SELECT,
+                                        .index=field});
+            return;
+        }
 }
 
 static void paint_wave(F80Widget *canvas,void *user) {
@@ -1654,6 +1930,9 @@ static void ensure_pattern_visible(F80Rect r) {
           pattern_field_span(tracker.field_scroll,selected)>available)
         ++tracker.field_scroll;
 }
+static int grid_value_edit_pair(void) {
+    return tracker.app.tick%18<9?7:3;
+}
 static void paint_phrase(F80Widget *canvas,void *user) {
     (void)user;
     F80Rect r=canvas->rect;
@@ -1812,7 +2091,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             int pair=!editable?66:editrow && editcol?4:editrow?2:
                      playhead?4:empty?1:
                      field==0?4:field==1?8:9;
-            if(table_selected)pair=3;
+            if(table_selected)pair=tracker.grid_value_editing?
+                grid_value_edit_pair():3;
             else if(!inline_line && selected_cell(base_global,channel))
                 pair=tracker.grid_selection_invalid?15:65;
             if(!inline_line && tracker.inline_table_open &&
@@ -1824,7 +2104,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             if(selected && !tracker.selecting) {
                 int highlight=field==0?3:field==1?2:width;
                 if(highlight>visible)highlight=visible;
-                f80_put(r.y+3+line,x,shown,highlight,3,1);
+                f80_put(r.y+3+line,x,shown,highlight,
+                        tracker.grid_value_editing?grid_value_edit_pair():3,1);
             }
         }
         x+=width;
@@ -1900,11 +2181,8 @@ static void manage_refresh(void) {
     if(!tracker.manage_dialog)return;
     for(int i=0;i<tracker.sample_count;++i) {
         const TtWave *wave=i==tracker.sample_index?&tracker.wave:&tracker.samples[i].wave;
-        char note[4];const TtPhrase *phrase=i==tracker.sample_index?
-            &tracker.phrase:&tracker.samples[i].phrase;
-        tt_note_name(phrase->reference_note,note);
         snprintf(tracker.manage_rows[i],sizeof(tracker.manage_rows[i]),
-                 "%s %02X  %-32.32s  Ref %s",wave->instrument_type==TT_INSTRUMENT_DX7?"DX7":"WAV",i+1,wave->name,note);
+                 "%s %02X  %.32s",wave->instrument_type==TT_INSTRUMENT_DX7?"FM ":"WAV",i+1,wave->name);
         tracker.manage_items[i]=tracker.manage_rows[i];
     }
     tracker.manage_list->item_count=tracker.sample_count;
@@ -1915,10 +2193,10 @@ static void manage_refresh(void) {
         &tracker.samples[selected].phrase;
     char note[4];tt_note_name(phrase->reference_note,note);
     snprintf(tracker.manage_details,sizeof(tracker.manage_details),
-             "Source: %.50s | %d frames | %d Hz | Base %s",
-             wave->source_name,wave->frames,wave->rate,note);
+             "Base %s | %d Hz | %d frames | Source: %.50s",
+             note,wave->rate,wave->frames,wave->source_name);
     if(wave->instrument_type==TT_INSTRUMENT_DX7)
-        snprintf(tracker.manage_details,sizeof(tracker.manage_details),"DX7 / MSFA | SysEx voice %d/32",tracker.sysex_voice+1);
+        snprintf(tracker.manage_details,sizeof(tracker.manage_details),"FM instrument | SysEx voice %d/32",tracker.sysex_voice+1);
 }
 static int select_sample_index(int index) {
     if(index<0 || index>=tracker.sample_count)return 0;
@@ -1996,25 +2274,25 @@ static void manage_ref(F80Widget *button,void *user) {
     manage_refresh();tt_tracker_message("Sample base changed; slice bases transposed");
 }
 static void build_slices_panel(void);
+static void build_manage_panel(void);
 static void close_manage(F80Widget *button,void *user) {
     (void)button;(void)user;
     handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
                                 .a=TT_PERSPECTIVE_MAIN});
 }
-static void manage_new_dx7(F80Widget *button,void *user) {
-    (void)button;(void)user;TtEditEvent e={.type=TT_EDIT_DX7_APPEND};
-    if(!emit_edit(&e)){tt_tracker_message(edit_message);return;}
-    handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_REFRESH});
-    handle_ui_event((TtUiEvent){.type=TT_UI_DX7_CURSOR,.index=0});
-    manage_refresh();tt_tracker_message("New DX7 instrument; no sample required");
-}
-static void manage_type(F80Widget *button,void *user) {
+static void new_fm(F80Widget *button,void *user) {
     (void)button;(void)user;
-    TtEditEvent e={.type=TT_EDIT_INSTRUMENT_TYPE};
-    e.instrument_type.index=tracker.sample_index;
-    e.instrument_type.type=tracker.wave.instrument_type==TT_INSTRUMENT_DX7?TT_INSTRUMENT_SAMPLE:TT_INSTRUMENT_DX7;
-    if(!emit_edit(&e))tt_tracker_message(edit_message);
-    else {manage_refresh();tt_tracker_message(e.instrument_type.type?"DX7 instrument selected":"Sample instrument selected");}
+    build_manage_panel();build_slices_panel();
+    TtEditEvent e={.type=TT_EDIT_DX7_APPEND};
+    if(!emit_edit(&e)){tt_tracker_message(edit_message);return;}
+    handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
+                                .a=TT_PERSPECTIVE_INSTRUMENTS});
+    handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_REFRESH});
+    handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,.index=1,
+                                .a=F80_KEY_HOME});
+    handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,.index=1,
+                                .a=F80_KEY_RIGHT});
+    manage_refresh();tt_tracker_message("New FM instrument; no sample required");
 }
 static void manage_sysex(F80Widget *button,void *user) {
     (void)button;(void)user;handle_ui_event((TtUiEvent){.type=TT_UI_DX7_OPEN_IMPORT});
@@ -2031,6 +2309,22 @@ static void build_manage_panel(void) {
         tracker.manage_list->window_role=F80_WINDOW_CYAN;
         tracker.manage_list->cursor=tracker.sample_index;
     }
+    tracker.dx7_globals_panel=f80_add(tracker.instrument_panels,
+        f80_window(F80_WINDOW_BLUE,F80_COL));
+    tracker.dx7_globals_panel->frame=1;
+    tracker.dx7_globals_panel->title="Global Settings";
+    tracker.dx7_globals_panel->title_style=F80_COLOR_TEXT;
+    tracker.dx7_globals_canvas=f80_add(tracker.dx7_globals_panel,
+                                       f80_canvas(paint_dx7_globals,NULL));
+    tracker.dx7_globals_canvas->visible=0;
+    tracker.dx7_operators_panel=f80_add(tracker.instrument_panels,
+        f80_window(F80_WINDOW_BLUE,F80_COL));
+    tracker.dx7_operators_panel->frame=1;
+    tracker.dx7_operators_panel->title="Operators";
+    tracker.dx7_operators_panel->title_style=F80_COLOR_TEXT;
+    tracker.synth_canvas=f80_add(tracker.dx7_operators_panel,
+                                 f80_canvas(paint_dx7_operators,NULL));
+    tracker.synth_canvas->focusable=1;tracker.synth_canvas->visible=0;
     F80Widget *dialog=f80_dialog("Instrument settings",NULL,NULL,0,0);
     dialog->kind=F80_BOX;dialog->direction=F80_COL;dialog->frame=1;
     dialog->title="Instrument settings";
@@ -2040,21 +2334,38 @@ static void build_manage_panel(void) {
     f80_add(tracker.instrument_panels,dialog);
     tracker.manage_name=f80_add(dialog,f80_input());
     tracker.manage_info=f80_add(dialog,f80_label(tracker.manage_details));
-    tracker.manage_info->style=F80_COLOR_TEXT;
+    tracker.manage_info->visible=0;
     manage_buttons[0]=f80_add(dialog,f80_button("~U~p",manage_move,(void *)(long)-1));
     manage_buttons[1]=f80_add(dialog,f80_button("Dow~n~",manage_move,(void *)(long)1));
     manage_buttons[2]=f80_add(dialog,f80_button("~D~elete",manage_delete,NULL));
     manage_buttons[3]=f80_add(dialog,f80_button("~R~ename",manage_rename,NULL));
-    manage_buttons[4]=f80_add(dialog,f80_button("Ref ~-~",manage_ref,(void *)(long)-1));
-    manage_buttons[5]=f80_add(dialog,f80_button("Ref ~+~",manage_ref,(void *)(long)1));
-    manage_buttons[6]=f80_add(dialog,f80_button("Type: WAV/DX7",manage_type,NULL));
-    manage_buttons[7]=f80_add(dialog,f80_button("Import .syx",manage_sysex,NULL));
-    manage_buttons[8]=f80_add(dialog,f80_button("Bank voice -",manage_sysex_voice,(void *)(long)-1));
-    manage_buttons[9]=f80_add(dialog,f80_button("Bank voice +",manage_sysex_voice,(void *)(long)1));
-    manage_buttons[10]=f80_add(dialog,f80_button("New DX7",manage_new_dx7,NULL));
-    tracker.synth_canvas=f80_add(tracker.instrument_panels,f80_canvas(paint_dx7,NULL));
-    tracker.synth_canvas->focusable=1;tracker.synth_canvas->visible=0;
     f80_wrap_init(&manage_actions,1,0);
+    tracker.sample_settings_panel=f80_add(tracker.instrument_panels,
+        f80_window(F80_WINDOW_GRAY,F80_COL));
+    tracker.sample_settings_panel->frame=1;
+    tracker.sample_settings_panel->title="Sample Settings";
+    tracker.sample_settings_info=f80_add(tracker.sample_settings_panel,
+        f80_label(tracker.manage_details));
+    tracker.sample_settings_info->style=F80_COLOR_TEXT;
+    sample_buttons[0]=f80_add(tracker.sample_settings_panel,
+        f80_button("Ref ~-~",manage_ref,(void *)(long)-1));
+    sample_buttons[1]=f80_add(tracker.sample_settings_panel,
+        f80_button("Ref ~+~",manage_ref,(void *)(long)1));
+    f80_wrap_init(&sample_actions,1,0);
+    tracker.fm_settings_panel=f80_add(tracker.instrument_panels,
+        f80_window(F80_WINDOW_GRAY,F80_COL));
+    tracker.fm_settings_panel->frame=1;
+    tracker.fm_settings_panel->title="FM Settings";
+    tracker.fm_settings_info=f80_add(tracker.fm_settings_panel,
+        f80_label(tracker.manage_details));
+    tracker.fm_settings_info->style=F80_COLOR_TEXT;
+    fm_buttons[0]=f80_add(tracker.fm_settings_panel,
+        f80_button("Import .syx",manage_sysex,NULL));
+    fm_buttons[1]=f80_add(tracker.fm_settings_panel,
+        f80_button("Bank voice -",manage_sysex_voice,(void *)(long)-1));
+    fm_buttons[2]=f80_add(tracker.fm_settings_panel,
+        f80_button("Bank voice +",manage_sysex_voice,(void *)(long)1));
+    f80_wrap_init(&fm_actions,1,0);
     manage_selected(tracker.manage_list,NULL);
 }
 static void build_slices_panel(void) {
@@ -2601,6 +2912,7 @@ static void redo_edit(F80Widget *button,void *user) {
 }
 static const F80MenuItem file_items[]={
     {"~L~oad WAV...",NULL,open_load,1},
+    {"~N~ew FM",NULL,new_fm,1},
     {"~O~pen song...",NULL,open_song,1},
     {"~S~ave song...",NULL,save_song,1},
     {"Song ~s~ettings...",NULL,show_settings,1},
@@ -3582,7 +3894,7 @@ static void update_labels(void) {
                  tracker.loop?"loop":"once");
     tracker.phrase_frame->title=tracker.phrase_title;
     if(tracker.focus==FOCUS_WAVE && tracker.wave.instrument_type==TT_INSTRUMENT_DX7)
-        snprintf(tracker.details_text,sizeof(tracker.details_text),"DX7  %.40s | %s",tracker.wave.name,tracker.message);
+        snprintf(tracker.details_text,sizeof(tracker.details_text),"FM  %.40s | %s",tracker.wave.name,tracker.message);
     else if(tracker.focus==FOCUS_WAVE)
         snprintf(tracker.details_text,sizeof(tracker.details_text),
                  "WAVE  marker %X %.3fs  |  %s",tracker.marker,
@@ -3998,14 +4310,18 @@ static void controller_action_input(TtPadAction action,int down) {
     if(!down)return;
     if(action==TT_PAD_TOP_LEFT || action==TT_PAD_TOP_RIGHT) {
         int direction=action==TT_PAD_TOP_RIGHT?1:-1;
-        if(tracker.grid_value_editing)
+        if(dx7_grid_is_editing())
+            handle_key(action==TT_PAD_TOP_LEFT?F80_KEY_UP:F80_KEY_RIGHT);
+        else if(tracker.grid_value_editing)
             handle_key(action==TT_PAD_TOP_LEFT?F80_KEY_UP:F80_KEY_RIGHT);
         else if(!handle_ui_event((TtUiEvent){
                     .type=TT_UI_FOCUS_LIST_PEER,.a=direction}))
             controller_navigation_move(0,direction);
     } else if(action==TT_PAD_BOTTOM_LEFT || action==TT_PAD_BOTTOM_RIGHT) {
         int direction=action==TT_PAD_BOTTOM_RIGHT?1:-1;
-        if(tracker.grid_value_editing)
+        if(dx7_grid_is_editing())
+            handle_key(action==TT_PAD_BOTTOM_LEFT?F80_KEY_DOWN:F80_KEY_LEFT);
+        else if(tracker.grid_value_editing)
             handle_key(action==TT_PAD_BOTTOM_LEFT?F80_KEY_DOWN:F80_KEY_LEFT);
         else controller_navigation_move(1,direction);
     } else if(action==TT_PAD_NEGATIVE) {
@@ -4306,6 +4622,11 @@ static void handle_mouse(int x,int y,int wheel) {
         f80_mouse(&tracker.app,x,y,wheel);
         return;
     }
+    if(tracker.wave.instrument_type==TT_INSTRUMENT_DX7 &&
+       tracker.dx7_globals_canvas && tracker.dx7_globals_canvas->visible &&
+       f80_contains(tracker.dx7_globals_canvas->rect,x,y)) {
+        dx7_mouse(tracker.dx7_globals_canvas->rect,x,y,wheel);return;
+    }
     if(tracker.wave.instrument_type==TT_INSTRUMENT_DX7 && tracker.synth_canvas &&
        tracker.synth_canvas->visible && f80_contains(tracker.synth_canvas->rect,x,y)) {
         dx7_mouse(tracker.synth_canvas->rect,x,y,wheel);return;
@@ -4316,7 +4637,15 @@ static void handle_mouse(int x,int y,int wheel) {
     if((!tracker.wave_canvas || tracker.wave_canvas->visible) &&
        f80_contains(wave_input_rect,x,y)) {
         handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
-        if(tracker.wave.instrument_type==TT_INSTRUMENT_DX7){dx7_mouse(r,x,y,wheel);return;}
+        if(tracker.wave.instrument_type==TT_INSTRUMENT_DX7) {
+            if(tracker.dx7_globals_canvas && tracker.dx7_globals_canvas->visible)
+                dx7_mouse(tracker.dx7_globals_canvas->rect,x,y,wheel);
+            else {
+                int global_h=dx7_global_panel_height(r.w);
+                dx7_mouse(f80_rect(r.x,r.y+1,r.w,global_h-2),x,y,wheel);
+            }
+            return;
+        }
         if(!tracker.wave.pcm) {
             if(!wheel && y==r.y+r.h-2) {
                 if(!recover_missing(NULL))tt_tracker_message("WAV still missing; check its saved path");
@@ -4853,6 +5182,25 @@ static void layout_header(int cols,int wide) {
         x+=w+1;
     }
 }
+static void layout_instrument_bottom(F80Rect row) {
+    int selector_w=row.w/3;
+    if(selector_w<20)selector_w=row.w/2;
+    if(selector_w>36)selector_w=36;
+    F80Rect selector=f80_rect(row.x,row.y,selector_w,row.h);
+    F80Rect settings=f80_rect(row.x+selector_w,row.y,row.w-selector_w,row.h);
+    if(tracker.instrument_selector_frame && tracker.manage_list) {
+        f80_layout(tracker.instrument_selector_frame,selector);
+        f80_layout(tracker.manage_list,f80_inset(selector,1,1));
+    }
+    if(tracker.manage_dialog) {
+        f80_layout(tracker.manage_dialog,settings);
+        f80_layout(tracker.manage_name,
+                   f80_rect(settings.x+1,settings.y+1,settings.w-2,1));
+        f80_wrap_layout(&manage_actions,
+            f80_rect(settings.x+1,settings.y+3,settings.w-2,
+                     settings.h-4),manage_buttons,4);
+    }
+}
 static int frame(void *user) {
     (void)user;
     if(!tracker.app.running) {
@@ -4888,9 +5236,6 @@ static int frame(void *user) {
     tracker.compact_editing=editing;
     int wide_header=header_is_wide(cols);
     tracker.header->height=f80_fixed(wide_header?2:4);
-    if(tracker.instrument_selector_frame)
-        tracker.instrument_selector_frame->height=
-            tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?f80_fixed(5):f80_fixed(0);
     tracker.wave_row->height=tracker.perspective==TT_PERSPECTIVE_ORDERS?f80_grow():
         tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
             (tracker.wave.instrument_type==TT_INSTRUMENT_DX7?f80_fixed(0):f80_percent(.35f)):
@@ -4898,12 +5243,6 @@ static int frame(void *user) {
     tracker.instrument_panels->height=tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS?
         f80_grow():f80_fixed(0);
     f80_layout(tracker.root,f80_rect(0,0,cols,rows));
-    if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
-       tracker.instrument_selector_frame && tracker.manage_list) {
-        F80Rect frame=tracker.instrument_selector_frame->rect;
-        F80Rect selector=f80_rect(frame.x+1,frame.y+1,frame.w-2,frame.h-2);
-        f80_layout(tracker.manage_list,selector);
-    }
     if(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.order_dialog) {
         F80Rect r=tracker.wave_frame->rect;
         f80_layout(tracker.order_dialog,r);
@@ -4947,28 +5286,69 @@ static int frame(void *user) {
     if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS && tracker.instrument_panels) {
         F80Rect r=tracker.instrument_panels->rect;
         int synth=tracker.wave.instrument_type==TT_INSTRUMENT_DX7;
-        int half=synth?(r.w>=100?28:r.w/3):r.w/2;
+        tracker.instrument_panels->direction=F80_COL;
         handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_VISIBILITY});
-        if(tracker.synth_canvas && synth)f80_layout(tracker.synth_canvas,f80_rect(r.x+half,r.y,r.w-half,r.h));
-        if(tracker.manage_dialog) {
-            F80Rect p=f80_rect(r.x,r.y,half,r.h);f80_layout(tracker.manage_dialog,p);
-            f80_layout(tracker.manage_info,f80_rect(p.x+1,p.y+2,p.w-2,1));
-            f80_layout(tracker.manage_name,f80_rect(p.x+1,p.y+4,p.w-2,1));
-            F80Widget *actions[11];int action_count=0;
-            for(int i=0;i<11;++i)if(!synth || (i!=4 && i!=5))actions[action_count++]=manage_buttons[i];
-            f80_wrap_layout(&manage_actions,
-                f80_rect(p.x+1,p.y+6,p.w-2,r.h-7),actions,action_count);
-        }
-        if(tracker.slices_dialog) {
-            F80Rect p=f80_rect(r.x+half,r.y,r.w-half,r.h);
-            f80_layout(tracker.slices_dialog,p);
-            int list_h=r.h-13;if(list_h<2)list_h=2;if(list_h>4)list_h=4;
-            f80_layout(tracker.slices_list_bg,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
-            f80_layout(tracker.slices_list,f80_rect(p.x+1,p.y+1,p.w-2,list_h));
-            f80_layout(tracker.slices_info,f80_rect(p.x+1,p.y+list_h+2,p.w-2,1));
-            f80_layout(tracker.slices_note,f80_rect(p.x+1,p.y+list_h+3,p.w-2,1));
-            f80_wrap_layout(&slices_actions,
-                f80_rect(p.x+1,p.y+list_h+5,p.w-2,r.h-list_h-6),slices_buttons,6);
+        if(synth) {
+            int settings_h=r.h>=6?6:r.h;
+            int fm_h=r.w<55?9:6;
+            if(fm_h>r.h-settings_h)fm_h=r.h-settings_h;
+            int editor_h=r.h-settings_h-fm_h;
+            int globals_h=dx7_global_panel_height(r.w-2);
+            if(globals_h>editor_h-3)globals_h=editor_h-3;
+            if(globals_h<0)globals_h=0;
+            F80Rect globals=f80_rect(r.x,r.y,r.w,globals_h);
+            F80Rect operators=f80_rect(r.x,r.y+globals_h,r.w,editor_h-globals_h);
+            if(tracker.dx7_globals_panel) {
+                f80_layout(tracker.dx7_globals_panel,globals);
+                f80_layout(tracker.dx7_globals_canvas,f80_inset(globals,1,1));
+            }
+            if(tracker.dx7_operators_panel) {
+                f80_layout(tracker.dx7_operators_panel,operators);
+                f80_layout(tracker.synth_canvas,f80_inset(operators,1,1));
+            }
+            if(tracker.fm_settings_panel) {
+                F80Rect p=f80_rect(r.x,r.y+editor_h,r.w,fm_h);
+                f80_layout(tracker.fm_settings_panel,p);
+                f80_layout(tracker.fm_settings_info,f80_rect(p.x+1,p.y+1,p.w-2,1));
+                f80_wrap_layout(&fm_actions,
+                    f80_rect(p.x+1,p.y+3,p.w-2,p.h-4),fm_buttons,3);
+            }
+            layout_instrument_bottom(
+                f80_rect(r.x,r.y+editor_h+fm_h,r.w,settings_h));
+        } else {
+            int settings_h=r.h>=6?6:r.h;
+            int top_h=r.h-settings_h;
+            int markers_w=(r.w*2)/3;
+            if(markers_w<1)markers_w=1;
+            F80Rect markers=f80_rect(r.x,r.y,markers_w,top_h);
+            F80Rect sample=f80_rect(r.x+markers_w,r.y,r.w-markers_w,top_h);
+            F80Rect settings=f80_rect(r.x,r.y+top_h,r.w,settings_h);
+            if(tracker.slices_dialog) {
+                f80_layout(tracker.slices_dialog,markers);
+                int list_h=markers.h-11;
+                if(list_h<2)list_h=2;
+                if(list_h>12)list_h=12;
+                f80_layout(tracker.slices_list_bg,
+                           f80_rect(markers.x+1,markers.y+1,markers.w-2,list_h));
+                f80_layout(tracker.slices_list,
+                           f80_rect(markers.x+1,markers.y+1,markers.w-2,list_h));
+                f80_layout(tracker.slices_info,
+                           f80_rect(markers.x+1,markers.y+list_h+2,markers.w-2,1));
+                f80_layout(tracker.slices_note,
+                           f80_rect(markers.x+1,markers.y+list_h+3,markers.w-2,1));
+                f80_wrap_layout(&slices_actions,
+                    f80_rect(markers.x+1,markers.y+list_h+4,markers.w-2,
+                             markers.h-list_h-5),slices_buttons,6);
+            }
+            if(tracker.sample_settings_panel) {
+                f80_layout(tracker.sample_settings_panel,sample);
+                f80_layout(tracker.sample_settings_info,
+                           f80_rect(sample.x+1,sample.y+2,sample.w-2,1));
+                f80_wrap_layout(&sample_actions,
+                    f80_rect(sample.x+1,sample.y+4,sample.w-2,sample.h-5),
+                    sample_buttons,2);
+            }
+            layout_instrument_bottom(settings);
         }
     }
     if(!tracker.console_visible)layout_header(cols,wide_header);
@@ -5228,6 +5608,7 @@ int main(int argc,char **argv) {
     SDL_SetHint(SDL_HINT_JOYSTICK_MFI,"0");
 #endif
     memset(&tracker,0,sizeof(tracker));
+    dx7_grids_init();
     tracker.entry_octave=4;tracker.loop=tracker.follow=1;tracker.active_step=-1;
     tracker.focus=FOCUS_PHRASE;
     tracker.edit_order=0;tracker.reveal_cursor=1;
@@ -5324,16 +5705,16 @@ int main(int argc,char **argv) {
     tracker.phrase_frame=f80_add(tracker.root,f80_box(F80_COL));
     tracker.phrase_frame->frame=1;
     tracker.phrase_canvas=f80_add(tracker.phrase_frame,f80_canvas(paint_phrase,NULL));
-    tracker.instrument_panels=f80_add(tracker.root,f80_box(F80_ROW));
+    tracker.instrument_panels=f80_add(tracker.root,f80_box(F80_COL));
     tracker.instrument_panels->visible=0;
     f80_sized(tracker.instrument_panels,f80_grow(),f80_grow());
-    tracker.instrument_selector_frame=f80_add(tracker.root,
+    tracker.instrument_selector_frame=f80_add(tracker.instrument_panels,
         f80_window(F80_WINDOW_GRAY,F80_COL));
     tracker.instrument_selector_frame->frame=1;
-    tracker.instrument_selector_frame->title="Select Instrument";
+    tracker.instrument_selector_frame->title="Instrument";
     tracker.instrument_selector_frame->title_style=F80_COLOR_TEXT;
     tracker.instrument_selector_frame->visible=0;
-    f80_sized(tracker.instrument_selector_frame,f80_grow(),f80_fixed(5));
+    f80_sized(tracker.instrument_selector_frame,f80_grow(),f80_fixed(0));
     tracker.details=f80_add(tracker.root,f80_label(tracker.details_text));
     tracker.details->window_role=F80_WINDOW_CONSOLE;
     tracker.details->style=F80_COLOR_TEXT;
