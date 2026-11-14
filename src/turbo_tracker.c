@@ -2041,7 +2041,7 @@ static void dx7_mouse(F80Rect r,int x,int y,int wheel) {
              f80_contains(tracker.dx7_pitch_grid.rect,x,y)?2:0;
     if(wheel) {
         if(kind)handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_SCROLL,
-                                             .index=kind,.b=-wheel*3});
+                                             .index=kind,.b=-wheel});
         return;
     }
     if(kind) {
@@ -5272,7 +5272,7 @@ static void controller_shutdown(void) {
     memset(&controller_input,0,sizeof(controller_input));
 }
 static void handle_mouse(int x,int y,int wheel) {
-    if(wheel==3)return;
+    if(wheel==F80_MOUSE_RELEASE)return;
     controller_navigation_exit();
     if(tracker.app.modal) {
         if(tracker.app.modal==tracker.table_dialog &&
@@ -5345,9 +5345,9 @@ static void handle_mouse(int x,int y,int wheel) {
         }
     }
     if(tracker.console_visible) {
-        if(wheel==1 || wheel==-1) {
+        if(wheel && wheel!=2) {
             int body=tracker.console->rect.h-2;
-            tracker.console_scroll=clamp(tracker.console_scroll-wheel*3,0,
+            tracker.console_scroll=clamp(tracker.console_scroll-wheel,0,
                                          console_max_scroll(body>0?body:1));
         }
         return;
@@ -5361,7 +5361,7 @@ static void handle_mouse(int x,int y,int wheel) {
        f80_contains(tracker.order_list->rect,x,y)) {
         handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
         if(wheel && wheel!=2)
-            handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,wheel*3});
+            handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,wheel});
         else {
             leave_follow();
             f80_mouse(&tracker.app,x,y,wheel);
@@ -5432,8 +5432,7 @@ static void handle_mouse(int x,int y,int wheel) {
         int body=r.h-3,maximum=grid_total_rows()-body;
         if(maximum<0)maximum=0;
         if(wheel && wheel!=2) {
-            leave_follow();
-            tracker.phrase_scroll=clamp(tracker.phrase_scroll+wheel*3,0,maximum);
+            handle_ui_event((TtUiEvent){TT_UI_SCROLL_GRID,wheel});
             return;
         }
         if(x==r.x+r.w-1) {
@@ -5838,19 +5837,14 @@ static void native_move(int x,int y) {
     native_touch.last_y=y;
 }
 static int native_decode_sgr_mouse(const char *payload,char ending,
-                                   int *x,int *y,mmask_t *state) {
+                                   int *x,int *y,mmask_t *state,int *wheel) {
     int button,column,row;
     if(!payload || sscanf(payload,"%d;%d;%d",&button,&column,&row)!=3 ||
        column<1 || row<1)return 0;
-    *x=column-1;*y=row-1;*state=0;
+    *x=column-1;*y=row-1;*state=0;*wheel=0;
     int code=button&3;
     if(button&64) {
-#ifdef BUTTON5_PRESSED
-        *state=(button&1)?BUTTON5_PRESSED:BUTTON4_PRESSED;
-#else
-        if(button&1)return 0;
-        *state=BUTTON4_PRESSED;
-#endif
+        *wheel=(button&1)?1:-1;
         return 1;
     }
     if(ending=='m') {
@@ -5883,26 +5877,54 @@ static int native_decode_sgr_mouse(const char *payload,char ending,
     }
     return *state!=0;
 }
-static void native_mouse_event_at(int x,int y,mmask_t bstate) {
-    if(tracker.console_visible) {
-        if(bstate&BUTTON4_PRESSED)handle_mouse(x,y,-1);
-#ifdef BUTTON5_PRESSED
-        else if(bstate&BUTTON5_PRESSED)handle_mouse(x,y,1);
+static int native_wheel_delta(mmask_t bstate) {
+#ifdef BUTTON4_PRESSED
+    if(bstate&BUTTON4_PRESSED)return -1;
 #endif
+#ifdef BUTTON4_CLICKED
+    if(bstate&BUTTON4_CLICKED)return -1;
+#endif
+#ifdef BUTTON4_RELEASED
+    if(bstate&BUTTON4_RELEASED)return -1;
+#endif
+#ifdef BUTTON4_DOUBLE_CLICKED
+    if(bstate&BUTTON4_DOUBLE_CLICKED)return -1;
+#endif
+#ifdef BUTTON4_TRIPLE_CLICKED
+    if(bstate&BUTTON4_TRIPLE_CLICKED)return -1;
+#endif
+#ifdef BUTTON5_PRESSED
+    if(bstate&BUTTON5_PRESSED)return 1;
+#endif
+#ifdef BUTTON5_CLICKED
+    if(bstate&BUTTON5_CLICKED)return 1;
+#endif
+#ifdef BUTTON5_RELEASED
+    if(bstate&BUTTON5_RELEASED)return 1;
+#endif
+#ifdef BUTTON5_DOUBLE_CLICKED
+    if(bstate&BUTTON5_DOUBLE_CLICKED)return 1;
+#endif
+#ifdef BUTTON5_TRIPLE_CLICKED
+    if(bstate&BUTTON5_TRIPLE_CLICKED)return 1;
+#endif
+    return 0;
+}
+static void native_mouse_event_at(int x,int y,mmask_t bstate) {
+    int wheel=native_wheel_delta(bstate);
+    if(tracker.console_visible) {
+        if(wheel)handle_mouse(x,y,wheel);
         else if(bstate&(BUTTON1_CLICKED|BUTTON1_PRESSED))handle_mouse(x,y,0);
         return;
     }
-    if(bstate&BUTTON4_PRESSED) { handle_mouse(x,y,-1);return; }
-#ifdef BUTTON5_PRESSED
-    if(bstate&BUTTON5_PRESSED) { handle_mouse(x,y,1);return; }
-#endif
+    if(wheel) { handle_mouse(x,y,wheel);return; }
 #ifdef REPORT_MOUSE_POSITION
     if(bstate&REPORT_MOUSE_POSITION) {
         if(native_touch.down)native_move(x,y);
-#ifndef BUTTON5_PRESSED
-        /* Older ncurses reports wheel-down as position motion. */
-        else if(!native_other_button_down)handle_mouse(x,y,1);
-#endif
+        /* Some terminals/ncurses builds report wheel-down as position motion,
+           even when BUTTON5_PRESSED is available at compile time. */
+        else if(!native_other_button_down &&
+                !(bstate&BUTTON1_PRESSED))handle_mouse(x,y,1);
         return;
     }
 #endif
@@ -5987,9 +6009,20 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
         } else handle_mouse(x,y,0);
     }
 }
-static void native_mouse_event(void) {
-    MEVENT event;
-    if(getmouse(&event)==OK)native_mouse_event_at(event.x,event.y,event.bstate);
+static void native_mouse_events(void) {
+	int key=KEY_MOUSE;
+    timeout(0);
+    while(key==KEY_MOUSE) {
+        MEVENT event;
+        if(getmouse(&event)==OK) {
+            int wheel=native_wheel_delta(event.bstate);
+			if(wheel)handle_mouse(event.x,event.y,wheel);
+			else native_mouse_event_at(event.x,event.y,event.bstate);
+        }
+        key=getch();
+    }
+    if(key!=ERR)ungetch(key);
+    timeout(f80_curses_timeout_ms);
 }
 static void native_sgr_mouse_event(void) {
     /* Keep this separate from KEY_MOUSE so ncurses retains its legacy mouse
@@ -6002,9 +6035,11 @@ static void native_sgr_mouse_event(void) {
         payload[length++]=(char)key;
     }
     payload[length]='\0';
-    int x,y;mmask_t state;
-    if(ending && native_decode_sgr_mouse(payload,(char)ending,&x,&y,&state))
-        native_mouse_event_at(x,y,state);
+    int x,y,wheel;mmask_t state;
+    if(ending && native_decode_sgr_mouse(payload,(char)ending,&x,&y,&state,&wheel)) {
+        if(wheel)handle_mouse(x,y,wheel);
+        else native_mouse_event_at(x,y,state);
+    }
 }
 #endif
 static int header_button_width(void) {
@@ -6418,7 +6453,7 @@ static int frame(void *user) {
     int key=getch();
     if(key==KEY_MOUSE) {
 #ifndef __EMSCRIPTEN__
-        native_mouse_event();
+        native_mouse_events();
 #else
         int x,y,wheel;
         if(f80_curses_mouse(&x,&y,&wheel)==OK)handle_mouse(x,y,wheel);
@@ -6634,7 +6669,7 @@ int main(int argc,char **argv) {
     tracker.app.running=1;f80_set_root(&tracker.app,tracker.root);
     controller_init();
     if(initial_play_requested())send_play(TT_PLAY_START,0,0);
-    f80_curses_run(frame,NULL,30);
+    f80_curses_run(frame,NULL,60);
     controller_shutdown();
 #ifndef __EMSCRIPTEN__
     if(restore_terminal)tcsetattr(STDIN_FILENO,TCSANOW,&original_terminal);

@@ -119,13 +119,19 @@ int main(void) {
     assert(demo.table[5].length==6);
     assert(inline_table_row_width()==42);
 #ifndef __EMSCRIPTEN__
-    int mouse_x=-1,mouse_y=-1;mmask_t mouse_state=0;
+    int mouse_x=-1,mouse_y=-1,mouse_wheel=0;mmask_t mouse_state=0;
     assert(native_decode_sgr_mouse("0;241;17",'M',
-        &mouse_x,&mouse_y,&mouse_state));
+        &mouse_x,&mouse_y,&mouse_state,&mouse_wheel));
     assert(mouse_x==240 && mouse_y==16 && mouse_state==BUTTON1_PRESSED);
     assert(native_decode_sgr_mouse("0;241;17",'m',
-        &mouse_x,&mouse_y,&mouse_state));
+        &mouse_x,&mouse_y,&mouse_state,&mouse_wheel));
     assert(mouse_x==240 && mouse_y==16 && mouse_state==BUTTON1_RELEASED);
+    assert(native_decode_sgr_mouse("64;241;17",'M',
+        &mouse_x,&mouse_y,&mouse_state,&mouse_wheel));
+    assert(mouse_x==240 && mouse_y==16 && mouse_wheel==-1);
+    assert(native_decode_sgr_mouse("65;241;17",'M',
+        &mouse_x,&mouse_y,&mouse_state,&mouse_wheel));
+    assert(mouse_x==240 && mouse_y==16 && mouse_wheel==1);
 #endif
     for(int width=50;width<=100;width+=50) {
         memset(&tracker,0,sizeof(tracker));memset(header_clicks,0,sizeof(header_clicks));
@@ -1192,6 +1198,19 @@ int main(void) {
     assert(f80_scroll_drag_move(&tracker.app,3,3) && wheel_list->scroll==1);
     assert(f80_scroll_drag_move(&tracker.app,3,5) && wheel_list->scroll==2);
     f80_scroll_drag_end(&tracker.app);
+    f80_mouse(&tracker.app,3,3,1);
+    assert(wheel_list->cursor==5 && !wheel_list->scroll_detached);
+    f80_mouse(&tracker.app,3,3,1);
+    assert(wheel_list->cursor==6); /* consecutive wheel inputs remain active */
+#ifdef BUTTON4_PRESSED
+    assert(native_wheel_delta(BUTTON4_PRESSED)==-1);
+#endif
+#ifdef BUTTON5_PRESSED
+    assert(native_wheel_delta(BUTTON5_PRESSED)==1);
+#endif
+#ifdef BUTTON5_CLICKED
+    assert(native_wheel_delta(BUTTON5_CLICKED)==1);
+#endif
     wheel_list->scroll=wheel_list->cursor=0;wheel_list->scroll_detached=0;
     F80Widget hidden_order_frame={0};
     hidden_order_frame.visible=0;
@@ -1200,7 +1219,11 @@ int main(void) {
     order_choice.rect=wheel_list->rect;
     order_choice.cursor=0;
     handle_mouse(3,2,1);
-    assert(wheel_list->cursor==3); /* list receives wheel before canvas zoom */
+    assert(wheel_list->cursor==1); /* list receives one precise wheel row */
+    handle_mouse(3,2,2);
+    assert(wheel_list->cursor==3); /* multi-row smooth-wheel deltas stay scroll input */
+    handle_mouse(3,2,-1);
+    assert(wheel_list->cursor==2); /* reversing wheel direction scrolls immediately */
     assert(order_choice.cursor==0); /* hidden Orders panel cannot intercept it */
     tracker.order_list=NULL;
     tracker.order_frame=NULL;
@@ -1222,12 +1245,17 @@ int main(void) {
     tracker.phrase_scroll=0;
     handle_mouse(10,5,0); /* an editable cell is manual navigation */
     assert(tracker.follow==0 && tracker.step==2);
+    int scroll_before_wheel=tracker.phrase_scroll;
+    tracker.reveal_cursor=1;
     tracker.follow=1;
     handle_mouse(10,5,1);
-    assert(tracker.follow==0 && tracker.phrase_scroll==3);
+    assert(tracker.follow==0 && tracker.phrase_scroll==scroll_before_wheel+1 &&
+           tracker.reveal_cursor==0);
+    handle_mouse(10,5,-1);
+    assert(tracker.phrase_scroll==scroll_before_wheel);
     tracker.follow=1;
     touch_scroll_rows(1);
-    assert(tracker.follow==0 && tracker.phrase_scroll==4);
+    assert(tracker.follow==0 && tracker.phrase_scroll==1);
     F80Rect saved_grid_rect=tracker.phrase_canvas->rect;
     tracker.phrase_canvas->rect=f80_rect(0,0,80,14);
     tracker.phrase_scroll=4;tracker.follow=1;

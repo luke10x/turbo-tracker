@@ -139,7 +139,7 @@ EMSCRIPTEN_KEEPALIVE void curses_push_key(int key) {
 }
 EMSCRIPTEN_KEEPALIVE void curses_push_mouse(int x, int y, int wheel) {
     MEVENT event = {0};
-    event.x = x; event.y = y;
+    event.x = x; event.y = y; event.z = wheel;
     event.bstate = wheel < 0 ? BUTTON4_PRESSED : wheel > 0 ? BUTTON5_PRESSED : BUTTON1_CLICKED;
     if (event.bstate & wasm_mouse_mask) wasm_queue_key(KEY_MOUSE, event);
 }

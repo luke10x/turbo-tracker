@@ -394,7 +394,12 @@ if (!pointerGestures) for (const type of ['touchstart', 'touchmove', 'touchend',
   }, { passive: false });
 }
 term.element.addEventListener('wheel', event => {
-  call('curses_push_mouse', [...cell(event), Math.sign(event.deltaY)]);
+  const rows = Math.sign(event.deltaY);
+  if (rows) {
+    call('curses_push_mouse', [...cell(event), rows]);
+    if (ready && window.f80ApplicationId === 'turbo-tracker')
+      Module.ccall('tt_tracker_flush_input', null, [], []);
+  }
   event.preventDefault();
 }, { passive: false });
 let fittedCols = 0;

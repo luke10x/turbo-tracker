@@ -1772,7 +1772,11 @@ int f80_mouse(F80App *app,int x,int y,int wheel) {
         return 1;
     }
     if(w->kind==F80_LISTBOX || w->kind==F80_TABLE) {
-        if(wheel)w->cursor=limit(w->cursor+wheel*3,0,w->item_count>0?w->item_count-1:0);
+        if(wheel) {
+            /* A wheel input resumes cursor-following after a detached drag scroll. */
+            w->scroll_detached=0;
+            w->cursor=limit(w->cursor+wheel,0,w->item_count>0?w->item_count-1:0);
+        }
         else {
             int old=w->cursor;
             int header=w->kind==F80_TABLE?(w->table_fields?table_has_groups(w)+1:(w->table_group_header?2:1)):0;

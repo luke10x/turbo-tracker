@@ -9,6 +9,8 @@
 
 #include "f80.h"
 
+enum { F80_MOUSE_RELEASE=10000 };
+
 static inline int f80_curses_key(int key) {
     if (key >= KEY_F(1) && key <= KEY_F(10)) return 2000 + key - KEY_F(0);
     switch (key) {
@@ -50,9 +52,13 @@ static inline int f80_curses_mouse(int *x, int *y, int *wheel) {
 #endif
     if (getmouse(&event) != OK) return ERR;
     *x = event.x; *y = event.y;
+#ifdef __EMSCRIPTEN__
+    *wheel = event.z;
+#else
     *wheel = (event.bstate & BUTTON4_PRESSED) ? -1 : 0;
 #ifdef BUTTON5_PRESSED
     if (event.bstate & BUTTON5_PRESSED) *wheel = 1;
+#endif
 #endif
 #ifdef REPORT_MOUSE_POSITION
     if ((event.bstate & REPORT_MOUSE_POSITION) && button_down) *wheel = 2;
@@ -61,7 +67,7 @@ static inline int f80_curses_mouse(int *x, int *y, int *wheel) {
     if (event.bstate & BUTTON1_PRESSED) button_down = 1;
 #endif
 #ifdef BUTTON1_RELEASED
-    if (event.bstate & BUTTON1_RELEASED) { button_down = 0; *wheel = 3; }
+    if (event.bstate & BUTTON1_RELEASED) { button_down = 0; *wheel = F80_MOUSE_RELEASE; }
 #endif
     return OK;
 }
@@ -83,8 +89,10 @@ static inline void f80_curses_run(F80CursesFrame frame, void *context, int fps) 
     emscripten_set_main_loop(f80_curses_loop, fps, 1);
 }
 #else
+static int f80_curses_timeout_ms=100;
 static inline void f80_curses_run(F80CursesFrame frame, void *context, int fps) {
-    timeout(fps > 0 ? 1000 / fps : 100);
+    f80_curses_timeout_ms=fps > 0 ? 1000 / fps : 100;
+    timeout(f80_curses_timeout_ms);
     while (frame(context)) { }
     endwin();
 }

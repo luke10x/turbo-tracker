@@ -178,7 +178,7 @@ static int grid_field_at(const F80Grid *g,int content_x) {
 int f80_grid_mouse(F80Grid *g,int x,int y,int wheel) {
     F80Rect r=g->rect;
     if(x<r.x || y<r.y || x>=r.x+r.w || y>=r.y+r.h)return 0;
-    if(wheel) { f80_grid_scroll(g,0,wheel*3);return 1; }
+    if(wheel) { f80_grid_scroll(g,0,wheel);return 1; }
     if(g->show_h && g->show_v && x==r.x+r.w-1 && y==r.y+r.h-1)return 1;
     int data_x=r.x+grid_gutter_width(g),data_width=grid_body_width(g);
     if(g->show_h && y==r.y+r.h-1 && x>=data_x && x<data_x+data_width) {
@@ -345,7 +345,7 @@ int f80_wrap_mouse(F80Wrap *wrap,int x,int y,int wheel,
                    F80Widget *const *items,int count) {
     F80Rect r=wrap->rect;
     if(x<r.x || x>=r.x+r.w || y<r.y || y>=r.y+r.h)return 0;
-    if(wheel)f80_wrap_scroll(wrap,wheel*3,items,count);
+    if(wheel)f80_wrap_scroll(wrap,wheel,items,count);
     else if(x==r.x+r.w-1 && wrap->content_height>r.h) {
         int maximum=wrap->content_height-r.h;
         wrap->scroll=bound(y==r.y?wrap->scroll-1:
