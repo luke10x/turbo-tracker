@@ -745,10 +745,12 @@ int main(void) {
            tracker.pattern.cell[1][0].effect3==TT_EFFECT_NONE);
     tracker.focus=FOCUS_PHRASE;tracker.channel=0;tracker.field=0;
     tracker.step=tracker.song.pattern_rows-1;
+    tracker.phrase_scroll=4;
     tracker.pattern_lock=0;tracker.play_order=0;tracker.active_order_index=0;
     move_pattern_row(1);
     assert(tracker.pattern_index==1 && tracker.edit_order==1 && tracker.step==0 &&
            tracker.play_order==0 && tracker.active_order_index==0);
+    assert(tracker.phrase_scroll==5); /* Row 00 stays at the former row 15 screen position. */
     tracker.step=tracker.song.pattern_rows-1;
     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_LOCK,.a=1});
     move_pattern_row(1);
@@ -1241,7 +1243,7 @@ int main(void) {
 
     select_edit_pattern(1);
     assert(tracker.pattern_index==1 && tracker.edit_order==1);
-    assert(tracker.phrase_scroll==16);
+    assert(tracker.phrase_scroll==53); /* Preserve the cursor's screen row across order selection. */
     tracker.pattern.cell[0][0]=(TtCell){-1,-1,TT_EFFECT_T,0,
                                           TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
     tracker.play_mode=PLAY_PATTERN;tracker.loop_pattern_index=1;

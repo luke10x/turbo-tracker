@@ -1,60 +1,60 @@
 <root>
   <node title="Effects">
-    <node title="Effect registers (0RG–FRG)" href="./app.html?init_song=%2Fexamples%2Fregister-reference%2Fregister.song&amp;init_play=1"
+    <node title="Effect registers (0RG–FRG)" href="./app.html?init_song=%2Fexamples%2Fregister-reference%2Fregister.ttt&amp;init_play=1"
           source="./examples/register-reference/README.md" />
-    <node title="Glide (GLD)" href="./app.html?init_song=%2Fexamples%2Fglide%2Fglide.song&amp;init_play=1"
+    <node title="Glide (GLD)" href="./app.html?init_song=%2Fexamples%2Fglide%2Fglide.ttt&amp;init_play=1"
           source="./examples/glide/README.md" />
-    <node title="Fade in (IIN)" href="./app.html?init_song=%2Fexamples%2Fiin-fade-in%2Fiin.song&amp;init_play=1"
+    <node title="Fade in (IIN)" href="./app.html?init_song=%2Fexamples%2Fiin-fade-in%2Fiin.ttt&amp;init_play=1"
           source="./examples/iin-fade-in/README.md" />
-    <node title="Pitch down and up (JDN/KUP)" href="./app.html?init_song=%2Fexamples%2Fpitch-bends%2Fpitch-bends.song&amp;init_play=1"
+    <node title="Pitch down and up (JDN/KUP)" href="./app.html?init_song=%2Fexamples%2Fpitch-bends%2Fpitch-bends.ttt&amp;init_play=1"
           source="./examples/pitch-bends/README.md" />
-    <node title="Channel volume (MVL)" href="./app.html?init_song=%2Fexamples%2Fmvl-volume%2Fmvl.song&amp;init_play=1"
+    <node title="Channel volume (MVL)" href="./app.html?init_song=%2Fexamples%2Fmvl-volume%2Fmvl.ttt&amp;init_play=1"
           source="./examples/mvl-volume/README.md" />
-    <node title="Auto-pan (NPN)" href="./app.html?init_song=%2Fexamples%2Fnpn-auto-pan%2Fnpn.song&amp;init_play=1"
+    <node title="Auto-pan (NPN)" href="./app.html?init_song=%2Fexamples%2Fnpn-auto-pan%2Fnpn.ttt&amp;init_play=1"
           source="./examples/npn-auto-pan/README.md" />
-    <node title="Fade out (OUT)" href="./app.html?init_song=%2Fexamples%2Fout-fade-out%2Fout.song&amp;init_play=1"
+    <node title="Fade out (OUT)" href="./app.html?init_song=%2Fexamples%2Fout-fade-out%2Fout.ttt&amp;init_play=1"
           source="./examples/out-fade-out/README.md" />
-    <node title="Pan position (PAN)" href="./app.html?init_song=%2Fexamples%2Fpan-position%2Fpan.song&amp;init_play=1"
+    <node title="Pan position (PAN)" href="./app.html?init_song=%2Fexamples%2Fpan-position%2Fpan.ttt&amp;init_play=1"
           source="./examples/pan-position/README.md" />
-    <node title="Time stretch (RRR)" href="./app.html?init_song=%2Fexamples%2Ftime-stretch%2Ftime-stretch.song&amp;init_play=1"
+    <node title="Time stretch (RRR)" href="./app.html?init_song=%2Fexamples%2Ftime-stretch%2Ftime-stretch.ttt&amp;init_play=1"
           source="./examples/time-stretch/README.md" />
     <node title="Slice (SLC)">
-      <node title="Scale from SLC8B" href="./app.html?init_song=%2Fexamples%2Fslc-scale%2Fscale.song&amp;init_play=1"
+      <node title="Scale from SLC8B" href="./app.html?init_song=%2Fexamples%2Fslc-scale%2Fscale.ttt&amp;init_play=1"
             source="./examples/slc-scale/README.md" />
-      <node title="Beat-sliced break" href="./app.html?init_song=%2Fexamples%2Fslc-break%2Fbreak.song&amp;init_play=1"
+      <node title="Beat-sliced break" href="./app.html?init_song=%2Fexamples%2Fslc-break%2Fbreak.ttt&amp;init_play=1"
             source="./examples/slc-break/README.md" />
     </node>
     <node title="Tables (TBL)">
-      <node title="Arpeggio" href="./app.html?init_song=%2Fexamples%2Ftbl-arpeggio%2Ftbl-arpeggio.song&amp;init_play=1"
+      <node title="Arpeggio" href="./app.html?init_song=%2Fexamples%2Ftbl-arpeggio%2Ftbl-arpeggio.ttt&amp;init_play=1"
             source="./examples/tbl-arpeggio/README.md" />
-      <node title="Relative notes" href="./app.html?init_song=%2Fexamples%2Ftbl-relative-notes%2Ftbl-relative-notes.song&amp;init_play=1"
+      <node title="Relative notes" href="./app.html?init_song=%2Fexamples%2Ftbl-relative-notes%2Ftbl-relative-notes.ttt&amp;init_play=1"
             source="./examples/tbl-relative-notes/README.md" />
-      <node title="Backward loop (YRJ)" href="./app.html?init_song=%2Fexamples%2Ftbl-loop%2Ftbl-loop.song&amp;init_play=1"
+      <node title="Backward loop (YRJ)" href="./app.html?init_song=%2Fexamples%2Ftbl-loop%2Ftbl-loop.ttt&amp;init_play=1"
             source="./examples/tbl-loop/README.md" />
-      <node title="Retrigger (X)" href="./app.html?init_song=%2Fexamples%2Ftbl-retrigger%2Ftbl-retrigger.song&amp;init_play=1"
+      <node title="Retrigger (X)" href="./app.html?init_song=%2Fexamples%2Ftbl-retrigger%2Ftbl-retrigger.ttt&amp;init_play=1"
             source="./examples/tbl-retrigger/README.md" />
-      <node title="Tick automation" href="./app.html?init_song=%2Fexamples%2Ftbl-automation%2Ftbl-automation.song&amp;init_play=1"
+      <node title="Tick automation" href="./app.html?init_song=%2Fexamples%2Ftbl-automation%2Ftbl-automation.ttt&amp;init_play=1"
             source="./examples/tbl-automation/README.md" />
     </node>
-    <node title="Delay (UDL)" href="./app.html?init_song=%2Fexamples%2Fudl%2Fudl.song&amp;init_play=1"
+    <node title="Delay (UDL)" href="./app.html?init_song=%2Fexamples%2Fudl%2Fudl.ttt&amp;init_play=1"
           source="./examples/udl/README.md" />
-    <node title="Vibrato (VIB)" href="./app.html?init_song=%2Fexamples%2Fvib-vibrato%2Fvib.song&amp;init_play=1"
+    <node title="Vibrato (VIB)" href="./app.html?init_song=%2Fexamples%2Fvib-vibrato%2Fvib.ttt&amp;init_play=1"
           source="./examples/vib-vibrato/README.md" />
-    <node title="Tremolo (WBL)" href="./app.html?init_song=%2Fexamples%2Fwbl-tremolo%2Fwbl.song&amp;init_play=1"
+    <node title="Tremolo (WBL)" href="./app.html?init_song=%2Fexamples%2Fwbl-tremolo%2Fwbl.ttt&amp;init_play=1"
           source="./examples/wbl-tremolo/README.md" />
-    <node title="Pattern jump (XJP)" href="./app.html?init_song=%2Fexamples%2Fxjp-pattern-jump%2Fxjp.song&amp;init_play=1"
+    <node title="Pattern jump (XJP)" href="./app.html?init_song=%2Fexamples%2Fxjp-pattern-jump%2Fxjp.ttt&amp;init_play=1"
           source="./examples/xjp-pattern-jump/README.md" />
-    <node title="Pattern row jump (YRJ)" href="./app.html?init_song=%2Fexamples%2Fyrj-pattern-row-jump%2Fyrj.song&amp;init_play=1"
+    <node title="Pattern row jump (YRJ)" href="./app.html?init_song=%2Fexamples%2Fyrj-pattern-row-jump%2Fyrj.ttt&amp;init_play=1"
           source="./examples/yrj-pattern-row-jump/README.md" />
-    <node title="Tempo (ZTM)" href="./app.html?init_song=%2Fexamples%2Fztm%2Fztm.song&amp;init_play=1"
+    <node title="Tempo (ZTM)" href="./app.html?init_song=%2Fexamples%2Fztm%2Fztm.ttt&amp;init_play=1"
           source="./examples/ztm/README.md" />
   </node>
   <node title="Examples">
-    <node title="Chord voicings (>04)" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.song&amp;init_play=1"
+    <node title="Chord voicings (>04)" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.ttt&amp;init_play=1"
           source="./examples/chord-voicings/README.md" />
-    <node title="DX7 chord progression" href="./app.html?init_song=%2Fexamples%2Fsynth-chord-progression%2Fsynth-chord-progression.song&amp;init_play=1"
+    <node title="DX7 chord progression" href="./app.html?init_song=%2Fexamples%2Fsynth-chord-progression%2Fsynth-chord-progression.ttt&amp;init_play=1"
           source="./examples/synth-chord-progression/README.md" />
-    <node title="Same-channel note steps (+01)" href="./app.html?init_song=%2Fexamples%2Frelative-note-steps%2Frelative-note-steps.song&amp;init_play=1"
+    <node title="Same-channel note steps (+01)" href="./app.html?init_song=%2Fexamples%2Frelative-note-steps%2Frelative-note-steps.ttt&amp;init_play=1"
           source="./examples/relative-note-steps/README.md" />
   </node>
 </root>

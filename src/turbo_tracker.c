@@ -406,7 +406,8 @@ typedef enum {
     TT_UI_SET_PERSPECTIVE,
     TT_UI_LEADER_START, TT_UI_LEADER_CANCEL,
     TT_UI_LEADER_TIMEOUT, TT_UI_LEADER_COMPLETE,
-    TT_UI_FOCUS, TT_UI_FOCUS_LIST_PEER, TT_UI_SCROLL_ORDER, TT_UI_ORDER_CURSOR,
+    TT_UI_FOCUS, TT_UI_FOCUS_LIST_PEER, TT_UI_SCROLL_ORDER, TT_UI_SCROLL_GRID,
+    TT_UI_ORDER_CURSOR,
     TT_UI_PATTERN_LOCK,
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
     TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
@@ -868,6 +869,12 @@ static int handle_ui_event(TtUiEvent event) {
         list->scroll_detached=1;
         return 1;
     }
+    if(event.type==TT_UI_SCROLL_GRID) {
+        tracker.phrase_scroll+=event.index;
+        if(tracker.phrase_scroll<0)tracker.phrase_scroll=0;
+        tracker.reveal_cursor=0;
+        return 1;
+    }
     if(event.type==TT_UI_ORDER_CURSOR) {
         if(!tracker.order_list || event.index<0 ||
            event.index>=tracker.order_list->item_count)return 0;
@@ -995,11 +1002,16 @@ static int handle_ui_event(TtUiEvent event) {
         tracker.selecting=0;
         return 1;
     }
+    int previous_order=tracker.edit_order;
     if(order>=0 && tracker.order_list)reveal_order_cursor(order);
     tracker.edit_order=order>=0?order:order_for_pattern(index,tracker.edit_order);
     if(tracker.order_list)tracker.order_list->scroll_detached=0;
-    tracker.phrase_scroll=tracker.edit_order>=0?
+    if(tracker.edit_order>=0 && previous_order>=0)
+        tracker.phrase_scroll+=(tracker.edit_order-previous_order)*
+                               tracker.song.pattern_rows;
+    else tracker.phrase_scroll=tracker.edit_order>=0?
         tracker.edit_order*tracker.song.pattern_rows:0;
+    if(tracker.phrase_scroll<0)tracker.phrase_scroll=0;
     tracker.reveal_cursor=1;
     tracker.selecting=0;
     return 1;
@@ -1019,6 +1031,7 @@ static void move_pattern_row(int delta) {
         return;
     }
     int order=tracker.edit_order;
+    int old_step=tracker.step;
     if(row<0) { --order;row=tracker.song.pattern_rows-1; }
     else if(row>=tracker.song.pattern_rows) { ++order;row=0; }
     order=clamp(order,0,tracker.song.order_count-1);
@@ -1026,6 +1039,10 @@ static void move_pattern_row(int delta) {
         leave_follow();
         if(!handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,
                                         .index=order}))return;
+        /* Keep the edited row at the same screen height while the order
+           transition advances the cursor from one pattern edge to the other. */
+        handle_ui_event((TtUiEvent){.type=TT_UI_SCROLL_GRID,
+                                    .index=row-old_step});
     }
     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_ROW_CURSOR,.a=row});
 }
