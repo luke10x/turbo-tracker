@@ -1661,6 +1661,68 @@ int f80_mouse_over_list(F80App *app,int x,int y) {
     F80Widget *w=hit(app->modal?app->modal:app->root,x,y);
     return w && (w->kind==F80_LISTBOX || w->kind==F80_TABLE);
 }
+int f80_scroll_drag_begin(F80App *app,int x,int y) {
+    if(!app)return 0;
+    app->scroll_drag_widget=NULL;
+    F80Widget *w=hit(app->modal?app->modal:app->root,x,y);
+    if(!w || (w->kind!=F80_LISTBOX && w->kind!=F80_TABLE))return 0;
+    int header=w->kind==F80_TABLE?
+        (w->table_fields?table_has_groups(w)+1:
+         (w->table_group_header?2:1)):0;
+    int body=w->rect.h-header;
+    if(w->item_count<=body && w->table_col_count<=1)return 0;
+    app->scroll_drag_widget=w;
+    app->scroll_drag_x=x;app->scroll_drag_y=y;
+    if(w->focusable)app->focus=w;
+    return 1;
+}
+int f80_scroll_drag_move(F80App *app,int x,int y) {
+    if(!app || !app->scroll_drag_widget)return 0;
+    F80Widget *w=app->scroll_drag_widget;
+    F80Rect r=w->rect;
+    int header=w->kind==F80_TABLE?
+        (w->table_fields?table_has_groups(w)+1:
+         (w->table_group_header?2:1)):0;
+    int body=r.h-header;
+    if(body<1)body=1;
+    int vertical_delta=app->scroll_drag_y-y;
+    if(y<r.y)vertical_delta=-(r.y-y>0?r.y-y:1);
+    else if(y>=r.y+r.h)vertical_delta=y-r.y-r.h+1;
+    int maximum=w->item_count>body?w->item_count-body:0;
+    int old_scroll=w->scroll,old_cursor=w->cursor,old_col=w->table_col;
+    w->scroll=limit(w->scroll+vertical_delta,0,maximum);
+    if(w->item_count>0) {
+        int row=limit(y<r.y?0:y>=r.y+r.h?body-1:y-r.y-header,
+                      0,body-1);
+        w->cursor=limit(w->scroll+row,0,w->item_count-1);
+    }
+    w->scroll_detached=1;
+    int dx=app->scroll_drag_x-x;
+    if(w->kind==F80_TABLE && dx) {
+        if(w->table_fields)
+            w->table_col_scroll=limit(w->table_col_scroll+dx,0,
+                                      w->table_col_count>0?
+                                      w->table_col_count-1:0);
+        if(w->table_fields)w->table_col=w->table_col_scroll;
+        else if(w->items) {
+            int content=0;
+            for(int i=0;i<w->item_count;++i) {
+                int width=(int)strlen(w->items[i]);
+                if(width>content)content=width;
+            }
+            w->table_hscroll=limit(w->table_hscroll+dx,0,
+                content>r.w?content-r.w:0);
+        }
+    }
+    app->scroll_drag_x=x;app->scroll_drag_y=y;
+    if(w->action && (w->scroll!=old_scroll || w->cursor!=old_cursor ||
+                     w->table_col!=old_col))
+        w->action(w,w->user);
+    return 1;
+}
+void f80_scroll_drag_end(F80App *app) {
+    if(app)app->scroll_drag_widget=NULL;
+}
 int f80_mouse(F80App *app,int x,int y,int wheel) {
     F80Widget *menu=app->menu;
     if(menu && !app->modal && !wheel) {

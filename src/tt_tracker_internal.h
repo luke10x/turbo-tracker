@@ -78,6 +78,8 @@ typedef struct {
     char effect_picker_labels[36][6];
     F80Grid table_grid;
     F80PointerGesture grid_pointer_gesture;
+    int grid_touch_mode,grid_touch_x,grid_touch_y;
+    int grid_touch_last_x,grid_touch_last_y;
     F80Wrap table_actions;
     int table_index;
     TtTableTick table_clip[TT_TABLE_MAX_TICKS];

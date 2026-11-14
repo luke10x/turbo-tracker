@@ -123,6 +123,8 @@ struct F80App {
     F80Widget *root, *modal, *focus, *saved_focus;
     F80Widget *modal_stack[8], *modal_focus[8];
     int modal_depth;
+    F80Widget *scroll_drag_widget;
+    int scroll_drag_x,scroll_drag_y;
     int tick, animation_tick, running;
     void *user;
     F80Widget *menu;
@@ -190,6 +192,9 @@ int f80_focus_visible(const F80App *app);
 int f80_key(F80App *app, int key);
 int f80_mouse(F80App *app, int x, int y, int wheel);
 int f80_mouse_over_list(F80App *app, int x, int y);
+int f80_scroll_drag_begin(F80App *app,int x,int y);
+int f80_scroll_drag_move(F80App *app,int x,int y);
+void f80_scroll_drag_end(F80App *app);
 void f80_put(int y, int x, const char *text, int width, int pair, int bold);
 void f80_fill(F80Rect rect, int pair);
 void f80_frame(F80Rect rect, const char *title, int pair);

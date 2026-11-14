@@ -22,6 +22,11 @@ int main(void) {
     assert(f80_pointer_gesture_move(&pointer_gesture,4,8,300)==F80_POINTER_MOVE);
     assert(!f80_pointer_gesture_tick(&pointer_gesture,2000));
     f80_pointer_gesture_end(&pointer_gesture);
+    f80_pointer_gesture_begin(&pointer_gesture,400,700,2100);
+    assert(f80_pointer_gesture_move(&pointer_gesture,401,701,2600)==F80_POINTER_MOVE);
+    assert(!f80_pointer_gesture_tick(&pointer_gesture,3599));
+    assert(f80_pointer_gesture_move(&pointer_gesture,410,710,3600)==F80_POINTER_MOVE);
+    f80_pointer_gesture_end(&pointer_gesture);
     f80_pointer_gesture_begin(&pointer_gesture,4,7,3000);
     assert(!f80_pointer_gesture_tick(&pointer_gesture,3999));
     assert(f80_pointer_gesture_tick(&pointer_gesture,4000));
@@ -1108,6 +1113,14 @@ int main(void) {
     tracker.play_order=0;
     tracker.active_order_index=-1;
     tracker.active_step=-1;
+    int highlight_saved_edit=tracker.edit_order;
+    int highlight_saved_active=tracker.active_order_index;
+    tracker.edit_order=1;tracker.active_order_index=2;tracker.follow=1;
+    assert(grid_highlight_order()==2);
+    tracker.follow=0;
+    assert(grid_highlight_order()==1);
+    tracker.edit_order=highlight_saved_edit;
+    tracker.active_order_index=highlight_saved_active;tracker.follow=1;
     assert(grid_total_rows()==48);
     assert(grid_pattern_for_row(0)==0);
     assert(grid_pattern_for_row(16)==1);
@@ -1135,6 +1148,28 @@ int main(void) {
     tracker.phrase_canvas=&grid;
     wave.visible=1;
     grid.rect=f80_rect(0,0,80,30);
+    tracker.pattern_lock=1;
+    tracker.selecting=tracker.visual_selecting=0;
+    tracker.grid_selection_invalid=0;
+    tracker.edit_order=0;tracker.pattern_index=tracker.song.order[0];
+    tracker.step=0;tracker.phrase_scroll=0;
+    handle_mouse(10,5,2); /* Start a drag selection inside the locked order. */
+    handle_mouse(10,19,2); /* Extend the same selection into the next order. */
+    assert(tracker.edit_order==0 && tracker.selecting &&
+           !tracker.grid_selection_invalid && !selected_cell(8,0));
+    tracker.selecting=tracker.visual_selecting=0;
+    tracker.grid_selection_invalid=0;tracker.pattern_lock=0;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
+    tracker.pattern_lock=1;tracker.step=15;
+    handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
+    handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+                                .index=F80_KEY_DOWN});
+    assert(tracker.edit_order==0 && tracker.step==15 &&
+           !tracker.grid_selection_invalid && !selected_cell(16,0));
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    tracker.grid_selection_invalid=0;tracker.pattern_lock=0;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
+    tracker.step=0;
     order_choice.scroll=0;
     tracker.order_list=&order_choice;
     tracker.follow=1;
@@ -1153,6 +1188,11 @@ int main(void) {
     wheel_list->rect=f80_rect(2,2,10,3);
     tracker.wave_canvas=wheel_canvas;
     tracker.header=&header;
+    assert(f80_scroll_drag_begin(&tracker.app,3,4));
+    assert(f80_scroll_drag_move(&tracker.app,3,3) && wheel_list->scroll==1);
+    assert(f80_scroll_drag_move(&tracker.app,3,5) && wheel_list->scroll==2);
+    f80_scroll_drag_end(&tracker.app);
+    wheel_list->scroll=wheel_list->cursor=0;wheel_list->scroll_detached=0;
     F80Widget hidden_order_frame={0};
     hidden_order_frame.visible=0;
     tracker.order_frame=&hidden_order_frame;
@@ -1178,6 +1218,7 @@ int main(void) {
     tracker.phrase_scroll=32;
     handle_mouse(10,7,0); /* repeated patterns can be selected at another order */
     assert(tracker.pattern_index==0 && tracker.edit_order==2 && tracker.step==4);
+    assert(tracker.phrase_scroll==32); /* Clicking another order leaves the viewport fixed. */
     tracker.phrase_scroll=0;
     handle_mouse(10,5,0); /* an editable cell is manual navigation */
     assert(tracker.follow==0 && tracker.step==2);
@@ -1187,6 +1228,38 @@ int main(void) {
     tracker.follow=1;
     touch_scroll_rows(1);
     assert(tracker.follow==0 && tracker.phrase_scroll==4);
+    F80Rect saved_grid_rect=tracker.phrase_canvas->rect;
+    tracker.phrase_canvas->rect=f80_rect(0,0,80,14);
+    tracker.phrase_scroll=4;tracker.follow=1;
+    tracker.grid_touch_last_x=10;tracker.grid_touch_last_y=5;
+    f80_pointer_gesture_begin(&tracker.grid_pointer_gesture,10,5,SDL_GetTicks());
+    tracker_grid_touch_move(10,4,10,4); /* Quick touch swipe scrolls the rows. */
+    assert(tracker.phrase_scroll==5 && tracker.follow==0 &&
+           !tracker.grid_pointer_gesture.selecting);
+    tracker_grid_pointer_up();
+    tracker.phrase_canvas->rect=f80_rect(0,0,24,14);
+    tracker.field_scroll=0;tracker.grid_touch_mode=1;
+    tracker.grid_touch_last_x=10;tracker.grid_touch_last_y=5;
+    f80_pointer_gesture_begin(&tracker.grid_pointer_gesture,10,5,SDL_GetTicks());
+    tracker_grid_touch_move(9,5,9,5); /* A quick horizontal swipe scrolls fields. */
+    assert(tracker.field_scroll==1 && !tracker.grid_pointer_gesture.selecting);
+    tracker_grid_pointer_up();
+    tracker.grid_touch_mode=0;
+    handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
+    tracker.pattern_lock=1;tracker.step=3;tracker.phrase_scroll=0;
+    tracker.anchor_step=1;tracker.anchor_channel=tracker.channel;
+    tracker.selecting=1;tracker.grid_selection_invalid=0;
+    handle_mouse(10,14,2); /* Drag below the grid scrolls and extends selection. */
+    assert(tracker.step==11 && tracker.phrase_scroll==1 && tracker.selecting);
+    handle_mouse(10,2,2); /* Drag above the grid scrolls back toward its start. */
+    assert(tracker.step==0 && tracker.phrase_scroll==0 && tracker.selecting);
+    tracker.phrase_canvas->rect=f80_rect(0,0,24,14);
+    tracker.step=5;tracker.phrase_scroll=0;tracker.field_scroll=0;
+    tracker.anchor_channel=0;tracker.channel=0;
+    handle_mouse(25,8,2); /* Drag past the right edge scrolls grid fields. */
+    assert(tracker.field_scroll>0 && tracker.channel>0 && tracker.selecting);
+    tracker.selecting=0;tracker.pattern_lock=0;
+    tracker.phrase_canvas->rect=saved_grid_rect;
     tracker.follow=1;
     handle_mouse(79,10,0); /* grid scrollbar */
     assert(tracker.follow==0);
@@ -1448,6 +1521,21 @@ int main(void) {
     assert(tracker.marker==5);
     handle_mouse(marker_x+2,3,0);
     assert(tracker.marker==5);
+    tracker.wave_canvas=&wave;
+    tracker.zoom=1;tracker.view_start=400;
+    begin_wave_gesture(40);
+    pan_wave_touch(20);
+    int wave_pan_after_drag=tracker.view_start;
+    pan_wave_touch(-2); /* Continuing the drag beyond the left edge keeps panning. */
+    assert(wave_pan_after_drag>400 && tracker.view_start>wave_pan_after_drag);
+    tracker.zoom=1;tracker.view_start=0;
+    wave_touch.x=78;wave_touch.visible=visible_frames();
+    wave_touch.marker_frame=tracker.phrase.marker[1];tracker.marker=1;
+    int marker_before_edge_drag=tracker.phrase.marker[1];
+    move_wave_marker_touch(81); /* Dragging past the right edge pans the wave. */
+    assert(tracker.view_start>0);
+    edit_marker(1,marker_before_edge_drag);
+    tracker.view_start=0;tracker.zoom=0;
     tracker.wave.pcm=NULL; /* stack-backed smoke sample is not history-owned */
     TtEditDoc history_doc=edit_doc();
     edit_history=tt_edit_history_new(&history_doc);
