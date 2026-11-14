@@ -417,7 +417,9 @@ typedef enum {
     TT_UI_SCROLL_GRID_FIELDS,
     TT_UI_ORDER_CURSOR,
     TT_UI_PATTERN_LOCK,
-    TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_EXTEND_VISUAL_SELECTION,
+    TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_BEGIN_POINTER_SELECTION,
+    TT_UI_BEGIN_ORDER_SELECTION,
+    TT_UI_EXTEND_VISUAL_SELECTION,
     TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
     TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
@@ -437,6 +439,8 @@ typedef enum {
 } TtUiType;
 typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
 static int handle_ui_event(TtUiEvent event);
+static int begin_touch_selection(int x,int y);
+static int begin_order_range(int x,int y);
 static int widget_is_inside(F80Widget *widget,F80Widget *parent);
 static F80Widget *dx7_focus_canvas(void);
 static void open_path_dialog(int action);
@@ -911,6 +915,10 @@ static int handle_ui_event(TtUiEvent event) {
         tt_tracker_log_event("UI","Visual selection started");
         return 1;
     }
+    if(event.type==TT_UI_BEGIN_POINTER_SELECTION)
+        return begin_touch_selection(event.a,event.b);
+    if(event.type==TT_UI_BEGIN_ORDER_SELECTION)
+        return begin_order_range(event.a,event.b);
     if(event.type==TT_UI_EXTEND_VISUAL_SELECTION) {
         if(tracker.focus!=FOCUS_PHRASE || !tracker.selecting ||
            !tracker.visual_selecting)return 0;
@@ -1147,10 +1155,10 @@ static int order_at(int x,int y) {
     int at=tracker.order_list->scroll+y-r.y;
     return at<tracker.song.order_count?at:-1;
 }
-static void begin_order_range(int x,int y) {
-    if(tracker.app.modal)return;
+static int begin_order_range(int x,int y) {
+    if(tracker.app.modal)return 0;
     int at=order_at(x,y);
-    if(at<0)return;
+    if(at<0)return 0;
     F80Rect r=tracker.order_list->rect;
     if(tracker.play_mode==PLAY_SONG && x<r.x+4) {
         handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_CURSOR,.index=at});
@@ -1158,17 +1166,18 @@ static void begin_order_range(int x,int y) {
         edit.order.position=at;
         edit.order.pattern=!tracker.song.order_active[at];
         if(!emit_edit(&edit))tt_tracker_message(edit_message);
-        return;
+        return 0;
     }
     if(tracker.play_mode!=PLAY_SONG) {
         handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_CURSOR,.index=at});
         order_panel_selected(tracker.order_list,NULL);
-        return;
+        return 0;
     }
     handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_ORDER});
     leave_follow();
-    if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return;
+    if(!handle_ui_event((TtUiEvent){TT_UI_SELECT_ORDER,at}))return 0;
     send_play_range(at,at,1);
+    return tracker.order_range_active;
 }
 static void drag_order_range(int x,int y) {
     if(!tracker.order_range_active || tracker.app.modal || !tracker.order_list)return;
@@ -5526,8 +5535,6 @@ static int begin_touch_selection(int x,int y) {
        y<r.y+3 || y>=r.y+r.h)return 0;
     int global=tracker.phrase_scroll+y-r.y-3;
     if(global>=grid_total_rows() ||
-       ((tracker.selecting || tracker.visual_selecting) &&
-        grid_order_for_row(global)!=tracker.edit_order) ||
        (tracker.pattern_lock && tracker.edit_order>=0 &&
         grid_order_for_row(global)!=tracker.edit_order))
         return 0;
@@ -5535,6 +5542,8 @@ static int begin_touch_selection(int x,int y) {
         handle_mouse(x,y,0);
         return 1;
     }
+    if(tracker.visual_selecting)
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
     handle_mouse(x,y,0);
     tracker.anchor_step=tracker.step;
     tracker.anchor_channel=tracker.channel;
@@ -5543,17 +5552,17 @@ static int begin_touch_selection(int x,int y) {
 }
 static void tracker_grid_pointer_down(int x,int y) {
     tracker.grid_touch_mode=0;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
     f80_pointer_gesture_begin(&tracker.grid_pointer_gesture,x,y,
                               (uint32_t)SDL_GetTicks());
-    handle_mouse(x,y,0);
 }
 static void tracker_grid_touch_down(int x,int y,int pixel_x,int pixel_y) {
     tracker.grid_touch_mode=1;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
     tracker.grid_touch_x=x;tracker.grid_touch_y=y;
     tracker.grid_touch_last_x=x;tracker.grid_touch_last_y=y;
     f80_pointer_gesture_begin(&tracker.grid_pointer_gesture,pixel_x,pixel_y,
                               (uint32_t)SDL_GetTicks());
-    handle_mouse(x,y,0);
 }
 static void tracker_grid_pointer_poll(void) {
     if(f80_pointer_gesture_tick(&tracker.grid_pointer_gesture,
@@ -5563,7 +5572,7 @@ static void tracker_grid_pointer_poll(void) {
         int y=tracker.grid_touch_mode?tracker.grid_touch_y:
                                       tracker.grid_pointer_gesture.y;
         tracker.grid_pointer_gesture.selecting=
-            begin_touch_selection(x,y);
+            handle_ui_event((TtUiEvent){TT_UI_BEGIN_POINTER_SELECTION,0,x,y});
     }
 }
 static void tracker_grid_pointer_move(int x,int y) {
@@ -5572,12 +5581,27 @@ static void tracker_grid_pointer_move(int x,int y) {
     if(tracker.grid_pointer_gesture.hold_ready &&
        !tracker.grid_pointer_gesture.selecting) {
         tracker.grid_pointer_gesture.selecting=
-            begin_touch_selection(tracker.grid_pointer_gesture.x,
-                                  tracker.grid_pointer_gesture.y);
+            handle_ui_event((TtUiEvent){TT_UI_BEGIN_POINTER_SELECTION,0,
+                tracker.grid_pointer_gesture.x,tracker.grid_pointer_gesture.y});
         if(tracker.grid_pointer_gesture.selecting)action=F80_POINTER_SELECT;
     }
     if(action==F80_POINTER_MOVE)handle_mouse(x,y,0);
     else if(action==F80_POINTER_SELECT)handle_mouse(x,y,2);
+}
+static int tracker_grid_pointer_scroll_move(int x,int y) {
+    F80PointerGesture *gesture=&tracker.grid_pointer_gesture;
+    if(!gesture->active)return 1;
+    int action=f80_pointer_gesture_move(gesture,x,y,(uint32_t)SDL_GetTicks());
+    if(gesture->hold_ready && !gesture->selecting) {
+        gesture->selecting=handle_ui_event((TtUiEvent){
+            TT_UI_BEGIN_POINTER_SELECTION,0,gesture->x,gesture->y});
+        if(gesture->selecting)action=F80_POINTER_SELECT;
+    }
+    if(gesture->selecting) {
+        if(action==F80_POINTER_SELECT)handle_mouse(x,y,2);
+        return 2;
+    }
+    return action==F80_POINTER_MOVE?1:0;
 }
 static void tracker_grid_touch_move(int x,int y,int pixel_x,int pixel_y) {
     int old_x=tracker.grid_touch_last_x;
@@ -5588,8 +5612,8 @@ static void tracker_grid_touch_move(int x,int y,int pixel_x,int pixel_y) {
     if(tracker.grid_pointer_gesture.hold_ready &&
        !tracker.grid_pointer_gesture.selecting) {
         tracker.grid_pointer_gesture.selecting=
-            begin_touch_selection(tracker.grid_touch_x,
-                                  tracker.grid_touch_y);
+            handle_ui_event((TtUiEvent){TT_UI_BEGIN_POINTER_SELECTION,0,
+                tracker.grid_touch_x,tracker.grid_touch_y});
         if(tracker.grid_pointer_gesture.selecting)action=F80_POINTER_SELECT;
     }
     if(action==F80_POINTER_MOVE) {
@@ -5607,23 +5631,20 @@ static void tracker_grid_pointer_up(void) {
     tracker.grid_touch_mode=0;
 }
 static void touch_scroll_rows(int rows) {
-    F80Rect r=tracker.phrase_canvas->rect;
-    int body=r.h-3;
-    if(tracker.app.modal || body<1 || !rows)return;
-    leave_follow();
-    int maximum=grid_total_rows()-body;
-    if(maximum<0)maximum=0;
-    tracker.phrase_scroll=clamp(tracker.phrase_scroll+rows,0,maximum);
+    if(tracker.app.modal || !tracker.phrase_canvas || rows==0)return;
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
+    handle_ui_event((TtUiEvent){TT_UI_SCROLL_GRID,rows});
 }
 static void touch_scroll_fields(int fields) {
     F80Rect r=tracker.phrase_canvas->rect;
     if(tracker.app.modal || r.w<7 || !fields)return;
-    leave_follow();
-    int maximum=pattern_max_field_scroll(r.w-6);
-    tracker.field_scroll=clamp(tracker.field_scroll+fields,0,maximum);
+    handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
+    handle_ui_event((TtUiEvent){TT_UI_SCROLL_GRID_FIELDS,fields});
     /* Keep the cursor in the visible field so painting does not snap back. */
-    int channel,field;pattern_field_at(tracker.field_scroll,&channel,&field);
-    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=channel,.b=field});
+    if(!tracker.selecting) {
+        int channel,field;pattern_field_at(tracker.field_scroll,&channel,&field);
+        handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=channel,.b=field});
+    }
     handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
 }
 static struct {
@@ -5697,11 +5718,16 @@ EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_pointer_down(int x,int y) {
 EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_pointer_move(int x,int y) {
     tracker_grid_pointer_move(x,y);
 }
+EMSCRIPTEN_KEEPALIVE int tt_tracker_grid_pointer_scroll_move(int x,int y) {
+    return tracker_grid_pointer_scroll_move(x,y);
+}
 EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_pointer_up(void) {
     tracker_grid_pointer_up();
 }
-EMSCRIPTEN_KEEPALIVE void tt_tracker_begin_touch_selection(int x,int y) {
-    begin_touch_selection(x,y);
+EMSCRIPTEN_KEEPALIVE int tt_tracker_begin_touch_selection(int x,int y) {
+    tracker.grid_pointer_gesture.selecting=handle_ui_event((TtUiEvent){
+        TT_UI_BEGIN_POINTER_SELECTION,0,x,y});
+    return tracker.grid_pointer_gesture.selecting;
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_touch_scroll(int rows) {
     touch_scroll_rows(rows);
@@ -5721,8 +5747,8 @@ EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_drag_move(int x,int y) {
 EMSCRIPTEN_KEEPALIVE void tt_tracker_scroll_drag_end(void) {
     f80_scroll_drag_end(&tracker.app);
 }
-EMSCRIPTEN_KEEPALIVE void tt_tracker_hold_order_selection(int x,int y) {
-    begin_order_range(x,y);
+EMSCRIPTEN_KEEPALIVE int tt_tracker_hold_order_selection(int x,int y) {
+    return handle_ui_event((TtUiEvent){TT_UI_BEGIN_ORDER_SELECTION,0,x,y});
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_drag_order_selection(int x,int y) {
     drag_order_range(x,y);
@@ -5781,7 +5807,7 @@ enum { NATIVE_TOUCH_GRID=1, NATIVE_TOUCH_WAVE=2,
        NATIVE_TOUCH_TABLE=3, NATIVE_TOUCH_WRAP=4, NATIVE_TOUCH_ORDER=5,
        NATIVE_TOUCH_SCROLL=6 };
 static struct {
-    int down,kind,selecting,moved,x,y,current_x,current_y,last_x,last_y;
+    int down,kind,selecting,moved,hold_started,x,y,current_x,current_y,last_x,last_y;
     Uint64 started_at;
 } native_touch;
 static int native_other_button_down;
@@ -5789,11 +5815,12 @@ static int native_ignore_followup_click;
 static void native_poll_hold(void) {
     if(native_touch.down && native_touch.kind==NATIVE_TOUCH_GRID)
         native_touch.selecting=tracker.grid_pointer_gesture.selecting;
-    if(native_touch.down && !native_touch.moved &&
+    if(native_touch.down && !native_touch.moved && !native_touch.hold_started &&
        SDL_GetTicks()-native_touch.started_at>=1000) {
+        native_touch.hold_started=1;
         if(native_touch.kind==NATIVE_TOUCH_ORDER) {
-            begin_order_range(native_touch.x,native_touch.y);
-            native_touch.selecting=tracker.order_range_active;
+            native_touch.selecting=handle_ui_event((TtUiEvent){
+                TT_UI_BEGIN_ORDER_SELECTION,0,native_touch.x,native_touch.y});
         } else if(native_touch.kind==NATIVE_TOUCH_TABLE) {
             f80_grid_mouse(&tracker.table_grid,native_touch.x,native_touch.y,0);
             f80_grid_hold(&tracker.table_grid);
@@ -5812,7 +5839,8 @@ static void native_move(int x,int y) {
     }
     if(native_touch.kind==NATIVE_TOUCH_ORDER) {
         if(native_touch.selecting)drag_order_range(x,y);
-        else if(native_touch.moved && y!=native_touch.last_y)
+        else if(!native_touch.hold_started && native_touch.moved &&
+                y!=native_touch.last_y)
             handle_ui_event((TtUiEvent){TT_UI_SCROLL_ORDER,native_touch.last_y-y});
     } else if(native_touch.kind==NATIVE_TOUCH_GRID) {
         /* In terminal mouse mode, a quick grid drag scrolls. The shared F80
@@ -5962,7 +5990,7 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
         } else native_touch.kind=0;
         if(native_touch.kind) {
             native_touch.down=1;
-            native_touch.selecting=native_touch.moved=0;
+            native_touch.selecting=native_touch.moved=native_touch.hold_started=0;
             native_touch.x=native_touch.current_x=native_touch.last_x=x;
             native_touch.y=native_touch.current_y=native_touch.last_y=y;
             native_touch.started_at=SDL_GetTicks();
@@ -5980,8 +6008,7 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
         if(native_touch.down) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
             if(native_touch.selecting || native_touch.moved)native_move(x,y);
-            else if(native_touch.kind!=NATIVE_TOUCH_GRID)
-                handle_mouse(native_touch.x,native_touch.y,0);
+            else handle_mouse(native_touch.x,native_touch.y,0);
             if(native_touch.kind==NATIVE_TOUCH_GRID)tracker_grid_pointer_up();
             if(native_touch.kind==NATIVE_TOUCH_SCROLL)
                 f80_scroll_drag_end(&tracker.app);

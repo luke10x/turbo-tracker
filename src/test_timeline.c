@@ -22,6 +22,10 @@ int main(void) {
     assert(f80_pointer_gesture_move(&pointer_gesture,4,8,300)==F80_POINTER_MOVE);
     assert(!f80_pointer_gesture_tick(&pointer_gesture,2000));
     f80_pointer_gesture_end(&pointer_gesture);
+    f80_pointer_gesture_begin(&pointer_gesture,10,10,5000);
+    assert(f80_pointer_gesture_move(&pointer_gesture,11,10,5010)==F80_POINTER_MOVE);
+    assert(!f80_pointer_gesture_tick(&pointer_gesture,7000));
+    f80_pointer_gesture_end(&pointer_gesture);
     f80_pointer_gesture_begin(&pointer_gesture,400,700,2100);
     assert(f80_pointer_gesture_move(&pointer_gesture,401,701,2600)==F80_POINTER_MOVE);
     assert(!f80_pointer_gesture_tick(&pointer_gesture,3599));
@@ -1236,12 +1240,16 @@ int main(void) {
     handle_mouse(10,19,0); /* Mouse selects a visible order without seeking playback. */
     assert(tracker.pattern_index==1 && tracker.edit_order==1 && tracker.step==0);
     assert(tracker.follow==0 && tracker.play_order==0);
-    assert(begin_touch_selection(10,19));
+    assert(handle_ui_event((TtUiEvent){TT_UI_BEGIN_POINTER_SELECTION,0,10,19}));
     tracker.selecting=0;
     tracker.phrase_scroll=32;
     handle_mouse(10,7,0); /* repeated patterns can be selected at another order */
     assert(tracker.pattern_index==0 && tracker.edit_order==2 && tracker.step==4);
     assert(tracker.phrase_scroll==32); /* Clicking another order leaves the viewport fixed. */
+    tracker.selecting=1;tracker.anchor_step=4;tracker.phrase_scroll=0;
+    assert(handle_ui_event((TtUiEvent){TT_UI_BEGIN_POINTER_SELECTION,0,10,5}));
+    assert(tracker.edit_order==0 && tracker.selecting && tracker.anchor_step==2);
+    tracker.selecting=0;
     tracker.phrase_scroll=0;
     handle_mouse(10,5,0); /* an editable cell is manual navigation */
     assert(tracker.follow==0 && tracker.step==2);
@@ -1267,12 +1275,27 @@ int main(void) {
     tracker_grid_pointer_up();
     tracker.phrase_canvas->rect=f80_rect(0,0,24,14);
     tracker.field_scroll=0;tracker.grid_touch_mode=1;
+    tracker.selecting=1;tracker.anchor_step=2;tracker.anchor_channel=1;
+    tracker.step=5;tracker.channel=1;
     tracker.grid_touch_last_x=10;tracker.grid_touch_last_y=5;
     f80_pointer_gesture_begin(&tracker.grid_pointer_gesture,10,5,SDL_GetTicks());
     tracker_grid_touch_move(9,5,9,5); /* A quick horizontal swipe scrolls fields. */
-    assert(tracker.field_scroll==1 && !tracker.grid_pointer_gesture.selecting);
+    assert(tracker.field_scroll==1 && !tracker.grid_pointer_gesture.selecting &&
+           tracker.selecting && tracker.anchor_step==2 && tracker.step==5 &&
+           tracker.anchor_channel==1 && tracker.channel==1);
     tracker_grid_pointer_up();
     tracker.grid_touch_mode=0;
+    tracker.selecting=1;tracker.anchor_step=3;tracker.anchor_channel=0;
+    tracker.step=6;tracker.channel=0;
+    tracker_grid_pointer_down(10,5);
+    assert(tracker_grid_pointer_scroll_move(11,5)==1);
+    tracker.grid_pointer_gesture.pressed_at=(uint32_t)SDL_GetTicks()-2000;
+    tracker_grid_pointer_poll(); /* Once moving, a long drag cannot arm selection. */
+    assert(tracker.grid_pointer_gesture.moved &&
+           !tracker.grid_pointer_gesture.selecting && tracker.selecting &&
+           tracker.anchor_step==3 && tracker.step==6);
+    tracker_grid_pointer_up();
+    tracker.selecting=0;
     handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER,.index=0});
     tracker.pattern_lock=1;tracker.step=3;tracker.phrase_scroll=0;
     tracker.anchor_step=1;tracker.anchor_channel=tracker.channel;

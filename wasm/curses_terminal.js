@@ -176,18 +176,22 @@ function moveTouch(start, x, y, clientX = start.lastClientX,
           ['number'], [start.lastX - x]);
     }
   } else if (start.target === 'order') {
-    if (start.holdStarted)
-      Module.ccall('tt_tracker_drag_order_selection', null,
-        ['number', 'number'], [x, y]);
-    else if (y !== start.lastY)
+    if (start.holdStarted) {
+      if (start.selectionStarted)
+        Module.ccall('tt_tracker_drag_order_selection', null,
+          ['number', 'number'], [x, y]);
+    } else if (y !== start.lastY)
       Module.ccall('tt_tracker_scroll_order', null,
         ['number'], [start.lastY - y]);
   } else if (start.target === 'grid') {
-    if (start.pointerType === 'touch') {
-      if (start.holdStarted)
-        Module.ccall('tt_tracker_drag_selection', null,
-          ['number', 'number'], [x, y]);
-      else {
+    if (!start.holdStarted) {
+      // A quick drag scrolls the grid on both touch and desktop pointers;
+      // holding first arms the existing range-selection behavior.
+      let desktopMode = 1;
+      if (start.pointerType !== 'touch')
+        desktopMode = Module.ccall('tt_tracker_grid_pointer_scroll_move',
+          'number', ['number', 'number'], [x, y]);
+      if (desktopMode === 1) {
         if (y !== start.lastY)
           Module.ccall('tt_tracker_touch_scroll', null,
             ['number'], [start.lastY - y]);
@@ -195,7 +199,10 @@ function moveTouch(start, x, y, clientX = start.lastClientX,
           Module.ccall('tt_tracker_touch_scroll_fields', null,
             ['number'], [start.lastX - x]);
       }
-    } else Module.ccall('tt_tracker_grid_pointer_move', null,
+    } else if (start.selectionStarted && start.pointerType === 'touch') {
+        Module.ccall('tt_tracker_drag_selection', null,
+          ['number', 'number'], [x, y]);
+    } else if (start.selectionStarted) Module.ccall('tt_tracker_grid_pointer_move', null,
       ['number', 'number'], [x, y]);
   } else if (start.target === 'scrollable') {
     Module.ccall('tt_tracker_scroll_drag_move', null,
@@ -222,7 +229,7 @@ function beginContact(id, x, y, pointerType = 'touch', clientX = x, clientY = y)
   if (!target && sample && sampleWaveAt(x, y)) target = 'wave';
   const start = { x, y, currentX: x, currentY: y,
     lastX: x, lastY: y, tapMoved: false, swiping: false,
-    holdStarted: false, pointerType, clientX, clientY,
+    holdStarted: false, selectionStarted: false, pointerType, clientX, clientY,
     lastClientX: clientX, lastClientY: clientY, target };
   activeContacts.set(id, start);
   if (target === 'grid' && pointerType !== 'touch')
@@ -247,16 +254,19 @@ function beginContact(id, x, y, pointerType = 'touch', clientX = x, clientY = y)
         Module.ccall('example_grid_hold', null,
           ['number', 'number'], [start.currentX, start.currentY]);
       else if (target === 'order') {
-        Module.ccall('tt_tracker_hold_order_selection', null,
+        start.selectionStarted = !!Module.ccall('tt_tracker_hold_order_selection',
+          'number',
           ['number', 'number'], [start.currentX, start.currentY]);
         start.focusStarted = true;
       }
       else if (target === 'grid')
-        Module.ccall('tt_tracker_begin_touch_selection', null,
+        start.selectionStarted = !!Module.ccall('tt_tracker_begin_touch_selection',
+          'number',
           ['number', 'number'], [start.currentX, start.currentY]);
       else if (target === 'table') {
         Module.ccall('tt_tracker_hold_table_selection', null,
           ['number', 'number'], [start.currentX, start.currentY]);
+        start.selectionStarted = true;
         start.focusStarted = true;
       }
       start.lastX = start.currentX;
@@ -306,9 +316,13 @@ function endContact(id, x, y, cancelled, clientX, clientY) {
   if (start.target === 'grid') {
     if (start.pointerType !== 'touch' && (start.swiping || start.tapMoved))
       moveTouch(start, x, y, clientX, clientY);
-    if (start.pointerType !== 'touch')
+    if (start.pointerType !== 'touch') {
+      if (!start.tapMoved && !start.holdStarted) {
+        call('curses_push_mouse', [x, y, 0]);
+        call('tt_tracker_flush_input', []);
+      }
       Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
-    else if (start.holdStarted)
+    } else if (start.holdStarted)
       Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
     else if (!start.tapMoved) {
       call('curses_push_mouse', [x, y, 0]);
@@ -393,12 +407,19 @@ if (!pointerGestures) for (const type of ['touchstart', 'touchmove', 'touchend',
     event.preventDefault();
   }, { passive: false });
 }
+let lastWheelStepAt = -Infinity;
+let lastWheelDirection = 0;
 term.element.addEventListener('wheel', event => {
   const rows = Math.sign(event.deltaY);
-  if (rows) {
+  const now = performance.now();
+  // Browsers can emit a burst of accelerated pixel-wheel events. Keep the
+  // tracker discrete and cap repeated steps, while allowing reversals now.
+  if (rows && (rows !== lastWheelDirection || now - lastWheelStepAt >= 60)) {
     call('curses_push_mouse', [...cell(event), rows]);
     if (ready && window.f80ApplicationId === 'turbo-tracker')
       Module.ccall('tt_tracker_flush_input', null, [], []);
+    lastWheelStepAt = now;
+    lastWheelDirection = rows;
   }
   event.preventDefault();
 }, { passive: false });
