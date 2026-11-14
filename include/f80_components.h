@@ -2,6 +2,7 @@
 #define F80_COMPONENTS_H
 
 #include "f80.h"
+#include <stdint.h>
 
 enum { F80_GRID_MAX_FIELDS=32 };
 enum { F80_GRID_KEY_IGNORED=0, F80_GRID_KEY_HANDLED=1,
@@ -19,6 +20,22 @@ typedef struct {
     int show_h,show_v;
     int selecting,anchor_row,anchor_field,focused,edit_enabled,editing,blink_on;
 } F80Grid;
+
+/* Shared press/drag recognition for grid-like controls. A quick drag moves
+   the cursor; a one-second stationary press arms selection. */
+typedef struct {
+    int active,hold_ready,selecting,moved;
+    int x,y,last_x,last_y;
+    uint32_t pressed_at;
+} F80PointerGesture;
+enum { F80_POINTER_IDLE, F80_POINTER_MOVE, F80_POINTER_HOLD,
+       F80_POINTER_SELECT };
+void f80_pointer_gesture_begin(F80PointerGesture *gesture,int x,int y,
+                               uint32_t now);
+int f80_pointer_gesture_tick(F80PointerGesture *gesture,uint32_t now);
+int f80_pointer_gesture_move(F80PointerGesture *gesture,int x,int y,
+                             uint32_t now);
+void f80_pointer_gesture_end(F80PointerGesture *gesture);
 
 void f80_grid_init(F80Grid *grid,int rows,int fields,const int *width,
                    const char *const *heading);

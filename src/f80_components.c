@@ -6,6 +6,32 @@ enum { GRID_GUTTER_WIDTH=4 };
 static int bound(int value,int low,int high) {
     return value<low?low:value>high?high:value;
 }
+void f80_pointer_gesture_begin(F80PointerGesture *gesture,int x,int y,
+                               uint32_t now) {
+    if(!gesture)return;
+    *gesture=(F80PointerGesture){.active=1,.x=x,.y=y,.last_x=x,.last_y=y,
+                                 .pressed_at=now};
+}
+int f80_pointer_gesture_tick(F80PointerGesture *gesture,uint32_t now) {
+    if(!gesture || !gesture->active || gesture->moved || gesture->hold_ready ||
+       (uint32_t)(now-gesture->pressed_at)<1000)return 0;
+    gesture->hold_ready=1;
+    return 1;
+}
+int f80_pointer_gesture_move(F80PointerGesture *gesture,int x,int y,
+                             uint32_t now) {
+    if(!gesture || !gesture->active)return F80_POINTER_IDLE;
+    f80_pointer_gesture_tick(gesture,now);
+    int moved=x!=gesture->x || y!=gesture->y;
+    if(moved)gesture->moved=1;
+    gesture->last_x=x;gesture->last_y=y;
+    if(gesture->selecting && moved)return F80_POINTER_SELECT;
+    if(gesture->hold_ready)return F80_POINTER_HOLD;
+    return moved?F80_POINTER_MOVE:F80_POINTER_IDLE;
+}
+void f80_pointer_gesture_end(F80PointerGesture *gesture) {
+    if(gesture)memset(gesture,0,sizeof(*gesture));
+}
 static int grid_gutter_width(const F80Grid *g) {
     return g->gutter_width>0?g->gutter_width:GRID_GUTTER_WIDTH;
 }
@@ -258,7 +284,7 @@ void f80_grid_draw(F80Grid *g,F80GridText text,void *user) {
     int max_x=grid_max_x(g),data_x=r.x+grid_gutter_width(g);
     int data_width=grid_body_width(g),track=data_width-2;
     if(g->show_h) {
-    f80_put(r.y+r.h-1,data_x,"◄",1,10,1);
+    f80_put(r.y+r.h-1,data_x,"◀",1,10,1);
     if(track>0) {
         int thumb=max_x?track*grid_body_width(g)/f80_grid_content_width(g):track;
         if(thumb<1)thumb=1;
@@ -266,7 +292,7 @@ void f80_grid_draw(F80Grid *g,F80GridText text,void *user) {
         for(int i=0;i<track;++i)
             f80_put(r.y+r.h-1,data_x+1+i,i>=at && i<at+thumb?"█":"▒",1,10,0);
     }
-    f80_put(r.y+r.h-1,data_x+data_width-1,"►",1,10,1);
+    f80_put(r.y+r.h-1,data_x+data_width-1,"▶",1,10,1);
     }
     int max_y=grid_max_y(g),vertical=r.h-g->show_h-2;
     if(g->show_v) {

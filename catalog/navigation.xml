@@ -50,9 +50,11 @@
           source="./examples/ztm/README.md" />
   </node>
   <node title="Examples">
-    <node title="Chord voicings" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.song&amp;init_play=1"
+    <node title="Chord voicings (>04)" href="./app.html?init_song=%2Fexamples%2Fchord-voicings%2Fchord-voicings.song&amp;init_play=1"
           source="./examples/chord-voicings/README.md" />
     <node title="DX7 chord progression" href="./app.html?init_song=%2Fexamples%2Fsynth-chord-progression%2Fsynth-chord-progression.song&amp;init_play=1"
           source="./examples/synth-chord-progression/README.md" />
+    <node title="Same-channel note steps (+01)" href="./app.html?init_song=%2Fexamples%2Frelative-note-steps%2Frelative-note-steps.song&amp;init_play=1"
+          source="./examples/relative-note-steps/README.md" />
   </node>
 </root>

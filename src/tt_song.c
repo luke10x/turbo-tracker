@@ -468,7 +468,7 @@ int tt_song_load(const char *path,TtSong *song,
                     &next->table[table].tick[tick]:&parsed;
                 if(!READ(10) || strcmp(field[0],"TICK") ||
                    !integer(field[1],tick,tick,&number) ||
-                   !integer(field[2],TT_NOTE_REL_MINUS_BASE-TT_NOTE_RELATIVE_MAX,
+                   !integer(field[2],TT_NOTE_REL_LEFT_MINUS_BASE-TT_NOTE_RELATIVE_MAX,
                             127,&entry->note) ||
                    !integer(field[3],-1,255,&entry->instrument)) { valid=0;break; }
                 for(int effect=0;effect<TT_TABLE_EFFECTS;++effect) {

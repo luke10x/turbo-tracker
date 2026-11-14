@@ -72,6 +72,40 @@ static int apply_pattern_new(TtEditDoc *doc) {
     snprintf(song->name[index],TT_SONG_NAME,"Pattern %02X",index);
     return 1;
 }
+static int apply_pattern_delete(TtEditDoc *doc,const TtEditPattern *e) {
+    TtSong *song=doc->song;
+    int index=e->index;
+    if(index<0 || index>=song->pattern_count) {
+        reject(doc,"Pattern out of range");return 0;
+    }
+    if(song->pattern_count<=1) {
+        reject(doc,"Keep at least one pattern");return 0;
+    }
+    for(int i=0;i<song->order_count;++i)if(song->order[i]==index) {
+        reject(doc,"Unlink this pattern from all orders first");return 0;
+    }
+    if(doc->active_index && *doc->active_index>=0 &&
+       *doc->active_index<song->pattern_count)
+        song->pattern[*doc->active_index]=*doc->active;
+    memmove(&song->pattern[index],&song->pattern[index+1],
+            (size_t)(song->pattern_count-index-1)*sizeof(song->pattern[0]));
+    memmove(&song->name[index],&song->name[index+1],
+            (size_t)(song->pattern_count-index-1)*sizeof(song->name[0]));
+    --song->pattern_count;
+    for(int i=0;i<song->order_count;++i)
+        if(song->order[i]>index)--song->order[i];
+    memset(&song->pattern[song->pattern_count],0,sizeof(song->pattern[0]));
+    memset(song->name[song->pattern_count],0,sizeof(song->name[0]));
+    if(doc->active_index) {
+        int active=*doc->active_index;
+        if(active==index) {
+            active=index<song->pattern_count?index:song->pattern_count-1;
+            *doc->active=song->pattern[active];
+        } else if(active>index) --active;
+        *doc->active_index=active;
+    }
+    return 1;
+}
 static int apply_pattern_append_order(TtEditDoc *doc) {
     if(doc->song->pattern_count>=TT_SONG_PATTERNS) {
         reject(doc,"Pattern bank is full");return 0;
@@ -551,6 +585,8 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_cells_bulk(doc,&event->cells);
     case TT_EDIT_PATTERN_NEW:
         return apply_pattern_new(doc);
+    case TT_EDIT_PATTERN_DELETE:
+        return apply_pattern_delete(doc,&event->pattern);
     case TT_EDIT_PATTERN_APPEND_ORDER:
         return apply_pattern_append_order(doc);
     case TT_EDIT_PATTERN_RENAME:

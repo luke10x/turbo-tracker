@@ -76,6 +76,8 @@ static void play_stop_now(F80Widget *button,void *user) {
     tracker.song_finished=tracker.frames_to_tick=0;
     tracker.playback_bpm=tracker.song.bpm;
     tracker.playback_ticks_per_row=tracker.song.ticks_per_row;
+    for(int channel=0;channel<TT_CHANNELS;++channel)
+        tracker.previous_note[channel]=-1;
     memset(tracker.effect_registers,0,sizeof(tracker.effect_registers));
     tracker.pending_flow=0;
     tracker.display_head=tracker.display_tail=0;
@@ -199,11 +201,15 @@ void tt_play_play_row(int row) {
     int row_note[TT_CHANNELS];
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         const TtCell *cell=&pattern->cell[row][channel];
-        int note_root=channel>0?row_note[channel-1]:-1;
+        int left_note=channel>0?row_note[channel-1]:-1;
         TtCell resolved_cell=*cell;
-        if(tt_note_is_relative(resolved_cell.note))
-            resolved_cell.note=resolve_relative_note(resolved_cell.note,note_root);
+        if(tt_note_is_relative(resolved_cell.note)) {
+            int root=tt_note_is_left_relative(resolved_cell.note)?left_note:
+                     tracker.previous_note[channel];
+            resolved_cell.note=resolve_relative_note(resolved_cell.note,root);
+        }
         row_note[channel]=resolved_cell.note>=0?resolved_cell.note:-1;
+        if(resolved_cell.note>=0)tracker.previous_note[channel]=resolved_cell.note;
         int glide=0,udl=-1,table_started=0;
         TtCell sample=resolved_cell;
         for(int slot=0;slot<3;++slot) {
@@ -225,7 +231,7 @@ void tt_play_play_row(int row) {
             } else if(fx->command==TT_EFFECT_T && fx->value>=0 && fx->value<TT_SONG_TABLES) {
                 TableVoice *voice=&tracker.table_voice[channel];
                 voice->active=1;voice->table=fx->value;voice->tick=0;
-                voice->root_note=resolved_cell.note>=0?resolved_cell.note:note_root;
+                voice->root_note=resolved_cell.note>=0?resolved_cell.note:left_note;
                 voice->next_table=-1;voice->pending=0;
                 voice->table_loop_active=voice->table_loop_broken=0;
                 tt_audio_cancel_delayed(channel);

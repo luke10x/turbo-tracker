@@ -10,19 +10,32 @@ enum { TT_MARKERS=16, TT_SLICES=15, TT_STEPS=16,
 enum { TT_SLICE_INHERIT=-1000 };
 enum { TT_PATTERN_EFFECTS=3 };
 enum { TT_NOTE_OFF=-2, TT_NOTE_REL_PLUS_BASE=-3,
-       TT_NOTE_REL_MINUS_BASE=-19, TT_NOTE_RELATIVE_MAX=15 };
+       TT_NOTE_REL_MINUS_BASE=-19, TT_NOTE_REL_LEFT_PLUS_BASE=-35,
+       TT_NOTE_REL_LEFT_MINUS_BASE=-51, TT_NOTE_RELATIVE_MAX=15 };
 static inline int tt_note_is_relative(int note) {
     return (note<=TT_NOTE_REL_PLUS_BASE && note>TT_NOTE_REL_PLUS_BASE-TT_NOTE_RELATIVE_MAX-1) ||
-           (note<=TT_NOTE_REL_MINUS_BASE && note>TT_NOTE_REL_MINUS_BASE-TT_NOTE_RELATIVE_MAX-1);
+           (note<=TT_NOTE_REL_MINUS_BASE && note>TT_NOTE_REL_MINUS_BASE-TT_NOTE_RELATIVE_MAX-1) ||
+           (note<=TT_NOTE_REL_LEFT_PLUS_BASE && note>TT_NOTE_REL_LEFT_PLUS_BASE-TT_NOTE_RELATIVE_MAX-1) ||
+           (note<=TT_NOTE_REL_LEFT_MINUS_BASE && note>TT_NOTE_REL_LEFT_MINUS_BASE-TT_NOTE_RELATIVE_MAX-1);
+}
+static inline int tt_note_is_left_relative(int note) {
+    return (note<=TT_NOTE_REL_LEFT_PLUS_BASE && note>TT_NOTE_REL_LEFT_PLUS_BASE-TT_NOTE_RELATIVE_MAX-1) ||
+           (note<=TT_NOTE_REL_LEFT_MINUS_BASE && note>TT_NOTE_REL_LEFT_MINUS_BASE-TT_NOTE_RELATIVE_MAX-1);
 }
 static inline int tt_note_relative(int positive,int semitones) {
     return (positive?TT_NOTE_REL_PLUS_BASE:TT_NOTE_REL_MINUS_BASE)-semitones;
 }
+static inline int tt_note_left_relative(int semitones) {
+    return TT_NOTE_REL_LEFT_PLUS_BASE-semitones;
+}
 static inline int tt_note_relative_amount(int note) {
+    if(note<=TT_NOTE_REL_LEFT_MINUS_BASE)return TT_NOTE_REL_LEFT_MINUS_BASE-note;
+    if(note<=TT_NOTE_REL_LEFT_PLUS_BASE)return TT_NOTE_REL_LEFT_PLUS_BASE-note;
     return note<=TT_NOTE_REL_MINUS_BASE?TT_NOTE_REL_MINUS_BASE-note:
-                                         TT_NOTE_REL_PLUS_BASE-note;
+                                        TT_NOTE_REL_PLUS_BASE-note;
 }
 static inline int tt_note_relative_positive(int note) {
+    if(tt_note_is_left_relative(note))return note>TT_NOTE_REL_LEFT_MINUS_BASE;
     return note>TT_NOTE_REL_MINUS_BASE;
 }
 enum { TT_EFFECT_NONE=0, TT_EFFECT_G='G', TT_EFFECT_I='I',

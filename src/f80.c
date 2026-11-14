@@ -22,6 +22,7 @@ EM_JS(void, f80_web_add_input, (int x, int y, int width, int height), {
 
 static int limit(int value, int lo, int hi) { return value < lo ? lo : value > hi ? hi : value; }
 static int hot_label(const char *source,char *out,int cap,int *hot);
+static F80Widget *focused_panel(F80App *app);
 static const F80Widget *paint_widget;
 #ifndef __EMSCRIPTEN__
 typedef struct { int x,y,pair; unsigned code; } F80RawGlyph;
@@ -88,6 +89,19 @@ int f80_palette_pair(const F80Widget *widget,int slot) {
         if(w->window_role!=F80_WINDOW_INHERIT) { role=w->window_role; break; }
     }
     if(role<=F80_WINDOW_INHERIT || role>=F80_WINDOW_ROLE_COUNT)role=F80_WINDOW_BLUE;
+    if(slot==F80_COLOR_FRAME_ACTIVE || slot==F80_COLOR_FRAME_INACTIVE) {
+        int selected=slot==F80_COLOR_FRAME_ACTIVE;
+        if(widget && widget->style==15)return selected?82:83;
+        if(widget && widget->style==7)return selected?76:77;
+        switch(role) {
+        case F80_WINDOW_BLUE:return selected?72:73;
+        case F80_WINDOW_CYAN:return selected?74:75;
+        case F80_WINDOW_GRAY:return selected?76:77;
+        case F80_WINDOW_CONSOLE:return selected?78:79;
+        case F80_WINDOW_PURPLE:return selected?80:81;
+        default:return selected?72:73;
+        }
+    }
     if(widget && widget->app && widget->app->palettes[role].pair[slot])
         return widget->app->palettes[role].pair[slot];
     /* The floating-window shadow is solid; button half-blocks use the
@@ -152,6 +166,10 @@ F80Widget *f80_listbox(const char **items, int count, F80Action action, void *us
     F80Widget *w = f80_widget(F80_LISTBOX);
     if (w) { w->items = items; w->item_count = count; w->action = action; w->user = user; w->focusable = 1; w->window_role=F80_WINDOW_CYAN; }
     return w;
+}
+void f80_listbox_preserve_window_colors_when_unfocused(F80Widget *w,int enabled) {
+    if(w && w->kind==F80_LISTBOX)
+        w->preserve_window_colors_when_unfocused=!!enabled;
 }
 F80Widget *f80_radio_group(const char **items,int count,int selected,F80Action action,void *user) {
     F80Widget *w=f80_widget(F80_RADIO_GROUP);
@@ -527,6 +545,34 @@ void f80_colors(void) {
     init_pair(F80_PAIR_LIST_INACTIVE_SELECTED,COLORS>8?8:COLOR_WHITE,
               COLOR_WHITE);
 #endif
+    /* Pane frames remain legible against each window's own background. */
+#ifdef __EMSCRIPTEN__
+    short bright_white=15;
+    init_pair(73,COLOR_CYAN,COLOR_BLUE); /* inactive blue */
+#else
+    short bright_white=COLORS>15?15:COLOR_WHITE;
+    init_pair(73,COLORS>7?7:COLOR_CYAN,COLOR_BLUE); /* inactive blue */
+#endif
+    init_pair(72,bright_white,COLOR_BLUE); /* active blue */
+    init_pair(74,bright_white,COLOR_CYAN); /* active cyan */
+    init_pair(75,COLOR_WHITE,COLOR_CYAN); /* inactive cyan */
+    init_pair(76,bright_white,COLOR_WHITE); /* active gray */
+#ifdef __EMSCRIPTEN__
+    init_pair(77,8,COLOR_WHITE); /* inactive gray */
+    init_pair(79,COLOR_CYAN,COLOR_BLACK); /* inactive black */
+    init_pair(83,COLOR_WHITE,COLOR_RED); /* inactive light red */
+#else
+    init_pair(77,COLORS>8?8:COLOR_CYAN,COLOR_WHITE); /* inactive gray */
+    init_pair(78,bright_white,COLOR_BLACK); /* active black */
+    init_pair(79,COLORS>8?8:COLOR_CYAN,COLOR_BLACK); /* inactive black */
+#endif
+    init_pair(78,COLOR_WHITE,COLOR_BLACK); /* active black */
+    init_pair(80,bright_white,COLOR_MAGENTA); /* active purple */
+    init_pair(81,COLOR_RED,COLOR_MAGENTA); /* inactive purple */
+    init_pair(82,bright_white,COLOR_RED); /* active red */
+#ifndef __EMSCRIPTEN__
+    init_pair(83,COLORS>9?9:COLOR_WHITE,COLOR_RED); /* inactive light red */
+#endif
 }
 void f80_put(int y, int x, const char *text, int width, int pair, int bold) {
     if(!text || width<=0 || y<0 || x<0)return;
@@ -812,7 +858,9 @@ static void draw_status(F80Widget *w) {
     }
 }
 
-static int has_focus(F80Widget *w) { if(!w)return 0; if(w->app && w->app->focus==w)return 1; for(size_t i=0;i<w->child_count;++i)if(has_focus(w->children[i]))return 1; return 0; }
+static int has_focus(F80Widget *w) {
+    return w && w->frame && w->app && focused_panel(w->app)==w;
+}
 static void draw_bars(F80Widget *w) {
     static const int defaults[]={310,180,95,140,60,120};
     static const int pairs[]={4,8,9,10,20,2};
@@ -1031,9 +1079,9 @@ static void draw_table_grid(F80Widget *w) {
             if(gn>0)f80_put(r.y,r.x+x+(span-gn)/2,group_title,gn,4,1);
         }
     }
-    if(w->table_col_scroll>0)f80_put(r.y+header-1,r.x,"◄",1,8,1);
+    if(w->table_col_scroll>0)f80_put(r.y+header-1,r.x,"◀",1,8,1);
     if(w->table_visible_count && w->table_visible_index[w->table_visible_count-1]<w->table_col_count-1)
-        f80_put(r.y+header-1,r.x+width-1,"►",1,8,1);
+        f80_put(r.y+header-1,r.x+width-1,"▶",1,8,1);
     if(w->cursor<w->scroll)w->scroll=w->cursor;
     if(w->cursor>=w->scroll+body)w->scroll=w->cursor-body+1;
     for(int i=0;i<body && w->scroll+i<w->item_count;++i) {
@@ -1073,6 +1121,8 @@ int f80_listbox_row_pair(const F80Widget *w,int row) {
     if(ranged)return 65;
     if(w && w->kind==F80_LISTBOX) {
         int focused=w->app && w->app->focus==w;
+        if(!focused && w->preserve_window_colors_when_unfocused)
+            return row==w->cursor?F80_COLOR_HIGHLIGHT:F80_COLOR_TEXT;
         if(row==w->cursor)
             return focused?F80_PAIR_LIST_SELECTED:F80_PAIR_LIST_INACTIVE_SELECTED;
         if(!focused)return F80_PAIR_LIST_INACTIVE;
@@ -1091,7 +1141,8 @@ void f80_draw(F80Widget *w) {
         if(w->fill || w->frame)f80_fill(r,w->style==15?15:w->style==7?7:1);
         if(w->frame) {
             int active=has_focus(w);
-            f80_frame(r,w->title,w->style==15?15:w->style==7?7:active?2:1);
+            f80_frame(r,w->title,active?F80_COLOR_FRAME_ACTIVE:
+                                      F80_COLOR_FRAME_INACTIVE);
             if(w->title && w->style!=15 && w->style!=7 && r.w>6) {
                 int len=(int)strlen(w->title); if(len>r.w-6)len=r.w-6;
                 int title_pair=w->title_style?w->title_style:active?4:2;
@@ -1159,9 +1210,9 @@ void f80_draw(F80Widget *w) {
                 f80_put(r.y,r.x,ascii_offset(w->table_group_header,w->table_hscroll),width,4,1);
                 f80_put(r.y+1,r.x,ascii_offset(w->title,w->table_hscroll),width,10,1);
             } else f80_put(r.y,r.x,ascii_offset(w->title,w->table_hscroll),width,4,1);
-            if(w->table_hscroll>0)f80_put(r.y+header-1,r.x,"◄",1,8,1);
+            if(w->table_hscroll>0)f80_put(r.y+header-1,r.x,"◀",1,8,1);
             if(w->table_col_count && w->table_starts[w->table_col_count-1]+12>w->table_hscroll+width)
-                f80_put(r.y+header-1,r.x+width-1,"►",1,8,1);
+                f80_put(r.y+header-1,r.x+width-1,"▶",1,8,1);
         }
         if(!w->scroll_detached) {
             if(w->cursor<w->scroll)w->scroll=w->cursor;
@@ -1312,10 +1363,142 @@ static void collect(F80Widget *w, F80Widget **out, int *count, int cap) {
     if(w->focusable && *count<cap)out[(*count)++]=w;
     for(size_t i=0;i<w->child_count;++i)collect(w->children[i],out,count,cap);
 }
+static void collect_panel_focusables(F80Widget *w,F80Widget *panel,
+                                     F80Widget **out,int *count,int cap) {
+    if(!w || !w->visible || !w->enabled)return;
+    if(w!=panel && w->frame)return;
+    if(w->focusable && *count<cap)out[(*count)++]=w;
+    for(size_t i=0;i<w->child_count;++i)
+        collect_panel_focusables(w->children[i],panel,out,count,cap);
+}
+static F80Widget *focus_scope(F80App *app) {
+    F80Widget *scope=app->modal?app->modal:app->root;
+    F80Widget *panel=focused_panel(app);
+    if(panel)scope=panel;
+    return scope;
+}
 void f80_focus_next(F80App *app, int step) {
-    F80Widget *items[256]; int n=0; collect(app->modal?app->modal:app->root,items,&n,256); if(!n)return;
+    F80Widget *scope=focus_scope(app);
+    F80Widget *items[256]; int n=0;
+    int pane_scope=scope!=app->root && scope!=app->modal;
+    if(pane_scope)collect_panel_focusables(scope,scope,items,&n,256);
+    else collect(scope,items,&n,256);
+    if(!n)return;
     int i=-1; for(int j=0;j<n;++j)if(items[j]==app->focus)i=j;
     app->focus=items[(i+step+n)%n];
+}
+static void collect_panels(F80Widget *w,F80Widget **out,int *count,int cap) {
+    if(!w || !w->visible || !w->enabled)return;
+    if(w->frame && w->rect.w>0 && w->rect.h>0 && *count<cap) {
+        F80Widget *items[256];int n=0;collect(w,items,&n,256);
+        if(n)out[(*count)++]=w;
+    }
+    for(size_t i=0;i<w->child_count;++i)collect_panels(w->children[i],out,count,cap);
+}
+static void find_focused_panel(F80Widget *w,F80Widget *focus,
+                               F80Widget **best,long long *best_area) {
+    if(!w || !w->visible || !w->enabled)return;
+    if(w->frame && w->rect.w>0 && w->rect.h>0 && focus) {
+        int x=focus->rect.x+focus->rect.w/2;
+        int y=focus->rect.y+focus->rect.h/2;
+        if(f80_contains(w->rect,x,y)) {
+            long long area=(long long)w->rect.w*w->rect.h;
+            if(!*best || area<*best_area) { *best=w;*best_area=area; }
+        }
+    }
+    for(size_t i=0;i<w->child_count;++i)
+        find_focused_panel(w->children[i],focus,best,best_area);
+}
+static F80Widget *focused_panel(F80App *app) {
+    if(!app || !app->focus)return NULL;
+    F80Widget *scope=app->modal?app->modal:app->root,*best=NULL;
+    /* Pane ownership follows the widget tree. Geometry is a fallback for
+       focusables that are laid out outside their framed container. */
+    for(F80Widget *at=app->focus;at && at!=scope;at=at->parent)
+        if(at->frame && at->visible && at->enabled)return at;
+    long long area=0;
+    find_focused_panel(scope,app->focus,&best,&area);
+    return best;
+}
+F80Widget *f80_focused_panel(F80App *app) { return focused_panel(app); }
+static void sort_panels_by_layout(F80Widget **panels,int count) {
+    for(int i=1;i<count;++i) {
+        F80Widget *panel=panels[i];int j=i;
+        while(j>0) {
+            F80Rect a=panels[j-1]->rect,b=panel->rect;
+            int after=a.y>b.y || (a.y==b.y && a.x>b.x);
+            if(!after)break;
+            panels[j]=panels[j-1];--j;
+        }
+        panels[j]=panel;
+    }
+}
+static int focus_nearest_in_panel(F80App *app,F80Widget *panel,int x,int y) {
+    F80Widget *items[256];int n=0;
+    collect_panel_focusables(panel,panel,items,&n,256);
+    if(!n)return 0;
+    int chosen=0;long long distance=-1;
+    for(int i=0;i<n;++i) {
+        int ix=items[i]->rect.x+items[i]->rect.w/2;
+        int iy=items[i]->rect.y+items[i]->rect.h/2;
+        long long d=(long long)(ix-x)*(ix-x)+(long long)(iy-y)*(iy-y);
+        if(distance<0 || d<distance) { chosen=i;distance=d; }
+    }
+    app->focus=items[chosen];return 1;
+}
+static int focus_direction(F80App *app,int dx,int dy) {
+    F80Widget *scope=focus_scope(app),*items[256];int n=0,current=-1;
+    collect_panel_focusables(scope,scope,items,&n,256);
+    for(int i=0;i<n;++i)if(items[i]==app->focus)current=i;
+    if(current<0)return 0;
+    F80Rect r=items[current]->rect;
+    int cx=r.x+r.w/2,cy=r.y+r.h/2,best=-1;
+    long long best_score=0;
+    for(int i=0;i<n;++i)if(i!=current) {
+        F80Rect q=items[i]->rect;
+        int ox=q.x+q.w/2-cx,oy=q.y+q.h/2-cy;
+        int primary=dx?ox:oy,cross=dx?oy:ox;
+        if((dx && dx*primary<=0) || (dy && dy*primary<=0))continue;
+        long long score=(long long)primary*primary+
+                        4LL*cross*cross;
+        if(best<0 || score<best_score) { best=i;best_score=score; }
+    }
+    if(best<0)return 0;
+    app->focus=items[best];return 1;
+}
+static int focus_captive(const F80Widget *widget) {
+    if(!widget)return 0;
+    return widget->kind==F80_INPUT || widget->kind==F80_LISTBOX ||
+           widget->kind==F80_TABLE || widget->kind==F80_RADIO_GROUP ||
+           widget->kind==F80_CHECK_GROUP;
+}
+static int focus_peer_count(F80App *app) {
+    F80Widget *scope=focus_scope(app),*items[256];int n=0;
+    collect_panel_focusables(scope,scope,items,&n,256);return n;
+}
+int f80_focus_panel_next(F80App *app,int step) {
+    if(!app || !step)return 0;
+    F80Widget *scope=app->modal?app->modal:app->root;
+    F80Widget *panels[128];int n=0;collect_panels(scope,panels,&n,128);
+    if(n<2)return 0;
+    sort_panels_by_layout(panels,n);
+    F80Widget *current=focused_panel(app);int i=-1;
+    if(!current)current=scope;
+    for(int at=0;at<n;++at)if(panels[at]==current)i=at;
+    if(i<0)i=step>0?-1:0;
+    int next=(i+step+n)%n;int x=current->rect.x+current->rect.w/2;
+    int y=current->rect.y+current->rect.h/2;
+    return focus_nearest_in_panel(app,panels[next],x,y);
+}
+int f80_focus_visible(const F80App *app) {
+    if(!app || !app->focus)return 0;
+    const F80Widget *scope=app->modal?app->modal:app->root;
+    int visible=1,inside=0;
+    for(const F80Widget *at=app->focus;at;at=at->parent) {
+        if(!at->visible || !at->enabled)visible=0;
+        if(at==scope) { inside=1;break; }
+    }
+    return visible && inside;
 }
 static int form_activate(F80Widget *w,int index) {
     if(index<0 || index>=w->item_count)return 0;
@@ -1332,6 +1515,8 @@ static int widget_key(F80Widget *w, int key) {
     if(w->kind==F80_BUTTON && (key==10 || key==13 || key==' ')) { if(w->app)w->pressed_until=w->app->tick+2; if(w->action)w->action(w,w->user); return 1; }
     if(w->kind==F80_RADIO_GROUP || w->kind==F80_CHECK_GROUP) {
         if(!w->item_count)return 0;
+        if(w->kind==F80_CHECK_GROUP && key==27)
+            return form_activate(w,w->cursor);
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_HOME || key==F80_KEY_END) {
             int next=key==F80_KEY_HOME?0:key==F80_KEY_END?w->item_count-1:
                      limit(w->cursor+(key==F80_KEY_UP?-1:1),0,w->item_count-1);
@@ -1426,8 +1611,10 @@ int f80_key(F80App *app, int key) {
     if(app->modal && app->modal->kind==F80_DIALOG) {
         F80Widget *d=app->modal;
         if(key==F80_KEY_LEFT || key==F80_KEY_UP || key==F80_KEY_RIGHT || key==F80_KEY_DOWN) {
-            if(app->focus && app->focus->kind==F80_INPUT && (key==F80_KEY_LEFT || key==F80_KEY_RIGHT))return widget_key(app->focus,key);
-            f80_focus_next(app,(key==F80_KEY_LEFT || key==F80_KEY_UP)?-1:1); return 1;
+            if(widget_key(app->focus,key))return 1;
+            int dx=key==F80_KEY_LEFT?-1:key==F80_KEY_RIGHT?1:0;
+            int dy=key==F80_KEY_UP?-1:key==F80_KEY_DOWN?1:0;
+            focus_direction(app,dx,dy);return 1;
         }
         if((key==10 || key==13) && app->focus && app->focus->kind==F80_INPUT) {
             int button=0;
@@ -1443,8 +1630,25 @@ int f80_key(F80App *app, int key) {
             }
         }
     }
-    if(key==9) { f80_focus_next(app,1); return 1; }
-    if(key==F80_KEY_BTAB) { f80_focus_next(app,-1); return 1; }
+    if((key==F80_KEY_LEFT || key==F80_KEY_UP ||
+        key==F80_KEY_RIGHT || key==F80_KEY_DOWN) && !app->modal) {
+        if(widget_key(app->focus,key))return 1;
+        int dx=key==F80_KEY_LEFT?-1:key==F80_KEY_RIGHT?1:0;
+        int dy=key==F80_KEY_UP?-1:key==F80_KEY_DOWN?1:0;
+        focus_direction(app,dx,dy);return 1;
+    }
+    if(key==27 && app->focus && app->focus->kind==F80_CHECK_GROUP)
+        return widget_key(app->focus,key);
+    if(key==27 && !app->modal && focus_captive(app->focus)) {
+        if(focus_peer_count(app)>1)f80_focus_next(app,1);
+        return 1;
+    }
+    if(key==9 || key==F80_KEY_BTAB) {
+        int step=key==9?1:-1;
+        if(app->modal || !f80_focus_panel_next(app,step))
+            f80_focus_next(app,step);
+        return 1;
+    }
     return widget_key(app->focus,key);
 }
 static F80Widget *hit(F80Widget *w,int x,int y) {

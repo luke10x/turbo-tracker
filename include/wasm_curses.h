@@ -204,12 +204,20 @@ static void wasm_apply_style(const WINDOW *win) {
     int bg = pair > 0 && pair < 128 ? wasm_pair_bg[pair] : COLOR_BLACK;
     const char *weight=win && win->bold?(win->dim?"1;2":"1"):
                        win && win->dim?"2":"22";
-    if(fg>=16)
+    int fg_code=fg>=8?90+fg-8:30+fg;
+    int bg_code=bg>=8?100+bg-8:40+bg;
+    if(fg>=16 && bg>=16)
+        snprintf(sequence,sizeof(sequence),"\033[%s;38;5;%d;48;5;%dm",
+                 weight,fg,bg);
+    else if(fg>=16)
         snprintf(sequence,sizeof(sequence),"\033[%s;38;5;%d;%dm",
-                 weight,fg,40+bg);
+                 weight,fg,bg_code);
+    else if(bg>=16)
+        snprintf(sequence,sizeof(sequence),"\033[%s;%d;48;5;%dm",
+                 weight,fg_code,bg);
     else
         snprintf(sequence, sizeof(sequence), "\033[%s;%d;%dm",
-                 weight, fg==8?90:30+fg, 40 + bg);
+                 weight,fg_code,bg_code);
     wasm_puts(sequence);
 }
 

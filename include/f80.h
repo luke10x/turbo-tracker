@@ -13,7 +13,7 @@ typedef enum { F80_ROW, F80_COL } F80Direction;
 typedef enum { F80_WINDOW_INHERIT, F80_WINDOW_BLUE, F80_WINDOW_CYAN,
                F80_WINDOW_GRAY, F80_WINDOW_CONSOLE, F80_WINDOW_PURPLE,
                F80_WINDOW_ROLE_COUNT } F80WindowRole;
-enum { F80_PALETTE_SLOTS = 31 };
+enum { F80_PALETTE_SLOTS = 33 };
 enum { F80_PAIR_RANGE_CURSOR = 67 }; /* blue foreground on yellow selection */
 enum { F80_PAIR_BUTTON_SELECTED = 68 }; /* black foreground on yellow selection */
 enum { F80_PAIR_LIST_SELECTED = 69, F80_PAIR_LIST_INACTIVE = 70,
@@ -30,7 +30,8 @@ typedef enum {
     F80_COLOR_ALERT_SHADOW, F80_COLOR_BUTTON_SHADOW_BOTTOM,
     F80_COLOR_ALERT_SHADOW_BOTTOM,
     F80_COLOR_FORM_FIELD, F80_COLOR_FORM_FOCUS, F80_COLOR_FORM_HOT,
-    F80_COLOR_FORM_INPUT, F80_COLOR_INPUT_OVERFLOW
+    F80_COLOR_FORM_INPUT, F80_COLOR_INPUT_OVERFLOW,
+    F80_COLOR_FRAME_ACTIVE, F80_COLOR_FRAME_INACTIVE
 } F80ColorSlot;
 typedef struct { int pair[F80_PALETTE_SLOTS]; } F80Palette;
 typedef enum { F80_STRETCH, F80_START, F80_CENTER, F80_END } F80Align;
@@ -70,6 +71,8 @@ struct F80Widget {
     F80Align align;
     F80Justify justify;
     int padding_x, padding_y, gap, frame, fill;
+    /* Explicit listbox override: keep the inherited window colors when unfocused. */
+    int preserve_window_colors_when_unfocused;
     F80WindowRole window_role;
     F80Palette palette; /* zero entries inherit from the window/app palette */
     const char *title, *text;
@@ -143,6 +146,8 @@ F80Widget *f80_spacer(void);
 F80Widget *f80_label(const char *text);
 F80Widget *f80_button(const char *text, F80Action action, void *user);
 F80Widget *f80_listbox(const char **items, int count, F80Action action, void *user);
+void f80_listbox_preserve_window_colors_when_unfocused(F80Widget *listbox,
+                                                       int enabled);
 F80Widget *f80_radio_group(const char **items, int count, int selected,
                            F80Action action, void *user);
 F80Widget *f80_check_group(const char **items, int count, F80Action action, void *user);
@@ -179,6 +184,9 @@ void f80_draw(F80Widget *widget);
 int f80_listbox_row_pair(const F80Widget *widget,int row);
 void f80_draw_screen(F80App *app);
 void f80_focus_next(F80App *app, int step);
+int f80_focus_panel_next(F80App *app, int step);
+F80Widget *f80_focused_panel(F80App *app);
+int f80_focus_visible(const F80App *app);
 int f80_key(F80App *app, int key);
 int f80_mouse(F80App *app, int x, int y, int wheel);
 int f80_mouse_over_list(F80App *app, int x, int y);

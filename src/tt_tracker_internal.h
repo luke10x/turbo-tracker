@@ -54,6 +54,7 @@ typedef struct {
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
     int playback_bpm,playback_ticks_per_row;
+    int previous_note[TT_CHANNELS];
     int effect_registers[TT_EFFECT_REGISTER_COUNT];
     int pending_flow,pending_pattern,pending_order,pending_row;
     int audio_recovery_result;
@@ -73,7 +74,10 @@ typedef struct {
     TableVoice table_voice[TT_CHANNELS];
     F80Widget *table_dialog,*table_panel,*table_canvas,*table_name,*table_name_label;
     F80Widget *table_scrollbar,*table_buttons[5];
+    F80Widget *effect_picker_dialog,*effect_picker_help,*effect_picker_buttons[36];
+    char effect_picker_labels[36][6];
     F80Grid table_grid;
+    F80PointerGesture grid_pointer_gesture;
     F80Wrap table_actions;
     int table_index;
     TtTableTick table_clip[TT_TABLE_MAX_TICKS];

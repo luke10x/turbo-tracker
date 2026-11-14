@@ -27,6 +27,10 @@ int main(void) {
     original.cell[15][0]=(TtCell){TT_NOTE_OFF,-1,TT_EFFECT_X,0x1f,
                                     TT_EFFECT_Y,0x0f,TT_EFFECT_Z,0x30};
     original.cell[13][5].note=tt_note_relative(1,4);
+    original.cell[14][0]=tt_cell_empty();
+    original.cell[14][0].note=tt_note_relative(1,1);
+    original.cell[14][1]=tt_cell_empty();
+    original.cell[14][1].note=tt_note_left_relative(5);
     char blank_value[11];
     tt_cell_text(&original.cell[11][3],blank_value);
     assert(!strcmp(blank_value,".....SLC.."));
@@ -51,7 +55,16 @@ int main(void) {
     tt_cell_text(&original.cell[15][0],off_cell);
     assert(!strcmp(off_cell,"OFF..XJP1F"));
     char relative_cell[11];tt_cell_text(&original.cell[13][5],relative_cell);
-    assert(!strcmp(relative_cell,"+=4......."));
+    assert(!strcmp(relative_cell,"+04......."));
+    char same_channel_cell[11];tt_cell_text(&original.cell[14][0],same_channel_cell);
+    assert(!strcmp(same_channel_cell,"+01......."));
+    char left_channel_cell[11];tt_cell_text(&original.cell[14][1],left_channel_cell);
+    assert(!strcmp(left_channel_cell,">05......."));
+    TtPattern relative_roundtrip;tt_pattern_init(&relative_roundtrip);
+    assert(tt_pattern_parse_row("+0101.....|>0501.....|..........|..........|..........|..........",
+                                &relative_roundtrip,14));
+    assert(relative_roundtrip.cell[14][0].note==tt_note_relative(1,1));
+    assert(relative_roundtrip.cell[14][1].note==tt_note_left_relative(5));
     assert(tt_pattern_save(path,&original,error,sizeof(error)));
     FILE *file=fopen(path,"r");assert(file);
     char line[128];assert(fgets(line,sizeof(line),file));

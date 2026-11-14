@@ -46,9 +46,13 @@ void tt_cell_text(const TtCell *cell,char text[11]) {
     memcpy(text,"..........",11);
     if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
     else if(tt_note_is_relative(cell->note)) {
-        static const char digits[]="0123456789ABCDEF";
-        text[0]=tt_note_relative_positive(cell->note)?'+':'-';text[1]='=';
-        text[2]=digits[tt_note_relative_amount(cell->note)];
+        int amount=tt_note_relative_amount(cell->note);
+        if(tt_note_is_left_relative(cell->note)) {
+            text[0]='>';text[1]='0';text[2]=digits[amount];
+        } else {
+            text[0]=tt_note_relative_positive(cell->note)?'+':'-';
+            text[1]='0';text[2]=digits[amount];
+        }
     }
     else if(cell->note>=0) {
         char note[4];tt_note_name(cell->note,note);
@@ -78,6 +82,13 @@ static int parse_note(const char *text) {
     if((text[0]=='+' || text[0]=='-') && text[1]=='=') {
         int amount=hex(text[2]);
         return amount>=0?tt_note_relative(text[0]=='+',amount):-1000;
+    }
+    if(text[0]=='>' && hex(text[1])==0 && hex(text[2])>=0)
+        return tt_note_left_relative(hex(text[2]));
+    if((text[0]=='+' || text[0]=='-') && hex(text[1])==0 && hex(text[2])>=0) {
+        int amount=hex(text[1])*16+hex(text[2]);
+        return amount<=TT_NOTE_RELATIVE_MAX?
+            tt_note_relative(text[0]=='+',amount):-1000;
     }
     for(int note=0;note<=127;++note) {
         char name[4];tt_note_name(note,name);
@@ -136,9 +147,13 @@ static void cell_row_text(const TtCell *cell,char text[20]) {
     static const char digits[]="0123456789ABCDEF";
     if(cell->note==TT_NOTE_OFF)memcpy(text,"OFF",3);
     else if(tt_note_is_relative(cell->note)) {
-        static const char digits[]="0123456789ABCDEF";
-        text[0]=tt_note_relative_positive(cell->note)?'+':'-';text[1]='=';
-        text[2]=digits[tt_note_relative_amount(cell->note)];
+        int amount=tt_note_relative_amount(cell->note);
+        if(tt_note_is_left_relative(cell->note)) {
+            text[0]='>';text[1]='0';text[2]=digits[amount];
+        } else {
+            text[0]=tt_note_relative_positive(cell->note)?'+':'-';
+            text[1]='0';text[2]=digits[amount];
+        }
     }
     else if(cell->note>=0)tt_note_name(cell->note,text);
     else memcpy(text,"...",3);

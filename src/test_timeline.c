@@ -16,6 +16,18 @@ int main(void) {
     assert(setenv("INIT_PLAY","1",1)==0 && initial_play_requested());
     assert(setenv("INIT_PLAY","0",1)==0 && !initial_play_requested());
     assert(unsetenv("INIT_PLAY")==0);
+    F80PointerGesture pointer_gesture={0};
+    f80_pointer_gesture_begin(&pointer_gesture,4,7,100);
+    assert(!f80_pointer_gesture_tick(&pointer_gesture,1099));
+    assert(f80_pointer_gesture_move(&pointer_gesture,4,8,300)==F80_POINTER_MOVE);
+    assert(!f80_pointer_gesture_tick(&pointer_gesture,2000));
+    f80_pointer_gesture_end(&pointer_gesture);
+    f80_pointer_gesture_begin(&pointer_gesture,4,7,3000);
+    assert(!f80_pointer_gesture_tick(&pointer_gesture,3999));
+    assert(f80_pointer_gesture_tick(&pointer_gesture,4000));
+    pointer_gesture.selecting=1;
+    assert(f80_pointer_gesture_move(&pointer_gesture,5,7,4010)==F80_POINTER_SELECT);
+    f80_pointer_gesture_end(&pointer_gesture);
     char zip_dir[]="/tmp/tt-browse-XXXXXX";
     assert(mkdtemp(zip_dir));
     char zip_path[1024];assert(snprintf(zip_path,sizeof(zip_path),
@@ -186,6 +198,192 @@ int main(void) {
     assert(modal_app.focus==background_button);
     f80_free(background);
 
+    F80App panel_app={0};
+    F80Widget *panels=f80_box(F80_ROW);
+    F80Widget *left_panel=f80_add(panels,f80_box(F80_COL));left_panel->frame=1;
+    F80Widget *left_first=f80_add(left_panel,f80_button("Left 1",NULL,NULL));
+    F80Widget *left_second=f80_add(left_panel,f80_button("Left 2",NULL,NULL));
+    F80Widget *right_panel=f80_add(panels,f80_box(F80_COL));right_panel->frame=1;
+    F80Widget *right_button=f80_add(right_panel,f80_button("Right",NULL,NULL));
+    f80_set_root(&panel_app,panels);
+    f80_layout(panels,f80_rect(0,0,30,8));
+    panel_app.focus=left_first;
+    f80_focus_next(&panel_app,1);
+    assert(panel_app.focus==left_second); /* Focus loops inside the panel. */
+    f80_focus_next(&panel_app,1);
+    assert(panel_app.focus==left_first);
+    assert(f80_focus_panel_next(&panel_app,1));
+    assert(panel_app.focus==right_button); /* Option advances to the next pane. */
+    assert(f80_focus_panel_next(&panel_app,-1));
+    assert(panel_app.focus==left_first || panel_app.focus==left_second);
+    f80_free(panels);
+
+    F80App directional_app={0};
+    F80Widget *directional_root=f80_box(F80_ROW);
+    F80Widget *input_panel=f80_add(directional_root,f80_box(F80_COL));
+    input_panel->frame=1;
+    F80Widget *input=f80_add(input_panel,f80_input());
+    F80Widget *input_button=f80_add(input_panel,f80_button("Apply",NULL,NULL));
+    F80Widget *adjacent_panel=f80_add(directional_root,f80_box(F80_COL));
+    adjacent_panel->frame=1;
+    F80Widget *adjacent_button=f80_add(adjacent_panel,
+        f80_button("Adjacent",NULL,NULL));
+    f80_set_root(&directional_app,directional_root);
+    input_panel->rect=f80_rect(0,0,20,8);
+    input->rect=f80_rect(1,1,10,1);
+    input_button->rect=f80_rect(1,3,10,1);
+    adjacent_panel->rect=f80_rect(21,0,20,8);
+    adjacent_button->rect=f80_rect(22,1,10,1);
+    directional_app.focus=input;
+    assert(f80_key(&directional_app,F80_KEY_LEFT)); /* Input captures caret keys. */
+    assert(directional_app.focus==input);
+    assert(f80_key(&directional_app,F80_KEY_DOWN));
+    assert(directional_app.focus==input_button);
+    assert(f80_key(&directional_app,F80_KEY_RIGHT));
+    assert(directional_app.focus==input_button); /* Arrows stay within this pane. */
+    directional_app.focus=input;
+    assert(f80_key(&directional_app,27)); /* Negative exits a captive control. */
+    assert(directional_app.focus==input_button);
+    F80Widget *single_panel=f80_box(F80_COL);single_panel->frame=1;
+    F80Widget *single_input=f80_add(single_panel,f80_input());
+    F80App single_app={0};f80_set_root(&single_app,single_panel);
+    single_app.focus=single_input;
+    assert(f80_key(&single_app,27) && single_app.focus==single_input);
+    f80_free(single_panel);f80_free(directional_root);
+
+    const char *checkbox_items[]={"First","Second"};
+    F80Widget *checkboxes=f80_check_group(checkbox_items,2,NULL,NULL);
+    F80App checkbox_app={0};
+    f80_set_root(&checkbox_app,checkboxes);
+    checkbox_app.focus=checkboxes;
+    assert(!f80_checked(checkboxes,0));
+    assert(f80_key(&checkbox_app,27)); /* Negative toggles a checkbox in place. */
+    assert(f80_checked(checkboxes,0) && checkbox_app.focus==checkboxes &&
+           checkboxes->cursor==0);
+    assert(f80_key(&checkbox_app,F80_KEY_DOWN) && checkboxes->cursor==1);
+    assert(f80_key(&checkbox_app,27) && f80_checked(checkboxes,1));
+    f80_free(checkboxes);
+
+    const char *order_rows[]={"00o > 01p","01o > 02p"};
+    F80Widget *list_color_root=f80_box(F80_ROW);
+    F80Widget *blue_list=f80_add(list_color_root,
+        f80_listbox(order_rows,2,NULL,NULL));
+    blue_list->window_role=F80_WINDOW_BLUE;
+    F80Widget *other_focus=f80_add(list_color_root,
+        f80_button("Other",NULL,NULL));
+    F80App list_color_app={0};f80_set_root(&list_color_app,list_color_root);
+    list_color_app.focus=other_focus;
+    assert(f80_listbox_row_pair(blue_list,0)==F80_PAIR_LIST_INACTIVE_SELECTED);
+    assert(f80_listbox_row_pair(blue_list,1)==F80_PAIR_LIST_INACTIVE);
+    /* Explicit exception to F80's default gray inactive-list colors. */
+    f80_listbox_preserve_window_colors_when_unfocused(blue_list,1);
+    assert(f80_listbox_row_pair(blue_list,0)==F80_COLOR_HIGHLIGHT);
+    assert(f80_listbox_row_pair(blue_list,1)==F80_COLOR_TEXT);
+    f80_free(list_color_root);
+
+    F80App pane_owner_app={0};
+    F80Widget *pane_owner_root=f80_box(F80_ROW);
+    F80Widget *global_panel=f80_add(pane_owner_root,f80_box(F80_COL));
+    global_panel->frame=1;global_panel->rect=f80_rect(0,0,10,6);
+    F80Widget *global_focus_canvas=f80_add(global_panel,f80_canvas(NULL,NULL));
+    global_focus_canvas->rect=f80_rect(8,1,6,3); /* Center crosses into adjacent pane. */
+    F80Widget *operators_panel=f80_add(pane_owner_root,f80_box(F80_COL));
+    operators_panel->frame=1;operators_panel->rect=f80_rect(11,0,10,6);
+    F80Widget *operators_canvas=f80_add(operators_panel,f80_canvas(NULL,NULL));
+    operators_canvas->rect=f80_rect(12,1,8,3);
+    f80_set_root(&pane_owner_app,pane_owner_root);
+    pane_owner_app.focus=global_focus_canvas;
+    assert(f80_focused_panel(&pane_owner_app)==global_panel);
+    assert(f80_key(&pane_owner_app,F80_KEY_RIGHT));
+    assert(pane_owner_app.focus==global_focus_canvas &&
+           f80_focused_panel(&pane_owner_app)==global_panel);
+    f80_free(pane_owner_root);
+
+    F80App nested_panel_app={0};
+    F80Widget *nested_root=f80_box(F80_COL);
+    F80Widget *wave_panel=f80_add(nested_root,f80_box(F80_COL));wave_panel->frame=1;
+    F80Widget *wave_focus=f80_add(wave_panel,f80_button("Wave",NULL,NULL));
+    F80Widget *nested_row=f80_add(nested_root,f80_box(F80_ROW));
+    F80Widget *orders_panel=f80_add(nested_row,f80_box(F80_COL));orders_panel->frame=1;
+    F80Widget *orders_focus=f80_add(orders_panel,f80_button("Orders",NULL,NULL));
+    F80Widget *grid_panel=f80_add(nested_row,f80_box(F80_COL));grid_panel->frame=1;
+    F80Widget *grid_focus=f80_add(grid_panel,f80_button("Grid",NULL,NULL));
+    f80_set_root(&nested_panel_app,nested_root);
+    wave_panel->rect=f80_rect(0,0,20,3);
+    nested_row->rect=f80_rect(0,4,20,6);
+    orders_panel->rect=f80_rect(0,4,5,6);
+    grid_panel->rect=f80_rect(6,4,14,6);
+    wave_focus->rect=wave_panel->rect;
+    orders_focus->rect=orders_panel->rect;
+    grid_focus->rect=grid_panel->rect;
+    nested_panel_app.focus=grid_focus;
+    assert(f80_focus_panel_next(&nested_panel_app,1));
+    assert(nested_panel_app.focus==wave_focus);
+    assert(f80_focus_panel_next(&nested_panel_app,1));
+    assert(nested_panel_app.focus==orders_focus);
+    assert(f80_focus_panel_next(&nested_panel_app,1));
+    assert(nested_panel_app.focus==grid_focus); /* Wraps through the flex tree. */
+    f80_free(nested_root);
+
+    F80App layout_order_app={0};
+    F80Widget *layout_order_root=f80_box(F80_COL);
+    F80Widget *layout_order_panels[5];F80Widget *layout_order_controls[5];
+    for(int i=0;i<5;++i) {
+        layout_order_panels[i]=f80_add(layout_order_root,f80_box(F80_COL));
+        layout_order_panels[i]->frame=1;
+        layout_order_controls[i]=f80_add(layout_order_panels[i],
+            f80_button("Pane",NULL,NULL));
+    }
+    f80_set_root(&layout_order_app,layout_order_root);
+    /* Deliberately add in a different order from the visual flex layout. */
+    layout_order_panels[0]->rect=f80_rect(0,0,80,3); /* Wave editor */
+    layout_order_panels[1]->rect=f80_rect(0,5,30,3); /* Markers */
+    layout_order_panels[2]->rect=f80_rect(30,5,30,3); /* Sample settings */
+    layout_order_panels[3]->rect=f80_rect(0,10,25,3); /* Instrument */
+    layout_order_panels[4]->rect=f80_rect(25,10,55,3); /* Instrument settings */
+    for(int i=0;i<5;++i)layout_order_controls[i]->rect=layout_order_panels[i]->rect;
+    layout_order_app.focus=layout_order_controls[3];
+    assert(f80_focused_panel(&layout_order_app)==layout_order_panels[3]);
+    assert(f80_focus_panel_next(&layout_order_app,1) &&
+           layout_order_app.focus==layout_order_controls[4]);
+    assert(f80_focused_panel(&layout_order_app)==layout_order_panels[4]);
+    assert(f80_focus_panel_next(&layout_order_app,1) &&
+           layout_order_app.focus==layout_order_controls[0]);
+    assert(f80_focus_panel_next(&layout_order_app,1) &&
+           layout_order_app.focus==layout_order_controls[1]);
+    assert(f80_focus_panel_next(&layout_order_app,1) &&
+           layout_order_app.focus==layout_order_controls[2]);
+    assert(f80_focus_panel_next(&layout_order_app,1) &&
+           layout_order_app.focus==layout_order_controls[3]);
+    f80_free(layout_order_root);
+
+    memset(&tracker,0,sizeof(tracker));
+    tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
+    tracker.focus=FOCUS_WAVE;
+    tracker.root=f80_box(F80_COL);
+    tracker.instrument_panels=f80_add(tracker.root,f80_box(F80_COL));
+    F80Widget *instrument_list_panel=f80_add(tracker.instrument_panels,
+        f80_box(F80_COL));instrument_list_panel->frame=1;
+    const char *instrument_items[]={"One","Two"};
+    tracker.manage_list=f80_add(instrument_list_panel,
+        f80_listbox(instrument_items,2,NULL,NULL));
+    F80Widget *instrument_action_panel=f80_add(tracker.instrument_panels,
+        f80_box(F80_COL));instrument_action_panel->frame=1;
+    F80Widget *instrument_action=f80_add(instrument_action_panel,
+        f80_button("Action",NULL,NULL));
+    f80_set_root(&tracker.app,tracker.root);
+    f80_layout(tracker.root,f80_rect(0,0,40,12));
+    tracker.manage_list->cursor=1;
+    handle_key(9);
+    assert(tracker.app.focus==instrument_action);
+    handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_FOCUS_RECONCILE});
+    assert(tracker.app.focus==instrument_action); /* Reconcile preserves pane focus. */
+    handle_key(9);
+    assert(tracker.app.focus==tracker.manage_list); /* Tab wraps to the first pane. */
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.app.focus==tracker.manage_list && tracker.manage_list->cursor==1);
+    f80_free(tracker.root);
+
     memset(&tracker,0,sizeof(tracker));
     tracker.song=demo;tracker.pattern=demo.pattern[0];tracker.pattern_index=0;
     tracker.app.running=1;tracker.document_dirty=1;
@@ -267,23 +465,23 @@ int main(void) {
     tracker.field=2;
     handle_key('m');
     assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M);
-    handle_key(9);handle_key('4');handle_key('2');
+    handle_key(' ');handle_key('4');handle_key('2');
     assert(tracker.pattern.cell[0][1].value==0x42);
     handle_key(F80_KEY_DELETE);
     assert(tracker.pattern.cell[0][1].effect==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value==-1);
     tracker.playing=0;
-    handle_key(9);
+    handle_key(' ');
     assert(tracker.field==4 && tracker.channel==1 && !tracker.playing);
-    handle_key('m');handle_key(9);handle_key('4');handle_key('2');
+    handle_key('m');handle_key(' ');handle_key('4');handle_key('2');
     assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value2==0x42);
     handle_key(F80_KEY_DELETE);
     assert(tracker.pattern.cell[0][1].effect2==TT_EFFECT_M &&
            tracker.pattern.cell[0][1].value2==-1);
-    handle_key(9);
+    handle_key( ' ');
     assert(tracker.field==6 && tracker.channel==1 && !tracker.playing);
-    handle_key('p');handle_key(9);handle_key('a');handle_key('f');
+    handle_key('p');handle_key(' ');handle_key('a');handle_key('f');
     assert(tracker.pattern.cell[0][1].effect3==TT_EFFECT_P &&
            tracker.pattern.cell[0][1].value3==0xaf);
     tracker.field=6;handle_key(F80_KEY_DELETE);
@@ -393,8 +591,12 @@ int main(void) {
            tracker.song.pattern[0].cell[4][0].note==62);
     assert(setenv("INIT_SONG","examples/chord-voicings/chord-voicings.ttt",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
-    assert(tracker.song.pattern[0].cell[0][1].note==tt_note_relative(1,4) &&
-           tracker.song.pattern[0].cell[0][2].note==tt_note_relative(1,3));
+    assert(tracker.song.pattern[0].cell[0][1].note==tt_note_left_relative(4) &&
+           tracker.song.pattern[0].cell[0][2].note==tt_note_left_relative(3));
+    assert(setenv("INIT_SONG","examples/relative-note-steps/relative-note-steps.ttt",1)==0);
+    assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
+    assert(tracker.song.pattern[0].cell[2][0].note==tt_note_relative(1,1) &&
+           tracker.song.pattern[0].cell[6][0].note==tt_note_relative(0,2));
     assert(setenv("INIT_SONG","examples/tbl-loop/tbl-loop.ttt",1)==0);
     assert(load_default_song("build/macos/bin/test-sample-tracker-timeline"));
     assert(tracker.song.table[0].tick[11].effect[0].command=='Y' &&
@@ -562,7 +764,7 @@ int main(void) {
     TtCell *note_entry=&tracker.pattern.cell[0][1];
     assert(note_entry->note<0 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE);
-    handle_key('c');handle_key('-');handle_key('4');handle_key(9);
+    handle_key('c');handle_key('-');handle_key('4');handle_key(' ');
     assert(note_entry->note==60 && tracker.field==1 && note_entry->instrument<0 &&
            note_entry->effect==TT_EFFECT_NONE && note_entry->value<0);
     note_entry->instrument=1;
@@ -574,7 +776,7 @@ int main(void) {
     TtCell *effect_entry=&tracker.pattern.cell[0][2];
     handle_key('s');
     assert(effect_entry->effect==TT_EFFECT_S && effect_entry->value==-1);
-    handle_key(9);handle_key('4');
+    handle_key(' ');handle_key('4');
     assert(effect_entry->value==4);
     tracker.step=1;tracker.field=2;
     TtCell *register_input=&tracker.pattern.cell[1][2];
@@ -634,6 +836,20 @@ int main(void) {
     tracker.play_mode=PLAY_PATTERN;
     assert(strcmp(current_status()[0].label,"Pt-")==0 &&
            current_status()[0].action==prev_pattern);
+    int saved_field=tracker.field;
+    tracker.focus=FOCUS_PHRASE;tracker.field=0;
+    assert(strcmp(current_status()[0].label,"-C")==0 &&
+           strcmp(current_status()[1].label,"+C")==0 &&
+           strcmp(current_status()[4].label,"OFF")==0);
+    tracker.field=1;
+    assert(strcmp(current_status()[0].label,"-F")==0 &&
+           strcmp(current_status()[2].label,"-1")==0);
+    tracker.field=2;
+    assert(strcmp(current_status()[0].label,"Auto")==0);
+    tracker.field=3;
+    assert(strcmp(current_status()[0].label,"-F")==0 &&
+           strcmp(current_status()[1].label,"+F")==0);
+    tracker.field=saved_field;tracker.focus=FOCUS_ORDER;
     F80Widget fake_wave_row={.visible=1},fake_grid_row={.visible=1},
         fake_phrase_frame={.visible=1};
     F80Widget fake_instrument_panels={.visible=0},fake_order_frame={.visible=1};
@@ -708,18 +924,39 @@ int main(void) {
     tracker.order_list=NULL;
     tracker.focus=FOCUS_PHRASE;
     tracker.inline_table_selected=0;
+    tracker.grid_value_editing=0;
     tracker.selecting=tracker.visual_selecting=0;
     tracker.step=10;tracker.channel=0;tracker.field=0;
-    handle_key(9); /* Tab advances the grid edit cursor. */
+    handle_key(9); /* Option/Tab no longer advances the grid subcell. */
+    assert(tracker.field==0 && tracker.channel==0);
+    handle_key(F80_KEY_SHIFT_RIGHT); /* Focus+arrow selects in the grid. */
+    assert(tracker.field==0 && tracker.visual_selecting && tracker.selecting);
+    handle_key(27);
+    assert(!tracker.visual_selecting && !tracker.selecting);
+    tracker.channel=0;tracker.field=0;
+    handle_key(' '); /* Space is an alternate Focus binding in the grid. */
     assert(tracker.field==1 && tracker.channel==0);
-    handle_key(F80_KEY_BTAB);
-    assert(tracker.field==0 && tracker.channel==0);
-    handle_key(' '); /* Space no longer advances to another grid cell. */
-    assert(tracker.field==0 && tracker.channel==0);
     handle_key(F80_KEY_SHIFT_DOWN); /* Shift+arrow is keyboard visual select. */
     assert(tracker.visual_selecting && tracker.selecting && tracker.step==11);
     handle_key(27);
     assert(!tracker.visual_selecting && !tracker.selecting);
+    F80Widget *keyboard_panels=f80_box(F80_ROW);
+    F80Widget *keyboard_left=f80_add(keyboard_panels,f80_box(F80_COL));
+    keyboard_left->frame=1;
+    F80Widget *keyboard_left_focus=f80_add(keyboard_left,
+        f80_button("Orders",NULL,NULL));
+    F80Widget *keyboard_right=f80_add(keyboard_panels,f80_box(F80_COL));
+    keyboard_right->frame=1;
+    F80Widget *keyboard_grid_focus=f80_add(keyboard_right,
+        f80_button("Grid",NULL,NULL));
+    tracker.perspective=TT_PERSPECTIVE_MAIN;
+    f80_set_root(&tracker.app,keyboard_panels);
+    f80_layout(keyboard_panels,f80_rect(0,0,30,8));
+    tracker.app.focus=keyboard_grid_focus;
+    handle_key(9); /* A short Option/Tab press switches panes immediately. */
+    assert(tracker.app.focus==keyboard_left_focus);
+    f80_set_root(&tracker.app,NULL);
+    f80_free(keyboard_panels);
     tracker.step=10;tracker.channel=0;tracker.field=0;
     tracker.pattern.cell[10][0].note=48;
     tracker.playing=0;
@@ -781,6 +1018,49 @@ int main(void) {
     assert(!tracker.controller_toolbar_mode && header_clicks[2]==1);
     tracker.play_button=NULL;
     memset(&controller_input,0,sizeof(controller_input));
+    tracker.controller_screen_navigation=0;
+    tracker.controller_toolbar_mode=tracker.controller_status_mode=0;
+    F80Widget *controller_root=f80_box(F80_COL);
+    F80Widget *controller_wave=f80_add(controller_root,f80_box(F80_COL));
+    controller_wave->frame=1;controller_wave->rect=f80_rect(0,0,20,3);
+    F80Widget *controller_wave_item=f80_add(controller_wave,
+        f80_button("Wave",NULL,NULL));controller_wave_item->rect=controller_wave->rect;
+    F80Widget *controller_row=f80_add(controller_root,f80_box(F80_ROW));
+    F80Widget *controller_orders=f80_add(controller_row,f80_box(F80_COL));
+    controller_orders->frame=1;controller_orders->rect=f80_rect(0,4,5,6);
+    F80Widget *controller_order_item=f80_add(controller_orders,
+        f80_button("Orders",NULL,NULL));controller_order_item->rect=controller_orders->rect;
+    F80Widget *controller_grid=f80_add(controller_row,f80_box(F80_COL));
+    controller_grid->frame=1;controller_grid->rect=f80_rect(6,4,14,6);
+    F80Widget *controller_grid_item=f80_add(controller_grid,
+        f80_button("Grid",NULL,NULL));controller_grid_item->rect=controller_grid->rect;
+    tracker.wave_frame=controller_wave;tracker.order_frame=controller_orders;
+    tracker.phrase_frame=controller_grid;tracker.perspective=TT_PERSPECTIVE_MAIN;
+    tracker.focus=FOCUS_PHRASE;tracker.step=10;tracker.channel=0;tracker.field=0;
+    tracker.visual_selecting=tracker.selecting=0;
+    f80_set_root(&tracker.app,controller_root);tracker.app.focus=controller_grid_item;
+    controller_button_input(SDL_GAMEPAD_BUTTON_WEST,1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,1);
+    assert(tracker.visual_selecting && tracker.selecting); /* Focus + Right */
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_WEST,0);
+    handle_key(27);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,1);
+    assert(tracker.focus==FOCUS_WAVE && tracker.app.focus==controller_wave_item);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,1);
+    assert(tracker.focus==FOCUS_ORDER && tracker.app.focus==controller_order_item);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,1);
+    assert(tracker.app.focus==controller_grid_item);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,1);
+    assert(tracker.focus==FOCUS_WAVE && tracker.app.focus==controller_wave_item);
+    controller_button_input(SDL_GAMEPAD_BUTTON_NORTH,0);
+    tracker.wave_frame=tracker.order_frame=tracker.phrase_frame=NULL;
+    f80_set_root(&tracker.app,NULL);f80_free(controller_root);
+    memset(&controller_input,0,sizeof(controller_input));
+    tracker.focus=FOCUS_PHRASE;
     const char *nav_items[]={"00","01","02"};
     F80Widget *nav_root=f80_box(F80_COL);
     F80Widget *selector=f80_add(nav_root,f80_box(F80_COL));
@@ -791,6 +1071,7 @@ int main(void) {
     F80Widget *selector_button=f80_add(selector,f80_button("Apply",NULL,NULL));
     f80_set_root(&tracker.app,nav_root);
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
+    tracker.focus=FOCUS_WAVE;
     tracker.instrument_selector_frame=selector;
     tracker.manage_list=selector_sample_list;
     tracker.slices_list=marker_list;
@@ -807,15 +1088,17 @@ int main(void) {
     assert(f80_listbox_row_pair(selector_sample_list,0)==2);
     handle_key(F80_KEY_DOWN);
     assert(selector_sample_list->cursor==2);
-    handle_key(9);
-    assert(tracker.app.focus==marker_list); /* Tab changes the active list */
-    handle_key(F80_KEY_BTAB);
+    controller_action_input(TT_PAD_FOCUS,1);
+    controller_action_input(TT_PAD_FOCUS,0);
+    assert(tracker.app.focus==marker_list); /* Focus cycles controls in this panel. */
+    f80_focus_next(&tracker.app,-1);
     assert(tracker.app.focus==selector_sample_list);
     controller_action_input(TT_PAD_TOP_RIGHT,1);
     assert(tracker.app.focus==marker_list); /* R1 changes the active list */
     tracker.instrument_selector_frame=NULL;
     tracker.manage_list=NULL;tracker.slices_list=NULL;
     tracker.perspective=TT_PERSPECTIVE_MAIN;
+    tracker.focus=FOCUS_PHRASE;
     f80_set_root(&tracker.app,NULL);
     f80_free(nav_root);
     toggle_follow(NULL,NULL);
@@ -912,6 +1195,32 @@ int main(void) {
     tt_play_play_row(0);
     assert(tracker.active_order_index==1);
     assert(tracker.pattern_index==0 && tracker.edit_order==0);
+
+    TtCell relative_cells[3][2];
+    int relative_roots[TT_CHANNELS];
+    memcpy(relative_roots,tracker.previous_note,sizeof(relative_roots));
+    for(int row=0;row<3;++row)
+        for(int channel=0;channel<2;++channel)
+            relative_cells[row][channel]=tracker.pattern.cell[row][channel];
+    int saved_relative_mode=tracker.play_mode;
+    int saved_relative_loop=tracker.loop_pattern_index;
+    tracker.play_mode=PLAY_PATTERN;tracker.loop_pattern_index=tracker.pattern_index;
+    tracker.pattern.cell[0][0]=(TtCell){60,1,0,-1,0,-1,0,-1};
+    tracker.pattern.cell[1][0]=(TtCell){tt_note_relative(1,1),1,0,-1,0,-1,0,-1};
+    tracker.pattern.cell[1][1]=(TtCell){tt_note_left_relative(5),1,0,-1,0,-1,0,-1};
+    tracker.pattern.cell[2][0]=(TtCell){tt_note_relative(0,1),1,0,-1,0,-1,0,-1};
+    tracker.previous_note[0]=-1;tracker.previous_note[1]=-1;
+    tt_play_play_row(0);
+    assert(tracker.previous_note[0]==60);
+    tt_play_play_row(1);
+    assert(tracker.previous_note[0]==61 && tracker.previous_note[1]==66);
+    tt_play_play_row(2);
+    assert(tracker.previous_note[0]==60); /* -01 follows the same-channel note. */
+    for(int row=0;row<3;++row)
+        for(int channel=0;channel<2;++channel)
+            tracker.pattern.cell[row][channel]=relative_cells[row][channel];
+    memcpy(tracker.previous_note,relative_roots,sizeof(relative_roots));
+    tracker.play_mode=saved_relative_mode;tracker.loop_pattern_index=saved_relative_loop;
 
     tracker.playing=1;
     F80Rect viewport=f80_rect(0,0,80,14); /* 11 pattern rows */
@@ -1141,6 +1450,24 @@ int main(void) {
     TtEditDoc history_doc=edit_doc();
     edit_history=tt_edit_history_new(&history_doc);
     assert(edit_history);
+    tracker.focus=FOCUS_PHRASE;tracker.field=2;tracker.step=0;tracker.channel=0;
+    assert(strcmp(current_status()[0].label,"Auto")==0);
+    TtCell picker_original=tracker.pattern.cell[0][0];
+    effect_picker_open(NULL,NULL);
+    assert(tracker.effect_picker_labels[17][0]=='R' &&
+           !strcmp(tracker.effect_picker_labels[17],"RRR"));
+    tracker.app.focus=tracker.effect_picker_buttons[17];
+    handle_key(13);
+    assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_R &&
+           tracker.effect_picker_dialog==NULL);
+    effect_picker_open(NULL,NULL); /* A second open must create a new modal. */
+    handle_key(27);
+    assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_NONE &&
+           tracker.effect_picker_dialog==NULL);
+    edit_cell(0,0,picker_original);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tt_edit_undo(edit_history,&history_doc));
     F80Widget order_input={0};
     order_input.kind=F80_LISTBOX;
     order_input.range_cursor_pair=F80_PAIR_RANGE_CURSOR;
@@ -1247,6 +1574,27 @@ int main(void) {
     assert(tracker.pattern.cell[0][4].note==72);
     tt_edit_history_free(edit_history);edit_history=NULL;
     F80Widget root={.visible=1,.window_role=F80_WINDOW_BLUE};
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==72);
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_INACTIVE)==73);
+    root.window_role=F80_WINDOW_CYAN;
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==74);
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_INACTIVE)==75);
+    root.window_role=F80_WINDOW_GRAY;
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==76);
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_INACTIVE)==77);
+    root.window_role=F80_WINDOW_CONSOLE;
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==78);
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_INACTIVE)==79);
+    root.window_role=F80_WINDOW_PURPLE;
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==80);
+    assert(f80_palette_pair(&root,F80_COLOR_FRAME_INACTIVE)==81);
+    F80Widget alert={.style=15,.window_role=F80_WINDOW_BLUE};
+    assert(f80_palette_pair(&alert,F80_COLOR_FRAME_ACTIVE)==82);
+    assert(f80_palette_pair(&alert,F80_COLOR_FRAME_INACTIVE)==83);
+    F80Widget dialog_frame={.style=7,.window_role=F80_WINDOW_BLUE};
+    assert(f80_palette_pair(&dialog_frame,F80_COLOR_FRAME_ACTIVE)==76);
+    assert(f80_palette_pair(&dialog_frame,F80_COLOR_FRAME_INACTIVE)==77);
+    root.window_role=F80_WINDOW_BLUE;
     F80Widget gap={.visible=1},wave_row={.visible=1},grid_row={.visible=1},
         phrase_frame={.visible=1};
     F80Widget details={.visible=1},status={.visible=1};
@@ -1304,10 +1652,18 @@ int main(void) {
     tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
     assert(!initial_instruments_ready()); /* sample instruments still require WAV data */
     tracker.wave.instrument_type=TT_INSTRUMENT_DX7;
-    F80Widget dx7_canvas={.rect={0,0,120,20}};
-    tracker.wave_canvas=&dx7_canvas;tracker.app.focus=&dx7_canvas;
+    F80Widget dx7_root={.visible=1,.enabled=1};
+    F80Widget dx7_instrument_panel={.visible=1,.enabled=1,.parent=&dx7_root};
+    F80Widget dx7_operator_panel={.visible=1,.enabled=1,.frame=1,
+                                  .parent=&dx7_instrument_panel};
+    F80Widget dx7_canvas={.kind=F80_CANVAS,.rect={0,0,120,20},
+                          .visible=1,.enabled=1,.focusable=1,
+                          .parent=&dx7_operator_panel};
+    tracker.wave_canvas=&dx7_canvas;tracker.app.root=&dx7_root;
+    tracker.app.focus=&dx7_canvas;
     tracker.focus=FOCUS_WAVE;tracker.dx7_grid_kind=0;
-    F80Widget global_canvas={.rect={0,0,48,12},.visible=1};
+    F80Widget global_canvas={.kind=F80_CANVAS,.rect={0,0,48,12},
+                             .visible=1,.enabled=1,.focusable=1};
     tracker.dx7_globals_canvas=&global_canvas;
     edit_history=tt_edit_history_new(&(TtEditDoc){.song=&tracker.song,
         .active=&tracker.pattern,.active_index=&tracker.pattern_index,.samples=tracker.samples,
@@ -1317,9 +1673,15 @@ int main(void) {
         .active_source_ref=tracker.source_ref,.active_csv_path=tracker.csv_path});
     assert(edit_history);
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
-    tracker.synth_canvas=&dx7_canvas;dx7_canvas.visible=1;
+    tracker.synth_canvas=&dx7_canvas;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INSTRUMENT_FOCUS_RECONCILE}));
     assert(tracker.app.focus==&dx7_canvas);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GLOBAL_SELECT,.index=0}));
+    assert(tracker.app.focus==&global_canvas);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=1,.a=F80_KEY_LEFT}));
+    assert(tracker.app.focus==&dx7_canvas);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GLOBAL_SELECT,.index=0}));
     send_play(TT_PLAY_AUDITION,0,0);assert(tt_audio_voice_active(0));
     handle_key('+');assert(tracker.wave.dx7.data[134]==1 && tt_audio_voice_active(0));
     undo_edit(NULL,NULL);assert(tracker.wave.dx7.data[134]==0 && tt_audio_voice_active(0));
@@ -1457,6 +1819,36 @@ int main(void) {
            tracker.sample_index==1 && tracker.wave.pcm &&
            !strcmp(tracker.wave.source_name,"01.wav") && !tracker.source_ref[0]);
     unlink(archive_path);tt_package_cleanup_all();
+    tt_edit_history_free(edit_history);edit_history=NULL;
+    tracker.song.pattern_count=3;
+    for(int p=0;p<3;++p) {
+        tt_pattern_init(&tracker.song.pattern[p]);
+        snprintf(tracker.song.name[p],TT_SONG_NAME,"Pattern %d",p);
+    }
+    tracker.song.order_count=2;tracker.song.order[0]=0;tracker.song.order[1]=2;
+    tracker.pattern=tracker.song.pattern[0];tracker.pattern_index=0;
+    TtStored empty_samples[TT_HISTORY_MAX]={0};
+    TtWave empty_wave={0};TtPhrase empty_phrase={0};
+    int empty_count=0,empty_index=0;
+    char empty_path[512]={0},empty_ref[512]={0},empty_csv[256]={0},empty_song_path[512]={0};
+    TtEditDoc delete_doc=edit_doc();
+    delete_doc.samples=empty_samples;delete_doc.active_wave=&empty_wave;
+    delete_doc.active_phrase=&empty_phrase;delete_doc.sample_count=&empty_count;
+    delete_doc.sample_index=&empty_index;delete_doc.active_loaded_path=empty_path;
+    delete_doc.active_source_ref=empty_ref;delete_doc.active_csv_path=empty_csv;
+    delete_doc.song_path=empty_song_path;
+    edit_history=tt_edit_history_new(&delete_doc);assert(edit_history);
+    TtEditEvent delete_pattern={.type=TT_EDIT_PATTERN_DELETE};
+    delete_pattern.pattern.index=1;
+    assert(tt_edit_apply_recorded(edit_history,&delete_doc,&delete_pattern) &&
+           tracker.song.pattern_count==2 && tracker.song.order[1]==1);
+    assert(tt_edit_undo(edit_history,&delete_doc) && tracker.song.pattern_count==3 &&
+           tracker.song.order[1]==2);
+    assert(tt_edit_redo(edit_history,&delete_doc) && tracker.song.pattern_count==2 &&
+           tracker.song.order[1]==1);
+    delete_pattern.pattern.index=0;
+    assert(!tt_edit_apply_recorded(edit_history,&delete_doc,&delete_pattern) &&
+           tracker.song.pattern_count==2 && tracker.song.order[1]==1);
     tt_edit_history_free(edit_history);edit_history=NULL;
     f80_free(source_root);
     puts("default song, ordered grid, playback follow and DX7 editor events passed");

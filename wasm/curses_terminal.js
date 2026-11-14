@@ -119,11 +119,6 @@ function sampleGridAt(x, y) {
   return r && x >= r.x && x < r.x + r.width &&
     y >= r.y && y < r.y + r.height;
 }
-function sampleEditableGridAt(x, y) {
-  const r = Module.f80EditableGridRect;
-  return r && x >= r.x && x < r.x + r.width &&
-    y >= r.y && y < r.y + r.height;
-}
 function sampleWaveAt(x, y) {
   const r = Module.f80WaveRect;
   return r && x >= r.x && x < r.x + r.width &&
@@ -163,7 +158,12 @@ function moveTouch(start, x, y) {
         'tt_tracker_scroll_table_actions' : 'example_wrap_scroll',
         null, ['number'], [start.lastY - y]);
   } else if (start.target === 'table') {
-    if (start.holdStarted)
+    if (!start.focusStarted) {
+      Module.ccall('tt_tracker_hold_table_selection', null,
+        ['number', 'number'], [start.x, start.y]);
+      start.focusStarted = true;
+    }
+    if (start.focusStarted)
       Module.ccall('tt_tracker_drag_table_selection', null,
         ['number', 'number'], [x, y]);
     else {
@@ -175,24 +175,20 @@ function moveTouch(start, x, y) {
           ['number'], [start.lastX - x]);
     }
   } else if (start.target === 'order') {
-    if (start.holdStarted)
+    if (!start.focusStarted) {
+      Module.ccall('tt_tracker_hold_order_selection', null,
+        ['number', 'number'], [start.x, start.y]);
+      start.focusStarted = true;
+    }
+    if (start.focusStarted)
       Module.ccall('tt_tracker_drag_order_selection', null,
         ['number', 'number'], [x, y]);
     else if (y !== start.lastY)
       Module.ccall('tt_tracker_scroll_order', null,
         ['number'], [start.lastY - y]);
   } else if (start.target === 'grid') {
-    if (start.holdStarted) {
-      Module.ccall('tt_tracker_drag_selection', null,
-        ['number', 'number'], [x, y]);
-    } else {
-      if (y !== start.lastY)
-        Module.ccall('tt_tracker_touch_scroll', null,
-          ['number'], [start.lastY - y]);
-      if (x !== start.lastX)
-        Module.ccall('tt_tracker_touch_scroll_fields', null,
-          ['number'], [start.lastX - x]);
-    }
+    Module.ccall('tt_tracker_grid_pointer_move', null,
+      ['number', 'number'], [x, y]);
   } else if (x !== start.lastX) {
     Module.ccall(start.holdStarted ? 'tt_tracker_move_wave_marker' :
       'tt_tracker_pan_wave_touch', null, ['number'], [x]);
@@ -214,6 +210,9 @@ function beginContact(id, x, y) {
     lastX: x, lastY: y, tapMoved: false, swiping: false,
     holdStarted: false, target };
   activeContacts.set(id, start);
+  if (target === 'grid')
+    Module.ccall('tt_tracker_grid_pointer_down', null,
+      ['number', 'number'], [x, y]);
   if (target === 'wave')
     Module.ccall('tt_tracker_begin_wave_gesture', null, ['number'], [x]);
   const tableRect = Module.f80TableRect;
@@ -225,28 +224,12 @@ function beginContact(id, x, y) {
     x < componentRect.x + componentRect.width - (componentRect.vertical ? 1 : 0) &&
     y > componentRect.y && y < componentRect.y + componentRect.height - (componentRect.horizontal ? 1 : 0);
   if (target === 'wave' || target === 'order' ||
-      target === 'grid' && sampleEditableGridAt(x, y) ||
       tableCell || componentCell) {
     start.holdTimer = setTimeout(() => {
       if (activeContacts.get(id) !== start || start.swiping) return;
       if (target === 'component-grid')
         Module.ccall('example_grid_hold', null,
           ['number', 'number'], [start.currentX, start.currentY]);
-      else if (target === 'table')
-        Module.ccall('tt_tracker_hold_table_selection', null,
-          ['number', 'number'], [start.currentX, start.currentY]);
-      else if (target === 'grid')
-        Module.ccall('tt_tracker_begin_touch_selection', null,
-          ['number', 'number'], [start.currentX, start.currentY]);
-      else if (target === 'order')
-        Module.ccall('tt_tracker_hold_order_selection', null,
-          ['number', 'number'], [start.currentX, start.currentY]);
-      else {
-        Module.ccall('tt_tracker_begin_wave_gesture', null,
-          ['number'], [start.currentX]);
-        Module.ccall('tt_tracker_hold_wave_marker', null,
-          ['number'], [start.currentX]);
-      }
       start.lastX = start.currentX;
       start.lastY = start.currentY;
       start.holdStarted = true;
@@ -279,11 +262,20 @@ function endContact(id, x, y, cancelled) {
   activeContacts.delete(id);
   clearTimeout(start.holdTimer);
   if (cancelled) {
+    if (start.target === 'grid')
+      Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
     editingCommitted = false;
     if (touchKeyboard) resized();
     return;
   }
   updateContact(start, x, y);
+  if (start.target === 'grid') {
+    if (start.tapMoved) moveTouch(start, x, y);
+    Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
+    editingCommitted = false;
+    if (touchKeyboard) resized();
+    return;
+  }
   if (start.tapMoved || start.holdStarted) {
     editingCommitted = false;
     moveTouch(start, x, y);
