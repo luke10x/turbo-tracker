@@ -1066,16 +1066,16 @@ int main(void) {
     handle_key(13);
     assert(!tracker.grid_value_editing && !tracker.playing);
     tracker.field=1;tracker.pattern.cell[10][0].instrument=0x22;
-    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
     handle_key(F80_KEY_UP);handle_key(F80_KEY_LEFT);
     assert(tracker.pattern.cell[10][0].instrument==0x31);
     handle_key(F80_KEY_DOWN);handle_key(F80_KEY_RIGHT);
     assert(tracker.pattern.cell[10][0].instrument==0x22);
-    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=0}));
     tracker.field=3;
     tracker.pattern.cell[10][0].effect='M';
     tracker.pattern.cell[10][0].value=0x20;
-    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
     handle_key(F80_KEY_UP);handle_key(F80_KEY_RIGHT);
     assert(tracker.pattern.cell[10][0].value==0x31);
     handle_key(27);
@@ -1755,6 +1755,49 @@ int main(void) {
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tt_edit_undo(edit_history,&history_doc));
+    TtCell byte_picker_original=tracker.pattern.cell[0][0];
+    tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=0;tracker.field=3;
+    tracker.grid_value_editing=0;
+    handle_key(13); /* Forward opens the byte picker on effect-value cells. */
+    assert(tracker.byte_picker_dialog &&
+           tracker.app.modal==tracker.byte_picker_dialog &&
+           tracker.byte_picker_cursor==0);
+    handle_key(F80_KEY_RIGHT);handle_key(F80_KEY_DOWN);
+    assert(tracker.byte_picker_cursor==0x11);
+    handle_key(13);
+    assert(!tracker.byte_picker_dialog &&
+           tracker.pattern.cell[0][0].value==0x11);
+    assert(tracker.pattern.cell[0][0].effect==
+           (byte_picker_original.effect==TT_EFFECT_NONE?
+            TT_EFFECT_S:byte_picker_original.effect));
+    assert(!tracker.grid_value_editing);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
+    handle_key(2003); /* Forward still opens while editing a byte value. */
+    assert(tracker.byte_picker_dialog);
+    handle_key(27);
+    assert(!tracker.byte_picker_dialog && tracker.pattern.cell[0][0].value==-1);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=0}));
+    controller_action_input(TT_PAD_AFFIRMATIVE,1);
+    assert(tracker.byte_picker_dialog &&
+           tracker.app.modal==tracker.byte_picker_dialog);
+    controller_action_input(TT_PAD_AFFIRMATIVE,0);
+    handle_key(27);
+    assert(!tracker.byte_picker_dialog);
+    tracker.field=1;
+    handle_key(13); /* The grid instrument cell uses the same byte chooser. */
+    assert(tracker.byte_picker_dialog && tracker.byte_picker_cursor==0);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=0x2a}));
+    handle_key(13);
+    assert(!tracker.byte_picker_dialog &&
+           tracker.pattern.cell[0][0].instrument==0x2a);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.pattern.cell[0][0].instrument==byte_picker_original.instrument);
+    tracker.field=3;
+    edit_cell(0,0,byte_picker_original);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tt_edit_undo(edit_history,&history_doc));
     F80Widget order_input={0};
     order_input.kind=F80_LISTBOX;
     order_input.range_cursor_pair=F80_PAIR_RANGE_CURSOR;
@@ -1810,6 +1853,7 @@ int main(void) {
            tracker.clipboard[0][0].note==60 && tracker.clipboard[1][1].value==0x34);
     handle_key('x');
     assert(tracker.pattern.cell[2][0].note<0 && tracker.pattern.cell[3][1].effect==TT_EFFECT_NONE);
+    tracker.selecting=1;tracker.visual_selecting=0;
     handle_key('p');
     assert(tracker.pattern.cell[2][0].note==60 && tracker.pattern.cell[3][1].value==0x34);
     tracker.selecting=0;
@@ -2055,24 +2099,48 @@ int main(void) {
     tracker.app.focus=&dx7_canvas;
     int parameter=dx7_operator_parameter(0,tracker.dx7_operators_grid.field);
     int old_value=tracker.wave.dx7.data[parameter];
-    handle_key(13);assert(dx7_grid_is_editing());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=1}));
+    assert(dx7_grid_is_editing());
     handle_key(F80_KEY_UP);
     assert(tracker.wave.dx7.data[parameter]==
            clamp(old_value+10,0,tt_dx7_max(parameter)));
     handle_key(F80_KEY_RIGHT);
     assert(tracker.wave.dx7.data[parameter]==
            clamp(old_value+11,0,tt_dx7_max(parameter)));
-    handle_key(13);assert(!dx7_grid_is_editing());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=0}));
+    assert(!dx7_grid_is_editing());
+    int old_decimal_value=tracker.wave.dx7.data[parameter];
+    handle_key(13); /* Forward opens autocomplete instead of toggling edit. */
+    assert(!dx7_grid_is_editing());
+    assert(tracker.decimal_picker_dialog &&
+           tracker.app.modal==tracker.decimal_picker_dialog);
+    handle_key(2003); /* Forward opens the FM decimal grid. */
+    assert(tracker.decimal_picker_dialog &&
+           tracker.decimal_picker_max==tt_dx7_max(parameter));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_CURSOR,
+                                       .index=0}));
+    handle_key(F80_KEY_RIGHT);handle_key(F80_KEY_DOWN);
+    assert(tracker.decimal_picker_cursor==11);
+    handle_key(13);
+    assert(!tracker.decimal_picker_dialog &&
+           tracker.wave.dx7.data[parameter]==11);
+    assert(!dx7_grid_is_editing());
+    assert(tt_edit_undo(edit_history,&synthdoc));
+    assert(tracker.wave.dx7.data[parameter]==old_decimal_value);
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
         .index=2,.a=F80_KEY_RIGHT}));
     assert(tracker.dx7_grid_kind==2 && tracker.dx7_pitch_grid.field==1);
+    tracker.app.focus=&dx7_canvas;
     int pitch_parameter=dx7_pitch_parameter(tracker.dx7_pitch_grid.field);
     int old_pitch=tracker.wave.dx7.data[pitch_parameter];
-    handle_key(13);assert(dx7_grid_is_editing());
-    handle_key(F80_KEY_UP);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=1}));
+    assert(dx7_grid_is_editing());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
+        .index=2,.a=F80_KEY_UP}));
     assert(tracker.wave.dx7.data[pitch_parameter]==
            clamp(old_pitch+10,0,tt_dx7_max(pitch_parameter)));
-    handle_key(13);assert(!dx7_grid_is_editing());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=0}));
+    assert(!dx7_grid_is_editing());
     tt_play_emit((TtPlayEvent){.type=TT_PLAY_AUDITION});
     TtEditEvent new_synth={.type=TT_EDIT_DX7_APPEND};assert(emit_edit(&new_synth));
     assert(!tracker.playing && tracker.sample_count==2 && tracker.sample_index==1);

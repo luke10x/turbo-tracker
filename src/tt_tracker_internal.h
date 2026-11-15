@@ -75,6 +75,11 @@ typedef struct {
     F80Widget *effect_picker_dialog,*effect_picker_help,*effect_picker_canvas;
     char effect_picker_labels[36][6];
     int effect_picker_cursor;
+    F80Widget *byte_picker_dialog,*byte_picker_help,*byte_picker_canvas;
+    int byte_picker_cursor;
+    F80Widget *decimal_picker_dialog,*decimal_picker_help,*decimal_picker_canvas;
+    int decimal_picker_cursor,decimal_picker_min,decimal_picker_max;
+    int decimal_picker_parameter;
     F80Grid table_grid;
     F80PointerGesture grid_pointer_gesture;
     int grid_touch_mode,grid_touch_x,grid_touch_y;

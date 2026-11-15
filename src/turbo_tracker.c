@@ -432,6 +432,12 @@ typedef enum {
     TT_UI_EFFECT_PICKER_OPEN, TT_UI_EFFECT_PICKER_MOVE,
     TT_UI_EFFECT_PICKER_CURSOR, TT_UI_EFFECT_PICKER_ACCEPT,
     TT_UI_EFFECT_PICKER_CLEAR,
+    TT_UI_BYTE_PICKER_OPEN, TT_UI_BYTE_PICKER_MOVE,
+    TT_UI_BYTE_PICKER_CURSOR, TT_UI_BYTE_PICKER_ACCEPT,
+    TT_UI_BYTE_PICKER_CLEAR,
+    TT_UI_DECIMAL_PICKER_OPEN, TT_UI_DECIMAL_PICKER_MOVE,
+    TT_UI_DECIMAL_PICKER_CURSOR, TT_UI_DECIMAL_PICKER_ACCEPT,
+    TT_UI_DECIMAL_PICKER_CLEAR,
     TT_UI_EXIT_REQUEST,
     TT_UI_INSTRUMENT_FOCUS_RECONCILE, TT_UI_INSTRUMENT_VISIBILITY, TT_UI_INSTRUMENT_REFRESH,
     TT_UI_DX7_GRID_KEY, TT_UI_DX7_GRID_MOUSE, TT_UI_DX7_GRID_SCROLL,
@@ -464,7 +470,12 @@ static void dx7_adjust(int delta);
 static int dx7_global_columns(int width);
 static int dx7_grid_is_editing(void);
 static int pattern_effect_slots_used(int channel);
+static int pattern_effect_slot(void);
+static void set_effect_slot(TtCell *cell,int slot,int effect);
+static int dx7_selected_parameter(void);
 static void effect_picker_paint(F80Widget *,void *);
+static void byte_picker_paint(F80Widget *,void *);
+static void decimal_picker_paint(F80Widget *,void *);
 static void grid_major_down(F80Widget *,void *);
 static void grid_major_up(F80Widget *,void *);
 static void grid_minor_down(F80Widget *,void *);
@@ -507,6 +518,14 @@ static int effect_name_focused(void) {
     return tracker.focus==FOCUS_PHRASE && tracker.field>=2 &&
            tracker.field%2==0 && !tracker.inline_table_selected;
 }
+static int effect_value_focused(void) {
+    return tracker.focus==FOCUS_PHRASE && tracker.field>=3 &&
+           tracker.field%2==1 && !tracker.inline_table_selected;
+}
+static int pattern_byte_value_focused(void) {
+    return tracker.focus==FOCUS_PHRASE && !tracker.inline_table_selected &&
+           (tracker.field==1 || effect_value_focused());
+}
 static int effect_picker_move(int key) {
     int row=tracker.effect_picker_cursor/6;
     int column=tracker.effect_picker_cursor%6;
@@ -530,6 +549,80 @@ static void effect_picker_accept_current(void) {
     if(index<0 || index>=36 || !tracker.effect_picker_labels[index][0])return;
     handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_ACCEPT,
                                 .index=effect_picker_command_at(index)});
+}
+static int byte_picker_move(int key) {
+    int value=tracker.byte_picker_cursor;
+    if(key==F80_KEY_UP)value-=16;
+    else if(key==F80_KEY_DOWN)value+=16;
+    else if(key==F80_KEY_LEFT)--value;
+    else if(key==F80_KEY_RIGHT)++value;
+    else return 0;
+    if(value<0 || value>255)return 0;
+    tracker.byte_picker_cursor=value;
+    return 1;
+}
+static void byte_picker_finish(int clear) {
+    TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel];
+    if(tracker.field==1) {
+        edited.instrument=clear?-1:tracker.byte_picker_cursor;
+        edit_cell(tracker.step,tracker.channel,edited);
+    } else {
+        int slot=pattern_effect_slot();
+        TtPatternEffect *fx=tt_cell_effect(&edited,slot);
+        if(fx) {
+            if(clear) {
+                if(fx->command!=TT_EFFECT_NONE)fx->value=-1;
+            } else {
+                if(fx->command==TT_EFFECT_NONE)
+                    set_effect_slot(&edited,slot,TT_EFFECT_S);
+                fx=tt_cell_effect(&edited,slot);
+                fx->value=tracker.byte_picker_cursor;
+            }
+            edit_cell(tracker.step,tracker.channel,edited);
+        }
+    }
+    tracker.byte_picker_dialog=NULL;
+    tracker.byte_picker_help=NULL;
+    tracker.byte_picker_canvas=NULL;
+    tracker.byte_picker_cursor=0;
+    f80_hide_modal(&tracker.app);
+    tt_tracker_log_event("UI",tracker.field==1?
+        (clear?"Instrument cleared from autocomplete":
+               "Instrument selected from autocomplete"):
+        (clear?"Effect value cleared from autocomplete":
+               "Effect value selected from autocomplete"));
+}
+static int decimal_picker_move(int key) {
+    int index=tracker.decimal_picker_cursor-tracker.decimal_picker_min;
+    if(key==F80_KEY_UP)index-=10;
+    else if(key==F80_KEY_DOWN)index+=10;
+    else if(key==F80_KEY_LEFT)--index;
+    else if(key==F80_KEY_RIGHT)++index;
+    else return 0;
+    if(index<0 || index>tracker.decimal_picker_max-
+                           tracker.decimal_picker_min)return 0;
+    tracker.decimal_picker_cursor=index+tracker.decimal_picker_min;
+    return 1;
+}
+static void decimal_picker_finish(int accept) {
+    if(accept) {
+        TtEditEvent edit={.type=TT_EDIT_DX7_PARAMETER};
+        edit.dx7_parameter.index=tracker.sample_index;
+        edit.dx7_parameter.parameter=tracker.decimal_picker_parameter;
+        int offset=edit.dx7_parameter.parameter==144?24:
+            edit.dx7_parameter.parameter<126 &&
+            edit.dx7_parameter.parameter%21==20?7:0;
+        edit.dx7_parameter.value=tracker.decimal_picker_cursor+offset;
+        if(!emit_edit(&edit))tt_tracker_message(edit_message);
+    }
+    tracker.decimal_picker_dialog=NULL;
+    tracker.decimal_picker_help=NULL;
+    tracker.decimal_picker_canvas=NULL;
+    tracker.decimal_picker_cursor=tracker.decimal_picker_min=
+        tracker.decimal_picker_max=tracker.decimal_picker_parameter=0;
+    f80_hide_modal(&tracker.app);
+    tt_tracker_log_event("UI",accept?"DX7 value selected from autocomplete":
+                                       "DX7 value autocomplete cancelled");
 }
 static void dx7_grid_move_field(F80Grid *grid,int field) {
     if(!grid || grid->fields<=0)return;
@@ -678,6 +771,103 @@ static int handle_ui_event(TtUiEvent event) {
         f80_hide_modal(&tracker.app);
         tt_tracker_log_event("UI",event.type==TT_UI_EFFECT_PICKER_CLEAR?
             "Effect cell cleared from autocomplete":"Effect selected from autocomplete");
+        return 1;
+    }
+    if(event.type==TT_UI_BYTE_PICKER_OPEN) {
+        if(!pattern_byte_value_focused())return 0;
+        if(!tracker.byte_picker_dialog) {
+            tracker.byte_picker_dialog=f80_dialog(
+                tracker.field==1?"Instrument":"Effect value",NULL,NULL,0,0);
+            tracker.byte_picker_dialog->style=F80_COLOR_PANEL;
+            tracker.byte_picker_dialog->window_role=F80_WINDOW_PURPLE;
+            tracker.byte_picker_canvas=f80_add(tracker.byte_picker_dialog,
+                f80_canvas(byte_picker_paint,NULL));
+            tracker.byte_picker_canvas->focusable=1;
+            tracker.byte_picker_help=f80_add(tracker.byte_picker_dialog,
+                f80_label("Arrows move   Accept select   Esc clear"));
+            tracker.byte_picker_help->style=F80_COLOR_TEXT;
+        }
+        if(tracker.field==1) {
+            int instrument=tracker.pattern.cell[tracker.step][tracker.channel].instrument;
+            tracker.byte_picker_cursor=instrument>=0 && instrument<=255?
+                instrument:0;
+        } else {
+            const TtPatternEffect *fx=tt_cell_effect_const(
+                &tracker.pattern.cell[tracker.step][tracker.channel],
+                pattern_effect_slot());
+            tracker.byte_picker_cursor=fx && fx->value>=0 && fx->value<=255?
+                fx->value:0;
+        }
+        f80_show_modal(&tracker.app,tracker.byte_picker_dialog);
+        tt_tracker_log_event("UI",tracker.field==1?
+            "Instrument autocomplete opened":"Effect value autocomplete opened");
+        return 1;
+    }
+    if(event.type==TT_UI_BYTE_PICKER_MOVE) {
+        if(tracker.app.modal!=tracker.byte_picker_dialog)return 0;
+        return byte_picker_move(event.index);
+    }
+    if(event.type==TT_UI_BYTE_PICKER_CURSOR) {
+        if(tracker.app.modal!=tracker.byte_picker_dialog ||
+           event.index<0 || event.index>255)return 0;
+        tracker.byte_picker_cursor=event.index;
+        return 1;
+    }
+    if(event.type==TT_UI_BYTE_PICKER_ACCEPT ||
+       event.type==TT_UI_BYTE_PICKER_CLEAR) {
+        if(tracker.app.modal!=tracker.byte_picker_dialog)return 0;
+        if(event.type==TT_UI_BYTE_PICKER_ACCEPT &&
+           event.index>=0 && event.index<=255)
+            tracker.byte_picker_cursor=event.index;
+        byte_picker_finish(event.type==TT_UI_BYTE_PICKER_CLEAR);
+        return 1;
+    }
+    if(event.type==TT_UI_DECIMAL_PICKER_OPEN) {
+        if(tracker.perspective!=TT_PERSPECTIVE_INSTRUMENTS ||
+           tracker.wave.instrument_type!=TT_INSTRUMENT_DX7)return 0;
+        int parameter=dx7_selected_parameter();
+        int maximum=tt_dx7_max(parameter);
+        if(parameter<0 || maximum<0 || maximum>99)return 0;
+        int offset=parameter==144?24:
+            parameter<126 && parameter%21==20?7:0;
+        if(!tracker.decimal_picker_dialog) {
+            tracker.decimal_picker_dialog=f80_dialog("Decimal value",NULL,NULL,0,0);
+            tracker.decimal_picker_dialog->style=F80_COLOR_PANEL;
+            tracker.decimal_picker_dialog->window_role=F80_WINDOW_PURPLE;
+            tracker.decimal_picker_canvas=f80_add(tracker.decimal_picker_dialog,
+                f80_canvas(decimal_picker_paint,NULL));
+            tracker.decimal_picker_canvas->focusable=1;
+            tracker.decimal_picker_help=f80_add(tracker.decimal_picker_dialog,
+                f80_label("Arrows move   Accept select   Esc cancel"));
+            tracker.decimal_picker_help->style=F80_COLOR_TEXT;
+        }
+        tracker.decimal_picker_parameter=parameter;
+        tracker.decimal_picker_min=-offset;
+        tracker.decimal_picker_max=maximum-offset;
+        tracker.decimal_picker_cursor=tracker.wave.dx7.data[parameter]-offset;
+        f80_show_modal(&tracker.app,tracker.decimal_picker_dialog);
+        tt_tracker_log_event("UI","DX7 decimal autocomplete opened");
+        return 1;
+    }
+    if(event.type==TT_UI_DECIMAL_PICKER_MOVE) {
+        if(tracker.app.modal!=tracker.decimal_picker_dialog)return 0;
+        return decimal_picker_move(event.index);
+    }
+    if(event.type==TT_UI_DECIMAL_PICKER_CURSOR) {
+        if(tracker.app.modal!=tracker.decimal_picker_dialog ||
+           event.index<tracker.decimal_picker_min ||
+           event.index>tracker.decimal_picker_max)return 0;
+        tracker.decimal_picker_cursor=event.index;
+        return 1;
+    }
+    if(event.type==TT_UI_DECIMAL_PICKER_ACCEPT ||
+       event.type==TT_UI_DECIMAL_PICKER_CLEAR) {
+        if(tracker.app.modal!=tracker.decimal_picker_dialog)return 0;
+        if(event.type==TT_UI_DECIMAL_PICKER_ACCEPT &&
+           event.index>=tracker.decimal_picker_min &&
+           event.index<=tracker.decimal_picker_max)
+            tracker.decimal_picker_cursor=event.index;
+        decimal_picker_finish(event.type==TT_UI_DECIMAL_PICKER_ACCEPT);
         return 1;
     }
     if(event.type==TT_UI_INSTRUMENT_FOCUS_RECONCILE) {
@@ -2014,6 +2204,15 @@ static int dx7_operator_parameter(int row,int field) {
     if(field<1 || field>=22)return -1;
     return (5-row)*21+dx7_ops[field-1];
 }
+static int dx7_selected_parameter(void) {
+    F80Grid *grid=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
+                  tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
+                                          &tracker.dx7_globals_grid;
+    return tracker.dx7_grid_kind==1?
+        dx7_operator_parameter(grid->row,grid->field):
+        tracker.dx7_grid_kind==2?dx7_pitch_parameter(grid->field):
+                                 dx7_global_parameter(grid->field);
+}
 static int dx7_grid_is_editing(void) {
     F80Grid *grid=tracker.dx7_grid_kind==1?&tracker.dx7_operators_grid:
                   tracker.dx7_grid_kind==2?&tracker.dx7_pitch_grid:
@@ -2224,6 +2423,17 @@ static void dx7_adjust(int delta) {
     if(!emit_edit(&e))tt_tracker_message(edit_message);
 }
 static int dx7_key(int key) {
+    /* Forward/affirmative opens the value chooser on numeric FM cells. Keep
+       this ahead of the grid's Enter handler, which otherwise only toggles
+       the inline edit cursor and makes the chooser unreachable. */
+    if((key==10 || key==13) && dx7_selected_parameter()>=0) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_OPEN});
+        return 1;
+    }
+    if(key=='P' && dx7_selected_parameter()>=0) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_OPEN});
+        return 1;
+    }
     if(key==27 && dx7_grid_is_editing()) {
         handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=0});return 1;
     }
@@ -4065,7 +4275,17 @@ static void status_option(F80Widget *button,void *user) {
     (void)button;(void)user;tracker_focus_panel_next(1);
 }
 static void status_forward(F80Widget *button,void *user) {
-    (void)button;(void)user;handle_key(10);
+    (void)button;(void)user;
+    if(effect_name_focused())
+        handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_OPEN});
+    else if(pattern_byte_value_focused())
+        handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_OPEN});
+    else if(tracker.focus==FOCUS_WAVE &&
+            tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
+            tracker.wave.instrument_type==TT_INSTRUMENT_DX7 &&
+            dx7_selected_parameter()>=0)
+        handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_OPEN});
+    else handle_key(10);
 }
 static void status_back(F80Widget *button,void *user) {
     (void)button;(void)user;handle_key(27);
@@ -4406,6 +4626,48 @@ static void effect_picker_paint(F80Widget *canvas,void *user) {
         int pair=index==tracker.effect_picker_cursor?
             F80_COLOR_BUTTON_FOCUS:F80_COLOR_PANEL;
         f80_put(y,x,cell,5,pair,1);
+    }
+}
+static int byte_picker_cell_width(F80Rect canvas) {
+    return canvas.w>=48?3:2;
+}
+static void byte_picker_paint(F80Widget *canvas,void *user) {
+    (void)user;
+    F80Rect r=canvas->rect;
+    int cell_width=byte_picker_cell_width(r);
+    f80_fill(r,F80_COLOR_PANEL);
+    for(int value=0;value<256;++value) {
+        int row=value/16,column=value%16;
+        int x=r.x+1+column*cell_width,y=r.y+row;
+        char cell[4];
+        snprintf(cell,sizeof(cell),cell_width==3?"%02X ":"%02X",value);
+        if(y>=r.y+r.h || x+cell_width>r.x+r.w)continue;
+        f80_put(y,x,cell,cell_width,
+            value==tracker.byte_picker_cursor?F80_COLOR_BUTTON_FOCUS:
+                                         F80_COLOR_PANEL,1);
+    }
+}
+static int decimal_picker_cell_width(F80Rect canvas) {
+    return canvas.w>=42?4:3;
+}
+static void decimal_picker_paint(F80Widget *canvas,void *user) {
+    (void)user;
+    F80Rect r=canvas->rect;
+    f80_fill(r,F80_COLOR_PANEL);
+    int cell_width=decimal_picker_cell_width(r);
+    for(int index=0;index<=tracker.decimal_picker_max-
+                              tracker.decimal_picker_min;++index) {
+        int value=index+tracker.decimal_picker_min;
+        int row=index/10,column=index%10;
+        int x=r.x+1+column*cell_width,y=r.y+row;
+        char cell[5];
+        if(tracker.decimal_picker_min<0)
+            snprintf(cell,sizeof(cell),cell_width==4?"%3d ":"%3d",value);
+        else snprintf(cell,sizeof(cell),cell_width==4?"%02d  ":"%02d ",value);
+        if(y>=r.y+r.h || x+cell_width>r.x+r.w)continue;
+        f80_put(y,x,cell,cell_width,
+            value==tracker.decimal_picker_cursor?F80_COLOR_BUTTON_FOCUS:
+                                            F80_COLOR_PANEL,1);
     }
 }
 static void clear_grid_subcell(void) {
@@ -4873,6 +5135,32 @@ static void handle_key(int key) {
             return;
         }
 #endif
+        if(tracker.app.modal==tracker.byte_picker_dialog) {
+            if(key==F80_KEY_UP || key==F80_KEY_DOWN ||
+               key==F80_KEY_LEFT || key==F80_KEY_RIGHT)
+                handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_MOVE,
+                                            .index=key});
+            else if(key==10 || key==13)
+                handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_ACCEPT,
+                                            .index=tracker.byte_picker_cursor});
+            else if(key==27)
+                handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CLEAR});
+            else f80_key(&tracker.app,key);
+            return;
+        }
+        if(tracker.app.modal==tracker.decimal_picker_dialog) {
+            if(key==F80_KEY_UP || key==F80_KEY_DOWN ||
+               key==F80_KEY_LEFT || key==F80_KEY_RIGHT)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_MOVE,
+                                            .index=key});
+            else if(key==10 || key==13)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_ACCEPT,
+                    .index=tracker.decimal_picker_cursor});
+            else if(key==27)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_CLEAR});
+            else f80_key(&tracker.app,key);
+            return;
+        }
         if(tracker.app.modal==tracker.effect_picker_dialog) {
             if(key==F80_KEY_UP || key==F80_KEY_DOWN ||
                key==F80_KEY_LEFT || key==F80_KEY_RIGHT)
@@ -5027,8 +5315,18 @@ static void handle_key(int key) {
         return;
     }
     if(tracker.focus==FOCUS_PHRASE && (key==10 || key==13)) {
+        if(pattern_byte_value_focused()) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_OPEN});
+            return;
+        }
         handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,
                                     .a=!tracker.grid_value_editing});
+        return;
+    }
+    if(pattern_byte_value_focused() && !tracker.grid_value_editing &&
+       !tracker.selecting && !tracker.visual_selecting &&
+       key=='P') {
+        handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_OPEN});
         return;
     }
     if(tracker.focus==FOCUS_PHRASE && tracker.grid_value_editing) {
@@ -5242,6 +5540,12 @@ static void controller_action_input(TtPadAction action,int down) {
         if(effect_name_focused() && !tracker.app.modal &&
            !tracker.console_visible && !controller_navigation_active()) {
             if(down)effect_picker_open(NULL,NULL);
+            return;
+        }
+        if(pattern_byte_value_focused() && !tracker.app.modal &&
+           !tracker.console_visible && !controller_navigation_active()) {
+            if(down)handle_ui_event((TtUiEvent){
+                .type=TT_UI_BYTE_PICKER_OPEN});
             return;
         }
         if(tracker.focus==FOCUS_PHRASE && !tracker.app.modal &&
@@ -5531,6 +5835,41 @@ static void handle_mouse(int x,int y,int wheel) {
     if(wheel==F80_MOUSE_RELEASE)return;
     controller_navigation_exit();
     if(tracker.app.modal) {
+        if(tracker.app.modal==tracker.decimal_picker_dialog &&
+           tracker.decimal_picker_canvas && wheel==0 &&
+           f80_contains(tracker.decimal_picker_canvas->rect,x,y)) {
+            F80Rect r=tracker.decimal_picker_canvas->rect;
+            int cell_width=decimal_picker_cell_width(r);
+            int local_x=x-(r.x+1),row=y-r.y;
+            if(local_x>=0 && row>=0 && row<10 &&
+               local_x<cell_width*10) {
+                int index=row*10+local_x/cell_width;
+                int value=index+tracker.decimal_picker_min;
+                if(value<=tracker.decimal_picker_max) {
+                    handle_ui_event((TtUiEvent){
+                        .type=TT_UI_DECIMAL_PICKER_CURSOR,.index=value});
+                    handle_ui_event((TtUiEvent){
+                        .type=TT_UI_DECIMAL_PICKER_ACCEPT,.index=value});
+                }
+            }
+            return;
+        }
+        if(tracker.app.modal==tracker.byte_picker_dialog &&
+           tracker.byte_picker_canvas && wheel==0 &&
+           f80_contains(tracker.byte_picker_canvas->rect,x,y)) {
+            F80Rect r=tracker.byte_picker_canvas->rect;
+            int cell_width=byte_picker_cell_width(r);
+            int local_x=x-(r.x+1),row=y-r.y;
+            if(local_x>=0 && row>=0 && row<16 &&
+               local_x<cell_width*16) {
+                int index=row*16+local_x/cell_width;
+                handle_ui_event((TtUiEvent){
+                    .type=TT_UI_BYTE_PICKER_CURSOR,.index=index});
+                handle_ui_event((TtUiEvent){
+                    .type=TT_UI_BYTE_PICKER_ACCEPT,.index=index});
+            }
+            return;
+        }
         if(tracker.app.modal==tracker.effect_picker_dialog &&
            tracker.effect_picker_canvas && wheel==0 &&
            f80_contains(tracker.effect_picker_canvas->rect,x,y)) {
@@ -6563,6 +6902,8 @@ static int frame(void *user) {
         }
         /* Keep the picker geometry independent of the established dialogs. */
         if(tracker.app.modal==tracker.effect_picker_dialog) { w=44;h=12; }
+        if(tracker.app.modal==tracker.byte_picker_dialog) { w=56;h=22; }
+        if(tracker.app.modal==tracker.decimal_picker_dialog) { w=48;h=16; }
         if(w>cols-2)w=cols-2;
         if(h>rows-2)h=rows-2;
         f80_layout(tracker.app.modal,f80_rect((cols-w)/2,(rows-h)/2,w,h));
@@ -6571,6 +6912,20 @@ static int frame(void *user) {
             f80_layout(tracker.effect_picker_canvas,
                        f80_rect(r.x+3,r.y+2,37,6));
             f80_layout(tracker.effect_picker_help,
+                       f80_rect(r.x+2,r.y+r.h-3,r.w-4,1));
+        }
+        if(tracker.app.modal==tracker.byte_picker_dialog) {
+            F80Rect r=tracker.app.modal->rect;
+            f80_layout(tracker.byte_picker_canvas,
+                       f80_rect(r.x+2,r.y+2,r.w-4,16));
+            f80_layout(tracker.byte_picker_help,
+                       f80_rect(r.x+2,r.y+r.h-3,r.w-4,1));
+        }
+        if(tracker.app.modal==tracker.decimal_picker_dialog) {
+            F80Rect r=tracker.app.modal->rect;
+            f80_layout(tracker.decimal_picker_canvas,
+                       f80_rect(r.x+2,r.y+2,r.w-4,10));
+            f80_layout(tracker.decimal_picker_help,
                        f80_rect(r.x+2,r.y+r.h-3,r.w-4,1));
         }
         if(tracker.app.modal==tracker.order_dialog)order_refresh();
