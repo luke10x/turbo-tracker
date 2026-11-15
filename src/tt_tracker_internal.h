@@ -48,7 +48,7 @@ typedef struct {
     int grid_value_editing;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
-    int compact_editing,effect_slots[TT_CHANNELS];
+    int compact_editing;
     int playing,started,follow,play_step,play_order,active_step,active_pattern_index;
     int active_order_index,loop,pattern_index,play_mode,loop_pattern_index;
     int playback_bpm,playback_ticks_per_row;

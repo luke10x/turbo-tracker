@@ -463,6 +463,7 @@ static void manage_selected(F80Widget *list,void *user);
 static void dx7_adjust(int delta);
 static int dx7_global_columns(int width);
 static int dx7_grid_is_editing(void);
+static int pattern_effect_slots_used(int channel);
 static void effect_picker_paint(F80Widget *,void *);
 static void grid_major_down(F80Widget *,void *);
 static void grid_major_up(F80Widget *,void *);
@@ -584,14 +585,16 @@ static int handle_ui_event(TtUiEvent event) {
         if(wave_editor)
             focus_marker((clamp(tracker.marker,0,TT_MARKERS-1)+1)%TT_MARKERS);
         else if(tracker.focus==FOCUS_PHRASE && !tracker.grid_value_editing) {
-            if(tracker.inline_table_selected)inline_table_move_field(1);
-            else move_pattern_field(1);
+            /* Focus is a pane action. Space advances grid subcells; Focus
+               remains available for visual selection with a direction key. */
         } else {
             f80_focus_next(&tracker.app,1);
             tracker_note_panel_focus(tracker.app.focus);
         }
         tt_tracker_log_event("UI",wave_editor?"Next wave marker focused":
-                             "Focus advanced within the current pane");
+            tracker.focus==FOCUS_PHRASE?
+                "Grid Focus reserved for directional selection":
+                "Focus advanced within the current pane");
         return 1;
     }
     if(event.type==TT_UI_OPTION_ACTION) {
@@ -979,13 +982,16 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_PATTERN_CURSOR) {
         tracker.inline_table_selected=0;
         int channel=clamp(event.a,0,TT_CHANNELS-1);
-        if(channel!=tracker.channel ||
-           (tracker.field>=2 && event.b<2))
+        int old_channel=tracker.channel;
+        int old_field=tracker.field;
+        int pair_start=pattern_effect_slots_used(old_channel)-1;
+        int old_slot=old_field>=2?(old_field-2)/2:-1;
+        int new_slot=event.b>=2?(event.b-2)/2:-1;
+        int leaves_effect_pair=old_slot>=pair_start && old_slot<=pair_start+1 &&
+            (channel!=old_channel || new_slot<pair_start ||
+             new_slot>pair_start+1);
+        if(channel!=old_channel || leaves_effect_pair) {
             compact_pattern_effects_if_needed();
-        if(event.b>=2) {
-            int requested=(event.b-2)/2+1;
-            if(requested>tracker.effect_slots[channel])
-                tracker.effect_slots[channel]=requested;
         }
         int fields=pattern_edit_fields_per_channel(channel);
         tracker.channel=channel;
@@ -1003,8 +1009,6 @@ static int handle_ui_event(TtUiEvent event) {
         }
         tracker.focus=event.index;
         if(event.index!=FOCUS_PHRASE)tracker.inline_table_selected=0;
-        if(event.index!=FOCUS_PHRASE)
-            memset(tracker.effect_slots,0,sizeof(tracker.effect_slots));
         tracker.app.focus=event.index==FOCUS_ORDER?tracker.order_list:
             event.index==FOCUS_PHRASE?tracker.phrase_canvas:
             tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
@@ -2380,8 +2384,8 @@ static void paint_wave(F80Widget *canvas,void *user) {
         f80_put(r.y+r.h-1,r.x+r.w-1,"▶",1,8,1);
     }
 }
-static int pattern_effect_slots_visible(int channel) {
-    int slots=tracker.effect_slots[channel]>1?tracker.effect_slots[channel]:1;
+static int pattern_effect_slots_used(int channel) {
+    int slots=1;
     int displayed=tracker.edit_order>=0?tracker.song.order_count:1;
     for(int item=0;item<displayed;++item) {
         int pattern=tracker.edit_order>=0?tracker.song.order[item]:tracker.pattern_index;
@@ -2394,9 +2398,19 @@ static int pattern_effect_slots_visible(int channel) {
             else if(cell->effect2!=TT_EFFECT_NONE && slots<2)slots=2;
         }
     }
+    return slots;
+}
+static int pattern_effect_slots_visible(int channel) {
+    int slots=pattern_effect_slots_used(channel);
     if(channel==tracker.channel && tracker.field>=2) {
-        int cursor_slots=(tracker.field-2)/2+1;
+        int cursor_slot=(tracker.field-2)/2;
+        int cursor_slots=cursor_slot+1;
         if(cursor_slots>slots)slots=cursor_slots;
+        /* Keep one blank effect slot available while the cursor is on the
+           last populated effect column. It collapses when the cursor leaves
+           this column and its adjacent expansion. */
+        if(cursor_slot==pattern_effect_slots_used(channel)-1 && slots<3)
+            ++slots;
     }
     return slots;
 }

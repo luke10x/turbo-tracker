@@ -993,6 +993,8 @@ int main(void) {
     tracker.grid_value_editing=0;
     tracker.selecting=tracker.visual_selecting=0;
     tracker.step=10;tracker.channel=0;tracker.field=0;
+    handle_key(F80_KEY_FOCUS); /* Focus no longer advances grid subcells. */
+    assert(tracker.field==0 && tracker.channel==0);
     handle_key(9); /* Option/Tab no longer advances the grid subcell. */
     assert(tracker.field==0 && tracker.channel==0);
     handle_key(F80_KEY_SHIFT_RIGHT); /* Focus+arrow selects in the grid. */
@@ -1000,12 +1002,38 @@ int main(void) {
     handle_key(27);
     assert(!tracker.visual_selecting && !tracker.selecting);
     tracker.channel=0;tracker.field=0;
-    handle_key(' '); /* Space is an alternate Focus binding in the grid. */
+    handle_key(' '); /* Space advances directly to the next grid subcell. */
     assert(tracker.field==1 && tracker.channel==0);
     handle_key(F80_KEY_SHIFT_DOWN); /* Shift+arrow is keyboard visual select. */
     assert(tracker.visual_selecting && tracker.selecting && tracker.step==11);
     handle_key(27);
     assert(!tracker.visual_selecting && !tracker.selecting);
+    TtCell effect_width_cell=tracker.pattern.cell[0][0];
+    int effect_width_edit_order=tracker.edit_order;
+    int effect_width_channel=tracker.channel,effect_width_field=tracker.field;
+    tracker.edit_order=-1;tracker.channel=0;tracker.field=0;
+    tracker.pattern.cell[0][0].effect=TT_EFFECT_R;
+    tracker.pattern.cell[0][0].value=0;
+    tracker.pattern.cell[0][0].effect2=TT_EFFECT_NONE;
+    tracker.pattern.cell[0][0].value2=-1;
+    tracker.pattern.cell[0][0].effect3=TT_EFFECT_NONE;
+    tracker.pattern.cell[0][0].value3=-1;
+    assert(pattern_effect_slots_used(0)==1);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=2});
+    assert(pattern_effect_slots_visible(0)==2); /* Trigger opens one spare. */
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=4});
+    assert(pattern_effect_slots_visible(0)==2); /* Spare remains while visited. */
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=0});
+    assert(pattern_effect_slots_visible(0)==1); /* Empty spare collapses. */
+    tracker.pattern.cell[0][0].effect2='G';
+    tracker.pattern.cell[0][0].value2=0;
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=4});
+    assert(pattern_effect_slots_used(0)==2 && pattern_effect_slots_visible(0)==3);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,.a=0,.b=0});
+    assert(pattern_effect_slots_visible(0)==2); /* Used effect column remains. */
+    tracker.pattern.cell[0][0]=effect_width_cell;
+    tracker.edit_order=effect_width_edit_order;
+    tracker.channel=effect_width_channel;tracker.field=effect_width_field;
     F80Widget *keyboard_panels=f80_box(F80_ROW);
     F80Widget *keyboard_left=f80_add(keyboard_panels,f80_box(F80_COL));
     keyboard_left->frame=1;
