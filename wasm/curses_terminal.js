@@ -100,6 +100,24 @@ term.onKey(({ domEvent }) => {
   }
   domEvent.preventDefault();
 });
+let focusKeyHeld = false;
+let focusKeyUsed = false;
+window.addEventListener('keydown', event => {
+  if (event.key === 'Shift') {
+    focusKeyHeld = true;
+    focusKeyUsed = false;
+  } else if (focusKeyHeld && event.shiftKey) {
+    focusKeyUsed = true;
+  }
+}, true);
+window.addEventListener('keyup', event => {
+  if (event.key !== 'Shift' || !focusKeyHeld) return;
+  focusKeyHeld = false;
+  if (focusKeyUsed) return;
+  call('curses_push_key', [1018]);
+  if (ready && window.f80ApplicationId === 'turbo-tracker')
+    call('tt_tracker_flush_input', []);
+}, true);
 function cell(event) {
   return cellAt(event.clientX, event.clientY);
 }

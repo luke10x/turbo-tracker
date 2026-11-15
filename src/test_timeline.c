@@ -11,6 +11,11 @@ static void count_header_click(F80Widget *button,void *user) {
 
 int main(void) {
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");
+    char compact_order[16];
+    order_panel_row_text(compact_order,sizeof(compact_order),0,0,1,1);
+    assert(!strcmp(compact_order,"[x]00>00"));
+    order_panel_row_text(compact_order,sizeof(compact_order),1,0,1,0);
+    assert(!strcmp(compact_order,"[x]01 00"));
     unsetenv("INIT_PLAY");
     assert(!initial_play_requested());
     assert(setenv("INIT_PLAY","1",1)==0 && initial_play_requested());
@@ -876,25 +881,34 @@ int main(void) {
     assert(tracker.focus==FOCUS_WAVE);
     handle_key(9);
     assert(tracker.focus==FOCUS_WAVE && current_status()==perspective_status_visible);
+    assert(!strcmp(current_status()[0].label,"Focus") &&
+           !strcmp(current_status()[1].label,"Option") &&
+           !strcmp(current_status()[2].label,"Forward") &&
+           !strcmp(current_status()[3].label,"Back"));
+    int saved_marker=tracker.marker,saved_view=tracker.view_start;
+    int saved_instrument_type=tracker.wave.instrument_type;
+    tracker.marker=0;tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
+    handle_key(2001);
+    assert(tracker.marker==1);
+    tracker.marker=TT_MARKERS-1;
+    handle_key(2001);
+    assert(tracker.marker==0);
+    tracker.marker=saved_marker;tracker.view_start=saved_view;
+    tracker.wave.instrument_type=saved_instrument_type;
     tracker.focus=FOCUS_ORDER;
-    assert(strcmp(current_status()[0].label,"Or-")==0 &&
-           current_status()[0].action==previous_order);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.play_mode=PLAY_PATTERN;
-    assert(strcmp(current_status()[0].label,"Pt-")==0 &&
-           current_status()[0].action==prev_pattern);
+    assert(strcmp(current_status()[1].label,"Option")==0);
     int saved_field=tracker.field;
     tracker.focus=FOCUS_PHRASE;tracker.field=0;
-    assert(strcmp(current_status()[0].label,"-C")==0 &&
-           strcmp(current_status()[1].label,"+C")==0 &&
-           strcmp(current_status()[4].label,"OFF")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0 &&
+           strcmp(current_status()[3].label,"Back")==0);
     tracker.field=1;
-    assert(strcmp(current_status()[0].label,"-F")==0 &&
-           strcmp(current_status()[2].label,"-1")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.field=2;
-    assert(strcmp(current_status()[0].label,"Auto")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.field=3;
-    assert(strcmp(current_status()[0].label,"-F")==0 &&
-           strcmp(current_status()[1].label,"+F")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.field=saved_field;tracker.focus=FOCUS_ORDER;
     F80Widget fake_wave_row={.visible=1},fake_grid_row={.visible=1},
         fake_phrase_frame={.visible=1};
@@ -950,7 +964,7 @@ int main(void) {
     tracker.focus=FOCUS_ORDER;
     handle_ui_event((TtUiEvent){.type=TT_UI_MODE_CONTEXT,.a=PLAY_SONG});
     tracker.play_mode=PLAY_SONG;
-    assert(strcmp(current_status()[0].label,"Or-")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.order_list=&order_choice;
     tracker.edit_order=0;
     tracker.phrase_scroll=0;
@@ -1039,7 +1053,7 @@ int main(void) {
     controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_UP,1);
     controller_button_input(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,1);
     controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
-    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==73 &&
+    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==60 &&
            tracker.playing);
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
     assert(!tracker.grid_value_editing && tracker.playing);
@@ -1049,24 +1063,55 @@ int main(void) {
     controller_raw_hat(SDL_HAT_UP);
     controller_raw_button(4,1); /* LB */
     controller_raw_button(5,1); /* RB */
-    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==73 &&
+    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==60 &&
            tracker.playing);
     controller_raw_button(0,0);
     controller_raw_hat(SDL_HAT_CENTERED);
     memset(&controller_input,0,sizeof(controller_input));
-    F80Widget fake_controller_play={.action=count_header_click,.user=(void *)2};
-    tracker.play_button=&fake_controller_play;
-    header_clicks[2]=0;
+    static const F80MenuItem controller_menu_one[]={
+        {"One",NULL,count_header_click,1},{NULL,NULL,NULL,0},
+        {"Two",NULL,count_header_click,1}};
+    static const F80MenuItem controller_menu_two[]={
+        {"Three",NULL,count_header_click,1}};
+    static const F80Menu controller_menus[]={
+        {"First",controller_menu_one,3},{"Second",controller_menu_two,1}};
+    F80Widget *controller_root=f80_box(F80_COL);
+    tracker.app.menu=f80_add(controller_root,
+        f80_menubar(controller_menus,2));
     controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
+    assert(tracker.app.menu->menu_active && tracker.app.menu->menu_index==0 &&
+           tracker.app.menu->menu_item==0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
+    assert(tracker.app.menu->menu_index==0 && tracker.app.menu->menu_item==2);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
+    assert(tracker.app.menu->menu_index==1 && tracker.app.menu->menu_item==0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
+    f80_menu_close(tracker.app.menu);
+    F80Widget fake_controller_play={.action=count_header_click,.user=(void *)2};
+    F80Widget fake_controller_stop={.action=count_header_click,.user=(void *)2};
+    tracker.play_button=&fake_controller_play;
+    tracker.stop_button=&fake_controller_stop;
+    header_clicks[2]=0;
+    controller_trigger_input(1,1);
     assert(tracker.controller_toolbar_mode &&
            tracker.controller_toolbar_index==0);
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
-    assert(!tracker.controller_toolbar_mode && header_clicks[2]==1);
-    tracker.play_button=NULL;
+    assert(tracker.controller_toolbar_mode && header_clicks[2]==1);
+    controller_trigger_input(1,0);
+    controller_trigger_input(1,1);
+    assert(tracker.controller_toolbar_mode &&
+           tracker.controller_toolbar_index==1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
+    assert(tracker.controller_toolbar_mode && header_clicks[2]==2);
+    controller_trigger_input(1,0);
+    controller_navigation_exit();
+    tracker.play_button=NULL;tracker.stop_button=NULL;tracker.app.menu=NULL;
     memset(&controller_input,0,sizeof(controller_input));
     tracker.controller_screen_navigation=0;
-    tracker.controller_toolbar_mode=tracker.controller_status_mode=0;
-    F80Widget *controller_root=f80_box(F80_COL);
+    tracker.controller_toolbar_mode=0;
     F80Widget *controller_wave=f80_add(controller_root,f80_box(F80_COL));
     controller_wave->frame=1;controller_wave->rect=f80_rect(0,0,20,3);
     F80Widget *controller_wave_item=f80_add(controller_wave,
@@ -1140,7 +1185,7 @@ int main(void) {
     f80_focus_next(&tracker.app,-1);
     assert(tracker.app.focus==selector_sample_list);
     controller_action_input(TT_PAD_TOP_RIGHT,1);
-    assert(tracker.app.focus==marker_list); /* R1 changes the active list */
+    assert(tracker.app.focus==selector_sample_list); /* R1 is menu traversal. */
     tracker.instrument_selector_frame=NULL;
     tracker.manage_list=NULL;tracker.slices_list=NULL;
     tracker.perspective=TT_PERSPECTIVE_MAIN;
@@ -1637,7 +1682,7 @@ int main(void) {
     edit_history=tt_edit_history_new(&history_doc);
     assert(edit_history);
     tracker.focus=FOCUS_PHRASE;tracker.field=2;tracker.step=0;tracker.channel=0;
-    assert(strcmp(current_status()[0].label,"Auto")==0);
+    assert(strcmp(current_status()[0].label,"Focus")==0);
     TtCell picker_original=tracker.pattern.cell[0][0];
     effect_picker_open(NULL,NULL);
     assert(tracker.effect_picker_labels[17][0]=='R' &&
@@ -1731,18 +1776,40 @@ int main(void) {
     handle_key(22);
     handle_key('p');
     assert(!tracker.selecting && !tracker.visual_selecting);
+    F80Widget shortcut_wave_row={.visible=1},shortcut_grid_row={.visible=1},
+        shortcut_phrase={.visible=1},shortcut_instruments={.visible=1},
+        shortcut_order={.visible=1},shortcut_wave={.visible=1},
+        shortcut_wave_frame={.visible=1},shortcut_manage={.visible=1},
+        shortcut_slices={.visible=1},shortcut_order_dialog={.visible=1};
+    tracker.wave_row=&shortcut_wave_row;tracker.grid_row=&shortcut_grid_row;
+    tracker.phrase_frame=&shortcut_phrase;
+    tracker.instrument_panels=&shortcut_instruments;
+    tracker.order_frame=&shortcut_order;tracker.wave_canvas=&shortcut_wave;
+    tracker.wave_frame=&shortcut_wave_frame;
+    tracker.instrument_selector_frame=NULL;
+    tracker.order_dialog=&shortcut_order_dialog;
+    tracker.manage_dialog=&shortcut_manage;tracker.slices_dialog=&shortcut_slices;
     handle_key(22);
     handle_key(2005); /* F5 */
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(tracker.perspective==TT_PERSPECTIVE_MAIN &&
+           !tracker.selecting && !tracker.visual_selecting);
     handle_key(22);
     handle_key(2006); /* F6 */
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
+           !tracker.selecting && !tracker.visual_selecting);
     handle_key(22);
     handle_key(27);
     assert(!tracker.selecting && !tracker.visual_selecting);
     handle_key(22);
     handle_key(2007); /* F7 */
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(tracker.perspective==TT_PERSPECTIVE_ORDERS &&
+           !tracker.selecting && !tracker.visual_selecting);
+    int playing_before_f8=tracker.playing;
+    handle_key(2008); /* F8 toggles playback. */
+    assert(tracker.playing!=playing_before_f8);
+    handle_key(2008);
+    assert(tracker.playing==playing_before_f8);
+    tracker.order_dialog=NULL;tracker.manage_dialog=NULL;tracker.slices_dialog=NULL;
     int original_note=tracker.pattern.cell[0][4].note;
     TtEditEvent change={.type=TT_EDIT_CELL_SET};
     change.cell_set=(TtEditCellSet){0,4,{72,1,TT_EFFECT_NONE,-1}};
@@ -1790,6 +1857,7 @@ int main(void) {
     tracker.wave_row=&wave_row;tracker.grid_row=&grid_row;
     tracker.phrase_frame=&phrase_frame;
     tracker.details=&details;tracker.status=&status;tracker.console=&console;
+    current_status();assert(status.status_count==4);
     int logged=event_log_count;
     view_items[5].action(NULL,NULL);
     assert(tracker.console_visible && root.window_role==F80_WINDOW_CONSOLE);
@@ -1856,6 +1924,12 @@ int main(void) {
     tracker.dx7_globals_canvas=&global_canvas;
     tracker.dx7_globals_panel=&dx7_global_panel;
     tracker.dx7_operators_panel=&dx7_operator_panel;
+    F80Grid saved_globals_grid=tracker.dx7_globals_grid;
+    tracker.dx7_globals_grid=(F80Grid){.field=0,.rect={0,0,48,12}};
+    tracker.dx7_grid_kind=0;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_FOCUS,
+                                       .index=0,.a=0}));
+    tracker.dx7_globals_grid=saved_globals_grid;
     edit_history=tt_edit_history_new(&(TtEditDoc){.song=&tracker.song,
         .active=&tracker.pattern,.active_index=&tracker.pattern_index,.samples=tracker.samples,
         .active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
