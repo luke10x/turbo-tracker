@@ -72,8 +72,9 @@ typedef struct {
     TableVoice table_voice[TT_CHANNELS];
     F80Widget *table_dialog,*table_panel,*table_canvas,*table_name,*table_name_label;
     F80Widget *table_scrollbar,*table_buttons[5];
-    F80Widget *effect_picker_dialog,*effect_picker_help,*effect_picker_buttons[36];
+    F80Widget *effect_picker_dialog,*effect_picker_help,*effect_picker_canvas;
     char effect_picker_labels[36][6];
+    int effect_picker_cursor;
     F80Grid table_grid;
     F80PointerGesture grid_pointer_gesture;
     int grid_touch_mode,grid_touch_x,grid_touch_y;

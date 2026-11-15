@@ -16,10 +16,12 @@ static const char *effect_alias(int effect) {
     int register_index=tt_effect_register_index(effect);
     if(register_index>=0)return register_alias[register_index];
     switch(effect) {
-    case 'G':return "GLD";case 'I':return "IIN";
+    case 'G':return "GLD";case 'H':return "HPC";case 'I':return "IIN";
     case 'J':return "JDN";case 'K':return "KUP";
+    case 'L':return "LPC";
     case 'M':return "MVL";case 'N':return "NPN";
     case 'O':return "OUT";case 'P':return "PAN";
+    case 'Q':return "QRS";
     case 'R':return "RRR";case 'r':return "RTG";case 'S':return "SLC";
     case 'T':return "TBL";case 'U':return "UDL";case 'V':return "VIB";
     case 'W':return "WBL";case 'X':return "XJP";

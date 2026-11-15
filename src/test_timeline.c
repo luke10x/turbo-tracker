@@ -10,6 +10,12 @@ static void count_header_click(F80Widget *button,void *user) {
 }
 
 int main(void) {
+    static const char expected_effect_picker_layout[6][7]={
+        "123456","7890ET","AOINSR","HLDCUM","FYWGPB","VKXQJZ"
+    };
+    for(int row=0;row<6;++row)for(int column=0;column<6;++column)
+        assert(effect_picker_layout[row][column]==
+               expected_effect_picker_layout[row][column]);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");
     char compact_order[16];
     order_panel_row_text(compact_order,sizeof(compact_order),0,0,1,1);
@@ -1687,7 +1693,18 @@ int main(void) {
     effect_picker_open(NULL,NULL);
     assert(tracker.effect_picker_labels[17][0]=='R' &&
            !strcmp(tracker.effect_picker_labels[17],"RRR"));
-    tracker.app.focus=tracker.effect_picker_buttons[17];
+    for(int i=0;i<36;++i)assert(strlen(tracker.effect_picker_labels[i])==3);
+    assert(!strcmp(tracker.effect_picker_labels[18],"HPC") &&
+           !strcmp(tracker.effect_picker_labels[19],"LPC") &&
+           !strcmp(tracker.effect_picker_labels[20],"DRG") &&
+           !strcmp(tracker.effect_picker_labels[21],"CRG") &&
+           !strcmp(tracker.effect_picker_labels[22],"UDL") &&
+           !strcmp(tracker.effect_picker_labels[23],"MVL") &&
+           !strcmp(tracker.effect_picker_labels[33],"QRS"));
+    assert(tracker.effect_picker_canvas &&
+           tracker.effect_picker_dialog->child_count==2);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_CURSOR,
+                                       .index=17}));
     handle_key(13);
     assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_R &&
            tracker.effect_picker_dialog==NULL);
@@ -1695,6 +1712,17 @@ int main(void) {
     handle_key(27);
     assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_NONE &&
            tracker.effect_picker_dialog==NULL);
+    handle_key(10); /* Grid Accept opens autocomplete on an effect-name cell. */
+    assert(tracker.effect_picker_dialog &&
+           tracker.app.modal==tracker.effect_picker_dialog);
+    handle_key(27);
+    assert(tracker.effect_picker_dialog==NULL);
+    controller_action_input(TT_PAD_AFFIRMATIVE,1);
+    assert(tracker.effect_picker_dialog &&
+           tracker.app.modal==tracker.effect_picker_dialog);
+    controller_action_input(TT_PAD_AFFIRMATIVE,0);
+    handle_key(27);
+    assert(tracker.effect_picker_dialog==NULL);
     edit_cell(0,0,picker_original);
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tt_edit_undo(edit_history,&history_doc));
