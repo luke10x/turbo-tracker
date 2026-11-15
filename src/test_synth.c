@@ -31,8 +31,10 @@ int main(void) {
         memcpy(b+112,init.data+137,4);b[116]=init.data[141]|init.data[142]<<1|init.data[143]<<4;
         memcpy(b+117,init.data+144,11);
     }
+    bank[6+31*128]=42; /* Distinctive operator data in voice 32. */
     checksum(bank,sizeof(bank));
-    assert(tt_dx7_import(bank,sizeof(bank),31,&p));assert(p.data[134]==31);
+    assert(tt_dx7_import(bank,sizeof(bank),31,&p));
+    assert(p.data[0]==42 && p.data[134]==31);
     assert(!tt_dx7_import(bank,sizeof(bank),32,&p));
     tt_synth_init();
     /* INIT should stay audible while held, with headroom before the mixer. */

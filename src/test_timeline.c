@@ -80,6 +80,35 @@ int main(void) {
     assert(snprintf(expected_parent,sizeof(expected_parent),"%s!",zip_path)<
            (int)sizeof(expected_parent));
     assert(!strcmp(browse_parent,expected_parent));
+    char syx_path[1024];
+    assert(snprintf(syx_path,sizeof(syx_path),"%s/test.syx",zip_dir)<
+           (int)sizeof(syx_path));
+    uint8_t syx_bank[4104]={0xf0,0x43,0,9,32,0};
+    for(int voice=0;voice<32;++voice) {
+        memset(syx_bank+6+voice*128+118,' ',10);
+        syx_bank[6+voice*128+118]=(uint8_t)('A'+voice%26);
+    }
+    unsigned syx_sum=0;
+    for(int i=6;i<4102;++i)syx_sum+=syx_bank[i];
+    syx_bank[4102]=(uint8_t)((-syx_sum)&127);syx_bank[4103]=0xf7;
+    FILE *syx_file=fopen(syx_path,"wb");assert(syx_file);
+    assert(fwrite(syx_bank,1,sizeof(syx_bank),syx_file)==sizeof(syx_bank));
+    assert(!fclose(syx_file));
+    const F80FileBrowseApi *syx_browse=tt_zip_syx_browse_api();
+    assert(syx_browse->stat(syx_browse->user,syx_path,&is_directory,NULL) &&
+           is_directory);
+    F80FileEntry voices[32];int voice_count=0;
+    assert(syx_browse->list(syx_browse->user,syx_path,voices,32,&voice_count,
+                            browse_error,sizeof(browse_error)) && voice_count==32);
+    assert(!strcmp(voices[5].name,"05 - F.syx"));
+    char voice_path[1024];
+    assert(syx_browse->join(syx_browse->user,syx_path,voices[5].name,
+                            voice_path,sizeof(voice_path)));
+    assert(strstr(voice_path,"test.syx!05 - F") &&
+           syx_browse->stat(syx_browse->user,voice_path,&is_directory,NULL) &&
+           !is_directory);
+    assert(syx_browse->parent(syx_browse->user,voice_path,browse_parent,
+                              sizeof(browse_parent)) && !strcmp(browse_parent,syx_path));
     char recent_path[]="/tmp/tt-recent-XXXXXX";
     int recent_fd=mkstemp(recent_path);assert(recent_fd>=0);close(recent_fd);unlink(recent_path);
     f80_file_dialog_recent_storage(recent_path);
@@ -98,7 +127,7 @@ int main(void) {
     assert(!strcmp(recent_dialog.directory,browse_subdir));
     assert(!strcmp(recent_dialog.input->input,"kick.wav"));
     f80_file_dialog_close(&recent_dialog);f80_free(recent_root);
-    unlink(recent_path);unlink(zip_path);rmdir(zip_dir);
+    unlink(recent_path);unlink(syx_path);unlink(zip_path);rmdir(zip_dir);
     TtSong demo;
     tt_song_make_demo(&demo);
     assert(demo.pattern_count==4 && demo.order_count==4);
@@ -1156,6 +1185,22 @@ int main(void) {
     tracker.header=&header;
     tracker.wave_canvas=&wave;
     tracker.phrase_canvas=&grid;
+    TtWave saved_wave=tracker.wave;
+    int saved_zoom=tracker.zoom,saved_view_start=tracker.view_start;
+    F80Rect saved_wave_rect=wave.rect;
+    float pinch_pcm[1024]={0};
+    tracker.wave=(TtWave){.pcm=pinch_pcm,.frames=1024,.rate=44100,
+                          .instrument_type=TT_INSTRUMENT_SAMPLE};
+    tracker.zoom=tracker.view_start=0;
+    wave.rect=f80_rect(10,0,100,4);
+    int pinch_anchor=tracker.view_start+50*visible_frames()/wave.rect.w;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_ZOOM_WAVE_AT,
+                                      .index=1,.a=60}));
+    assert(tracker.zoom==1 && tracker.view_start+
+           50*visible_frames()/wave.rect.w==pinch_anchor);
+    tracker.wave=saved_wave;tracker.zoom=saved_zoom;
+    tracker.view_start=saved_view_start;
+    wave.rect=saved_wave_rect;
     wave.visible=1;
     grid.rect=f80_rect(0,0,80,30);
     tracker.pattern_lock=1;
@@ -1797,6 +1842,8 @@ int main(void) {
     F80Widget dx7_instrument_panel={.visible=1,.enabled=1,.parent=&dx7_root};
     F80Widget dx7_operator_panel={.visible=1,.enabled=1,.frame=1,
                                   .parent=&dx7_instrument_panel};
+    F80Widget dx7_global_panel={.visible=1,.enabled=1,.frame=1,
+                                .parent=&dx7_instrument_panel};
     F80Widget dx7_canvas={.kind=F80_CANVAS,.rect={0,0,120,20},
                           .visible=1,.enabled=1,.focusable=1,
                           .parent=&dx7_operator_panel};
@@ -1804,8 +1851,11 @@ int main(void) {
     tracker.app.focus=&dx7_canvas;
     tracker.focus=FOCUS_WAVE;tracker.dx7_grid_kind=0;
     F80Widget global_canvas={.kind=F80_CANVAS,.rect={0,0,48,12},
-                             .visible=1,.enabled=1,.focusable=1};
+                             .visible=1,.enabled=1,.focusable=1,
+                             .parent=&dx7_global_panel};
     tracker.dx7_globals_canvas=&global_canvas;
+    tracker.dx7_globals_panel=&dx7_global_panel;
+    tracker.dx7_operators_panel=&dx7_operator_panel;
     edit_history=tt_edit_history_new(&(TtEditDoc){.song=&tracker.song,
         .active=&tracker.pattern,.active_index=&tracker.pattern_index,.samples=tracker.samples,
         .active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
@@ -1844,12 +1894,21 @@ int main(void) {
     assert(!strcmp(pitch_gutter,"Pitch Envelope: "));
     int global_columns=dx7_global_columns(global_canvas.rect.w);
     tracker.dx7_globals_grid.field=0;
-    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
-        .index=0,.a=F80_KEY_DOWN}));
+    tracker.app.focus=&dx7_global_panel;tracker.dx7_grid_kind=0;
+    handle_key(F80_KEY_DOWN);
     assert(tracker.dx7_globals_grid.field==global_columns);
-    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
-        .index=0,.a=F80_KEY_UP}));
+    assert(tracker.dx7_grid_kind==0);
+    handle_key(F80_KEY_UP);
     assert(tracker.dx7_globals_grid.field==0);
+    int global_rows=(11+global_columns-1)/global_columns;
+    for(int row=1;row<global_rows;++row)handle_key(F80_KEY_DOWN);
+    assert(tracker.dx7_grid_kind==0);
+    handle_key(F80_KEY_DOWN); /* The last globals row leads into Pitch Envelope. */
+    assert(tracker.dx7_grid_kind==2);
+    handle_key(F80_KEY_UP);
+    assert(tracker.dx7_grid_kind==0);
+    handle_key(F80_KEY_UP);
+    assert(tracker.dx7_grid_kind==0); /* The top edge stays in this pane. */
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_KEY,
         .index=1,.a=F80_KEY_RIGHT}));
     assert(tracker.dx7_grid_kind==1 && tracker.dx7_operators_grid.field==1);

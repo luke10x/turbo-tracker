@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tt_zip_browse.h"
 #include "f80_file_dialog.h"
+#include "tt_synth.h"
 #include "../third_party/miniz/miniz.h"
 #include <stdio.h>
 #include <string.h>
@@ -212,5 +213,105 @@ static int zip_browse_stat(void *user,const char *path,int *directory,
 const F80FileBrowseApi *tt_zip_browse_api(void) {
     static const F80FileBrowseApi api={NULL,zip_browse_list,zip_browse_join,
                                        zip_browse_parent,zip_browse_stat};
+    return &api;
+}
+
+/* SYX banks are virtual, read-only folders. Each entry is a patch path such as
+   bank.syx!03 - BASS.syx; the numeric prefix is the bank voice index. */
+static int syx_read_bank(const char *path,uint8_t data[4105]) {
+    FILE *file=fopen(path,"rb");
+    if(!file)return 0;
+    size_t size=fread(data,1,4105,file);
+    int failed=ferror(file);fclose(file);
+    if(failed || size!=4104)return 0;
+    TtDx7Patch patch;
+    return tt_dx7_import(data,size,0,&patch);
+}
+static int syx_split(const char *path,char bank[1024],int *voice) {
+    const char *bang=strchr(path,'!');
+    if(!bang || (size_t)(bang-path)>=1024 || strlen(bang+1)<2 ||
+       bang[1]<'0' || bang[1]>'9' || bang[2]<'0' || bang[2]>'9')return 0;
+    size_t n=(size_t)(bang-path);memcpy(bank,path,n);bank[n]='\0';
+    if(strcasecmp(bank+((strlen(bank)>4)?strlen(bank)-4:0),".syx"))return 0;
+    int index=(bang[1]-'0')*10+(bang[2]-'0');
+    if(index>=32)return 0;
+    *voice=index;return 1;
+}
+static int syx_voice_exists(const char *path) {
+    char bank[1024];int voice;uint8_t bytes[4105];TtDx7Patch patch;
+    if(!syx_split(path,bank,&voice) || !syx_read_bank(bank,bytes))return 0;
+    return tt_dx7_import(bytes,4104,voice,&patch);
+}
+static int syx_browse_list(void *user,const char *directory,F80FileEntry *entries,
+                           int capacity,int *count,char *error,size_t error_size) {
+    (void)user;
+    uint8_t bytes[4105];
+    if(syx_read_bank(directory,bytes)) {
+        *count=0;
+        for(int voice=0;voice<32 && *count<capacity;++voice) {
+            TtDx7Patch patch;
+            if(!tt_dx7_import(bytes,4104,voice,&patch))continue;
+            char name[256];char voice_name[11];
+            memcpy(voice_name,bytes+6+voice*128+118,10);voice_name[10]='\0';
+            for(int i=0;i<10;++i)if((unsigned char)voice_name[i]<32 ||
+                                     (unsigned char)voice_name[i]>126)voice_name[i]='_';
+            for(int i=9;i>=0 && voice_name[i]==' ';--i)voice_name[i]='\0';
+            int n=snprintf(name,sizeof(name),"%02d - %.10s.syx",voice,voice_name);
+            if(n<0 || (size_t)n>=sizeof(name))continue;
+            snprintf(entries[*count].name,sizeof(entries[*count].name),"%s",name);
+            entries[*count].directory=0;entries[*count].size=4104;++*count;
+        }
+        error[0]='\0';return 1;
+    }
+    const F80FileBrowseApi *zip=tt_zip_browse_api();
+    int ok=zip->list(zip->user,directory,entries,capacity,count,error,error_size);
+    if(!ok)return 0;
+    if(strchr(directory,'!'))return 1;
+    for(int i=0;i<*count;++i)if(!entries[i].directory) {
+        char candidate[1024];
+        if(zip->join(zip->user,directory,entries[i].name,candidate,sizeof(candidate)) &&
+           syx_read_bank(candidate,bytes)) {
+            entries[i].directory=1;entries[i].size=0;
+        }
+    }
+    return 1;
+}
+static int syx_browse_join(void *user,const char *directory,const char *name,
+                           char *path,size_t path_size) {
+    (void)user;
+    if(!strchr(directory,'!') && syx_read_bank(directory,(uint8_t[4105]){0})) {
+        int n=snprintf(path,path_size,"%s!%s",directory,name);
+        return n>=0 && (size_t)n<path_size;
+    }
+    return tt_zip_browse_api()->join(NULL,directory,name,path,path_size);
+}
+static int syx_browse_parent(void *user,const char *directory,char *path,
+                             size_t path_size) {
+    (void)user;
+    char bank[1024];int voice;
+    if(syx_split(directory,bank,&voice)) {
+        int n=snprintf(path,path_size,"%s",bank);
+        return n>=0 && (size_t)n<path_size;
+    }
+    return tt_zip_browse_api()->parent(NULL,directory,path,path_size);
+}
+static int syx_browse_stat(void *user,const char *path,int *directory,
+                           unsigned long long *size) {
+    (void)user;
+    if(!strchr(path,'!') && syx_read_bank(path,(uint8_t[4105]){0})) {
+        if(directory)*directory=1;
+        if(size)*size=0;
+        return 1;
+    }
+    if(syx_voice_exists(path)) {
+        if(directory)*directory=0;
+        if(size)*size=4104;
+        return 1;
+    }
+    return tt_zip_browse_api()->stat(NULL,path,directory,size);
+}
+const F80FileBrowseApi *tt_zip_syx_browse_api(void) {
+    static const F80FileBrowseApi api={NULL,syx_browse_list,syx_browse_join,
+                                       syx_browse_parent,syx_browse_stat};
     return &api;
 }

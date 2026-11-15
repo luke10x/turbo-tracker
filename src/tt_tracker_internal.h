@@ -32,7 +32,6 @@ typedef struct {
     F80Widget *dx7_globals_panel,*dx7_globals_canvas,*dx7_operators_panel;
     F80Widget *sample_settings_panel,*sample_settings_info;
     F80Widget *fm_settings_panel,*fm_settings_info;
-    int sysex_voice;
     F80Grid dx7_globals_grid,dx7_pitch_grid,dx7_operators_grid;
     int dx7_grid_kind;
     F80Widget *header,*header_title,*play_button,*stop_button,*follow_button,*mode_button;

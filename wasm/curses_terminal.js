@@ -101,13 +101,52 @@ term.onKey(({ domEvent }) => {
   domEvent.preventDefault();
 });
 function cell(event) {
+  return cellAt(event.clientX, event.clientY);
+}
+function cellAt(clientX, clientY) {
   const rect = term.element.getBoundingClientRect();
   return [Math.max(0, Math.min(term.cols - 1,
-    Math.floor((event.clientX - rect.left) * term.cols / rect.width))),
+    Math.floor((clientX - rect.left) * term.cols / rect.width))),
     Math.max(0, Math.min(term.rows - 1,
-      Math.floor((event.clientY - rect.top) * term.rows / rect.height)))];
+      Math.floor((clientY - rect.top) * term.rows / rect.height)))];
 }
 const activeContacts = new Map();
+let wavePinch = null;
+function contactDistance(a, b) {
+  return Math.hypot(a.lastClientX - b.lastClientX,
+    a.lastClientY - b.lastClientY);
+}
+function beginWavePinch(id, start) {
+  if (start.pointerType !== 'touch' || start.target !== 'wave') return;
+  const other = [...activeContacts.entries()].find(([otherId, contact]) =>
+    otherId !== id && contact.pointerType === 'touch' && contact.target === 'wave');
+  if (!other) return;
+  const [otherId, otherStart] = other;
+  clearTimeout(start.holdTimer);
+  clearTimeout(otherStart.holdTimer);
+  start.swiping = otherStart.swiping = true;
+  wavePinch = { ids: [id, otherId], startDistance: Math.max(1,
+    contactDistance(start, otherStart)), appliedSteps: 0 };
+}
+function updateWavePinch() {
+  if (!wavePinch) return;
+  const a = activeContacts.get(wavePinch.ids[0]);
+  const b = activeContacts.get(wavePinch.ids[1]);
+  if (!a || !b) return;
+  const distance = Math.max(1, contactDistance(a, b));
+  const steps = Math.max(-16, Math.min(16,
+    Math.round(Math.log2(distance / wavePinch.startDistance))));
+  const delta = steps - wavePinch.appliedSteps;
+  if (!delta) return;
+  const centerX = (a.lastClientX + b.lastClientX) / 2;
+  const centerY = (a.lastClientY + b.lastClientY) / 2;
+  const [x] = cellAt(centerX, centerY);
+  const direction = Math.sign(delta);
+  for (let step = 0; step < Math.abs(delta); ++step)
+    Module.ccall('tt_tracker_zoom_wave_touch', null,
+      ['number', 'number'], [direction, x]);
+  wavePinch.appliedSteps = steps;
+}
 term.textarea.addEventListener('blur', () => {
   if (!refocusingInput && !activeContacts.size) {
     editingCommitted = false;
@@ -237,6 +276,7 @@ function beginContact(id, x, y, pointerType = 'touch', clientX = x, clientY = y)
       ['number', 'number'], [x, y]);
   if (target === 'wave')
     Module.ccall('tt_tracker_begin_wave_gesture', null, ['number'], [x]);
+  beginWavePinch(id, start);
   const tableRect = Module.f80TableRect;
   const tableCell = target === 'table' && tableRect &&
     x < tableRect.x + tableRect.width - (tableRect.vertical ? 1 : 0) &&
@@ -295,12 +335,38 @@ function moveContact(id, x, y, clientX, clientY) {
   const start = activeContacts.get(id);
   if (!start) return;
   updateContact(start, x, y, clientX, clientY);
+  if (wavePinch && wavePinch.ids.includes(id)) {
+    updateWavePinch();
+    return;
+  }
   if (start.swiping || start.holdStarted)
     moveTouch(start, x, y, clientX, clientY);
 }
 function endContact(id, x, y, cancelled, clientX, clientY) {
   const start = activeContacts.get(id);
   if (!start) return;
+  if (wavePinch && wavePinch.ids.includes(id)) {
+    updateContact(start, x, y, clientX, clientY);
+    updateWavePinch();
+    const otherId = wavePinch.ids.find(contactId => contactId !== id);
+    activeContacts.delete(id);
+    clearTimeout(start.holdTimer);
+    wavePinch = null;
+    const other = activeContacts.get(otherId);
+    if (other) {
+      other.target = 'wave';
+      other.pinchEnded = true;
+      other.x = other.lastX = other.currentX;
+      other.y = other.lastY = other.currentY;
+      other.tapMoved = other.swiping = false;
+      other.holdStarted = false;
+      Module.ccall('tt_tracker_begin_wave_gesture', null,
+        ['number'], [other.currentX]);
+    }
+    editingCommitted = false;
+    if (touchKeyboard) resized();
+    return;
+  }
   activeContacts.delete(id);
   clearTimeout(start.holdTimer);
   if (cancelled) {
@@ -338,7 +404,7 @@ function endContact(id, x, y, cancelled, clientX, clientY) {
   }
   if (start.target === 'scrollable')
     Module.ccall('tt_tracker_scroll_drag_end', null, [], []);
-  if (!start.tapMoved && !start.holdStarted) {
+  if (!start.tapMoved && !start.holdStarted && !start.pinchEnded) {
     call('curses_push_mouse', [x, y, 0]);
     if (ready && window.f80ApplicationId === 'turbo-tracker')
       call('tt_tracker_flush_input', []);

@@ -49,6 +49,18 @@ int main(void) {
     assert(tt_edit_apply_recorded(synth_history,&doc,&synth));
     synth.dx7_parameter.value=32;assert(!tt_edit_apply_recorded(synth_history,&doc,&synth));
     assert(wave.dx7.data[134]==31);
+    TtDx7Patch imported;tt_dx7_init(&imported);
+    imported.data[0]=42;imported.data[134]=17;
+    TtEditEvent import_event={.type=TT_EDIT_DX7_IMPORT};
+    import_event.dx7_import.index=0;import_event.dx7_import.patch=imported;
+    import_event.dx7_import.bank_size=4104;
+    assert(tt_edit_apply_recorded(synth_history,&doc,&import_event));
+    assert(wave.dx7.data[0]==42 && wave.dx7.data[134]==17);
+    assert(tt_edit_undo(synth_history,&doc) && wave.dx7.data[0]!=42 &&
+           wave.dx7.data[134]==31);
+    assert(tt_edit_redo(synth_history,&doc) && wave.dx7.data[0]==42 &&
+           wave.dx7.data[134]==17);
+    assert(tt_edit_undo(synth_history,&doc) && wave.dx7.data[134]==31);
     assert(tt_edit_undo(synth_history,&doc) && wave.dx7.data[134]==0);
     assert(tt_edit_undo(synth_history,&doc) && wave.instrument_type==TT_INSTRUMENT_SAMPLE);
     assert(tt_edit_redo(synth_history,&doc) && wave.instrument_type==TT_INSTRUMENT_DX7);
