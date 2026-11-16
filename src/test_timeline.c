@@ -417,6 +417,50 @@ int main(void) {
     f80_free(layout_order_root);
 
     memset(&tracker,0,sizeof(tracker));
+    tracker.song=demo;tracker.pattern=demo.pattern[0];
+    tracker.perspective=TT_PERSPECTIVE_MAIN;
+    tracker.focus=FOCUS_PHRASE;tracker.selecting=1;
+    tracker.root=f80_box(F80_COL);
+    tracker.selection_frame=f80_add(tracker.root,f80_box(F80_ROW));
+    tracker.selection_frame->frame=1;
+    F80Widget *scope_first=f80_add(tracker.selection_frame,
+        f80_button("To >",NULL,NULL));
+    F80Widget *scope_second=f80_add(tracker.selection_frame,
+        f80_button("From >",NULL,NULL));
+    F80Widget *scope_third=f80_add(tracker.selection_frame,
+        f80_button("Base C-4",NULL,NULL));
+    tracker.selection_scope_group=scope_first;
+    tracker.order_frame=f80_add(tracker.root,f80_box(F80_COL));
+    tracker.order_frame->frame=1;
+    tracker.order_list=f80_add(tracker.order_frame,f80_button("Orders",NULL,NULL));
+    tracker.phrase_frame=f80_add(tracker.root,f80_box(F80_COL));
+    tracker.phrase_frame->frame=1;
+    tracker.phrase_canvas=f80_add(tracker.phrase_frame,f80_button("Grid",NULL,NULL));
+    f80_set_root(&tracker.app,tracker.root);
+    tracker.selection_frame->rect=f80_rect(0,0,40,6);
+    scope_first->rect=f80_rect(1,1,10,2);
+    scope_second->rect=f80_rect(12,1,12,2);
+    scope_third->rect=f80_rect(12,4,12,1);
+    tracker.order_frame->rect=f80_rect(0,7,12,6);
+    tracker.order_list->rect=f80_rect(1,8,10,2);
+    tracker.phrase_frame->rect=f80_rect(13,7,27,6);
+    tracker.phrase_canvas->rect=f80_rect(14,8,25,2);
+    tracker.app.focus=tracker.phrase_canvas;
+    handle_key(9);
+    assert(tracker.focus==FOCUS_SELECTION &&
+           f80_focused_panel(&tracker.app)==tracker.selection_frame);
+    tracker.app.focus=scope_first;
+    handle_key(F80_KEY_RIGHT);
+    assert(tracker.app.focus==scope_second && tracker.focus==FOCUS_SELECTION);
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.app.focus==scope_third && tracker.focus==FOCUS_SELECTION);
+    handle_key(9);
+    assert(tracker.focus==FOCUS_ORDER && tracker.app.focus==tracker.order_list);
+    handle_key(9);
+    assert(tracker.focus==FOCUS_PHRASE && tracker.app.focus==tracker.phrase_canvas);
+    f80_free(tracker.root);
+
+    memset(&tracker,0,sizeof(tracker));
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
     tracker.focus=FOCUS_WAVE;
     tracker.root=f80_box(F80_COL);

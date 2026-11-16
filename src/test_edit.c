@@ -91,6 +91,74 @@ int main(void) {
                                   TT_EFFECT_NONE,-1};
     e.cells=(TtEditCellsBulk){TT_BULK_PASTE,3,1,3,1,0,&duplicate_table_cell,1};
     assert(!apply(e) && strstr(message,"only one table"));
+    active.cell[5][1]=(TtCell){60,1,TT_EFFECT_NONE,-1,
+                                 TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    TtCell scoped_source={72,2,'M',7,TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    e.cells=(TtEditCellsBulk){.op=TT_BULK_PASTE,.top=5,.left=1,
+        .bottom=5,.right=1,.data=&scoped_source,.data_cols=1,
+        .scope=TT_CELL_SCOPE_EXPLICIT|TT_CELL_SCOPE_INSTRUMENT};
+    assert(apply(e) && active.cell[5][1].note==60 &&
+           active.cell[5][1].instrument==2 &&
+           active.cell[5][1].effect==TT_EFFECT_NONE);
+    TtEditHistory *selection_history=tt_edit_history_new(&doc);
+    assert(selection_history);
+    e.cells.op=TT_BULK_CLEAR;e.cells.data=NULL;
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e) &&
+           active.cell[5][1].note==60 && active.cell[5][1].instrument==-1);
+    assert(tt_edit_undo(selection_history,&doc) &&
+           active.cell[5][1].instrument==2);
+    assert(tt_edit_redo(selection_history,&doc) &&
+           active.cell[5][1].instrument==-1);
+    tt_edit_history_free(selection_history);
+    active.cell[30][1].note=60;active.cell[31][1].note=64;
+    active.cell[32][1].note=67;
+    e.cells=(TtEditCellsBulk){.op=TT_BULK_RELATIVE_BASE,.top=30,
+        .left=1,.bottom=32,.right=1,.scope=TT_CELL_SCOPE_EXPLICIT|
+        TT_CELL_SCOPE_NOTE,.base_note=60};
+    selection_history=tt_edit_history_new(&doc);assert(selection_history);
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e) &&
+           active.cell[30][1].note==60 &&
+           active.cell[31][1].note==tt_note_relative(1,4) &&
+           active.cell[32][1].note==tt_note_relative(1,3));
+    assert(tt_edit_undo(selection_history,&doc) && active.cell[31][1].note==64);
+    assert(tt_edit_redo(selection_history,&doc) &&
+           active.cell[31][1].note==tt_note_relative(1,4) &&
+           active.cell[32][1].note==tt_note_relative(1,3));
+    tt_edit_history_free(selection_history);
+    e.cells.op=TT_BULK_ABSOLUTE_BASE;
+    assert(apply(e) && active.cell[30][1].note==60 &&
+           active.cell[31][1].note==64 && active.cell[32][1].note==67);
+    active.cell[40][0].note=60;active.cell[40][1].note=64;
+    e.cells=(TtEditCellsBulk){.op=TT_BULK_RELATIVE_LEFT,.top=40,
+        .left=1,.bottom=40,.right=1,.scope=TT_CELL_SCOPE_EXPLICIT|
+        TT_CELL_SCOPE_NOTE};
+    assert(apply(e) && active.cell[40][1].note==tt_note_left_relative(4));
+    e.cells.op=TT_BULK_ABSOLUTE_LEFT;
+    assert(apply(e) && active.cell[40][1].note==64);
+    active.cell[10][1].note=60;
+    active.cell[11][1].note=62;
+    active.cell[12][1].note=64;
+    selection_history=tt_edit_history_new(&doc);
+    assert(selection_history);
+    e.cells=(TtEditCellsBulk){.op=TT_BULK_RELATIVE_PREVIOUS,.top=11,
+        .left=1,.bottom=12,.right=1,.scope=TT_CELL_SCOPE_EXPLICIT|TT_CELL_SCOPE_NOTE};
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e));
+    assert(active.cell[11][1].note==tt_note_relative(1,2) &&
+           active.cell[12][1].note==tt_note_relative(1,2));
+    assert(tt_edit_undo(selection_history,&doc) && active.cell[11][1].note==62);
+    assert(tt_edit_redo(selection_history,&doc) &&
+           active.cell[12][1].note==tt_note_relative(1,2));
+    tt_edit_history_free(selection_history);
+    active.cell[20][0].note=60;active.cell[20][1].note=64;
+    e.cells=(TtEditCellsBulk){.op=TT_BULK_RELATIVE_LEFT,.top=20,
+        .left=1,.bottom=20,.right=1,.scope=TT_CELL_SCOPE_EXPLICIT|TT_CELL_SCOPE_NOTE};
+    selection_history=tt_edit_history_new(&doc);assert(selection_history);
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e) &&
+           active.cell[20][1].note==tt_note_left_relative(4));
+    assert(tt_edit_undo(selection_history,&doc) && active.cell[20][1].note==64);
+    assert(tt_edit_redo(selection_history,&doc) &&
+           active.cell[20][1].note==tt_note_left_relative(4));
+    tt_edit_history_free(selection_history);
 
     int old_count=song.pattern_count;
     e=(TtEditEvent){.type=TT_EDIT_PATTERN_NEW};
@@ -145,9 +213,30 @@ int main(void) {
     e=(TtEditEvent){.type=TT_EDIT_TABLE_TICKS_BULK};
     e.table_ticks=(TtEditTableTicksBulk){TT_BULK_PASTE,0,0,0,0,1,&tick};
     assert(apply(e) && song.table[0].tick[0].note==67);
+    selection_history=tt_edit_history_new(&doc);assert(selection_history);
+    e.table_ticks=(TtEditTableTicksBulk){.op=TT_BULK_TRANSPOSE,.table=0,
+        .top=0,.left=0,.bottom=0,.right=4,
+        .scope=TT_CELL_SCOPE_EXPLICIT|TT_CELL_SCOPE_NOTE,.delta=1};
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e) &&
+           song.table[0].tick[0].note==68);
+    assert(tt_edit_undo(selection_history,&doc) && song.table[0].tick[0].note==67);
+    assert(tt_edit_redo(selection_history,&doc) && song.table[0].tick[0].note==68);
+    tt_edit_history_free(selection_history);
+    e.table_ticks=(TtEditTableTicksBulk){.op=TT_BULK_RELATIVE_BASE,
+        .table=0,.top=0,.left=0,.bottom=0,.right=4,
+        .scope=TT_CELL_SCOPE_EXPLICIT|TT_CELL_SCOPE_NOTE,.base_note=60};
+    selection_history=tt_edit_history_new(&doc);assert(selection_history);
+    assert(tt_edit_apply_recorded(selection_history,&doc,&e) &&
+           song.table[0].tick[0].note==tt_note_relative(1,8));
+    assert(tt_edit_undo(selection_history,&doc) && song.table[0].tick[0].note==68);
+    assert(tt_edit_redo(selection_history,&doc) &&
+           song.table[0].tick[0].note==tt_note_relative(1,8));
+    tt_edit_history_free(selection_history);
+    e.table_ticks.op=TT_BULK_ABSOLUTE_BASE;
+    assert(apply(e) && song.table[0].tick[0].note==68);
     e.table_ticks.op=TT_BULK_CLEAR;
     assert(apply(e) && song.table[0].tick[0].note==-1);
-    e.table_ticks.op=TT_BULK_TRANSPOSE;assert(!apply(e));
+    e.table_ticks.op=(TtBulkOp)99;assert(!apply(e));
     e=(TtEditEvent){.type=TT_EDIT_TABLE_LENGTH};
     e.table.table=0;e.table.length=999;
     assert(apply(e) && song.table[0].length==TT_TABLE_MAX_TICKS);

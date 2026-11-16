@@ -82,8 +82,16 @@ typedef struct {
 typedef enum {
     TT_BULK_CLEAR,              /* empty every cell in the rectangle */
     TT_BULK_PASTE,              /* copy data[] into the rectangle */
-    TT_BULK_TRANSPOSE           /* add delta to notes in the rectangle */
+    TT_BULK_TRANSPOSE,          /* add delta to notes in the rectangle */
+    TT_BULK_RELATIVE_LEFT, TT_BULK_RELATIVE_PREVIOUS,
+    TT_BULK_ABSOLUTE_LEFT, TT_BULK_ABSOLUTE_BASE,
+    TT_BULK_RELATIVE_BASE
 } TtBulkOp;
+
+enum { TT_CELL_SCOPE_NOTE=1, TT_CELL_SCOPE_INSTRUMENT=2,
+       TT_CELL_SCOPE_EFFECT1=4, TT_CELL_SCOPE_EFFECT2=8,
+       TT_CELL_SCOPE_EFFECT3=16, TT_CELL_SCOPE_ALL=31,
+       TT_CELL_SCOPE_EXPLICIT=0x100 };
 
 typedef struct {
     TtBulkOp op;
@@ -91,6 +99,8 @@ typedef struct {
     int delta;                  /* transpose */
     const TtCell *data;         /* paste source, rows x cols, row-major */
     int data_cols;
+    int scope;                  /* zero means all fields; EXPLICIT permits none */
+    int base_note;              /* chosen reference for RELATIVE_BASE */
 } TtEditCellsBulk;
 
 typedef struct {
@@ -115,10 +125,13 @@ typedef struct {
 
 /* Fields are table grid columns: 0 note, 1 instrument, 2.. effect slots. */
 typedef struct {
-    TtBulkOp op;                /* TT_BULK_CLEAR or TT_BULK_PASTE */
+    TtBulkOp op;                /* clear, paste, or transpose */
     int table;
     int top,left,bottom,right;  /* inclusive tick rows and field columns */
     const TtTableTick *data;    /* PASTE: data[row-top] supplies each tick */
+    int scope;
+    int delta;
+    int base_note;
 } TtEditTableTicksBulk;
 
 typedef struct {

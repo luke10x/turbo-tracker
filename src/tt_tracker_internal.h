@@ -5,7 +5,8 @@
 #include "f80_components.h"
 #include "tt_edit.h"
 #include "tt_song.h"
-enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE };
+enum { FOCUS_WAVE, FOCUS_PHRASE, FOCUS_ORDER, FOCUS_REFERENCE,
+       FOCUS_SELECTION };
 enum { PLAY_SONG, PLAY_PATTERN };
 enum { TT_PERSPECTIVE_MAIN, TT_PERSPECTIVE_ORDERS,
        TT_PERSPECTIVE_INSTRUMENTS };
@@ -44,6 +45,11 @@ typedef struct {
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
     int selection_frozen,selection_top,selection_bottom,selection_left,selection_right;
+    int selection_scope,clip_scope;
+    int selection_base_note,note_picker_base_mode;
+    char selection_base_label[20];
+    F80Widget *selection_frame,*selection_scope_group;
+    F80Widget *selection_to_left,*selection_from_left;
     int selection_table_top,selection_table_bottom;
     int clip_kind;
     int grid_value_editing;

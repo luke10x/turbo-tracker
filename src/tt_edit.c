@@ -12,6 +12,30 @@ static int clamp(int value,int low,int high) {
 static void clear_cell(TtCell *cell) {
     *cell=tt_cell_empty();
 }
+static void copy_scoped_fields(TtCell *dst,const TtCell *src,int scope) {
+    if(scope&TT_CELL_SCOPE_NOTE)dst->note=src->note;
+    if(scope&TT_CELL_SCOPE_INSTRUMENT)dst->instrument=src->instrument;
+    for(int slot=0;slot<3;++slot)if(scope&(TT_CELL_SCOPE_EFFECT1<<slot))
+        *tt_cell_effect(dst,slot)=*tt_cell_effect_const(src,slot);
+}
+static int prior_resolved_note(const TtPattern *pattern,int row,int channel) {
+    int previous[TT_CHANNELS];
+    for(int c=0;c<TT_CHANNELS;++c)previous[c]=-1;
+    for(int r=0;r<row;++r) {
+        int left=-1;
+        for(int c=0;c<TT_CHANNELS;++c) {
+            int note=pattern->cell[r][c].note;
+            if(tt_note_is_relative(note)) {
+                int root=tt_note_is_left_relative(note)?left:previous[c];
+                note=root<0?-1:clamp(root+(tt_note_relative_positive(note)?1:-1)*
+                    tt_note_relative_amount(note),0,127);
+            }
+            left=note>=0?note:-1;
+            if(note>=0)previous[c]=note;
+        }
+    }
+    return previous[channel];
+}
 static int apply_cell_set(TtEditDoc *doc,const TtEditCellSet *e) {
     if(e->row<0 || e->row>=TT_MAX_STEPS || e->channel<0 || e->channel>=TT_CHANNELS) {
         reject(doc,"Cell out of range");return 0;
@@ -32,9 +56,17 @@ static int apply_cells_bulk(TtEditDoc *doc,const TtEditCellsBulk *e) {
         reject(doc,"Selection out of range");return 0;
     }
     if(e->op!=TT_BULK_CLEAR && e->op!=TT_BULK_PASTE &&
-       e->op!=TT_BULK_TRANSPOSE) {
+       e->op!=TT_BULK_TRANSPOSE && e->op!=TT_BULK_RELATIVE_LEFT &&
+       e->op!=TT_BULK_RELATIVE_PREVIOUS && e->op!=TT_BULK_RELATIVE_BASE &&
+       e->op!=TT_BULK_ABSOLUTE_LEFT && e->op!=TT_BULK_ABSOLUTE_BASE) {
         reject(doc,"Unsupported selection edit");return 0;
     }
+    if((e->op==TT_BULK_RELATIVE_BASE || e->op==TT_BULK_ABSOLUTE_BASE) &&
+       (e->base_note<0 || e->base_note>127)) {
+        reject(doc,"Base note out of range");return 0;
+    }
+    int scope=(e->scope&TT_CELL_SCOPE_EXPLICIT)?e->scope&TT_CELL_SCOPE_ALL:
+              e->scope?e->scope:TT_CELL_SCOPE_ALL;
     if(e->op==TT_BULK_PASTE && (!e->data || e->data_cols<e->right-e->left+1)) {
         reject(doc,"Nothing to paste");return 0;
     }
@@ -42,19 +74,66 @@ static int apply_cells_bulk(TtEditDoc *doc,const TtEditCellsBulk *e) {
         for(int row=e->top;row<=e->bottom;++row)
             for(int channel=e->left;channel<=e->right;++channel) {
                 int r=row-e->top,c=channel-e->left;
-                if(tt_cell_table_effect_count(&e->data[r*e->data_cols+c])>1) {
+                TtCell result=doc->active->cell[row][channel];
+                copy_scoped_fields(&result,&e->data[r*e->data_cols+c],scope);
+                if(tt_cell_table_effect_count(&result)>1) {
                     reject(doc,"A row cell can reference only one table");return 0;
                 }
             }
     for(int row=e->top;row<=e->bottom;++row)
-        for(int channel=e->left;channel<=e->right;++channel) {
+        for(int step=0;step<=e->right-e->left;++step) {
+            int channel=e->op==TT_BULK_RELATIVE_LEFT?
+                e->right-step:e->left+step;
             TtCell *cell=&doc->active->cell[row][channel];
-            if(e->op==TT_BULK_CLEAR)clear_cell(cell);
+            if(e->op==TT_BULK_CLEAR) {
+                TtCell empty=tt_cell_empty();
+                copy_scoped_fields(cell,&empty,scope);
+            }
             else if(e->op==TT_BULK_TRANSPOSE) {
-                if(cell->note>=0)cell->note=clamp(cell->note+e->delta,12,127);
+                if((scope&TT_CELL_SCOPE_NOTE) && cell->note>=0)
+                    cell->note=clamp(cell->note+e->delta,12,127);
+            } else if(e->op==TT_BULK_ABSOLUTE_LEFT ||
+                      e->op==TT_BULK_ABSOLUTE_BASE) {
+                if(!(scope&TT_CELL_SCOPE_NOTE) ||
+                   !tt_note_is_relative(cell->note))continue;
+                if(e->op==TT_BULK_ABSOLUTE_LEFT &&
+                   !tt_note_is_left_relative(cell->note))continue;
+                if(e->op==TT_BULK_ABSOLUTE_BASE &&
+                   tt_note_is_left_relative(cell->note))continue;
+                int root=-1;
+                if(e->op==TT_BULK_ABSOLUTE_BASE) {
+                    root=prior_resolved_note(doc->active,row,channel);
+                    if(root<0)root=e->base_note;
+                }
+                if(e->op==TT_BULK_ABSOLUTE_LEFT && channel>0)
+                    root=doc->active->cell[row][channel-1].note;
+                if(root>=0)cell->note=clamp(root+
+                    (tt_note_relative_positive(cell->note)?1:-1)*
+                    tt_note_relative_amount(cell->note),0,127);
+            } else if(e->op==TT_BULK_RELATIVE_LEFT ||
+                      e->op==TT_BULK_RELATIVE_PREVIOUS ||
+                      e->op==TT_BULK_RELATIVE_BASE) {
+                if(!(scope&TT_CELL_SCOPE_NOTE) || cell->note<0)continue;
+                int root=-1;
+                if(e->op==TT_BULK_RELATIVE_BASE) {
+                    if(cell->note==e->base_note)continue;
+                    root=prior_resolved_note(doc->active,row,channel);
+                    if(root<0)root=e->base_note;
+                }
+                if(e->op==TT_BULK_RELATIVE_LEFT && channel>0)
+                    root=doc->active->cell[row][channel-1].note;
+                else if(e->op==TT_BULK_RELATIVE_PREVIOUS)
+                    root=prior_resolved_note(doc->active,row,channel);
+                int difference=cell->note-root;
+                if(root>=0 && difference>=-TT_NOTE_RELATIVE_MAX &&
+                   difference<=TT_NOTE_RELATIVE_MAX)
+                    cell->note=e->op==TT_BULK_RELATIVE_LEFT?
+                        (difference>=0?tt_note_left_relative(difference):
+                         TT_NOTE_REL_LEFT_MINUS_BASE+difference):
+                        tt_note_relative(difference>=0,abs(difference));
             } else {
                 int r=row-e->top,c=channel-e->left;
-                *cell=e->data[r*e->data_cols+c];
+                copy_scoped_fields(cell,&e->data[r*e->data_cols+c],scope);
             }
         }
     return 1;
@@ -272,14 +351,46 @@ static int apply_table_ticks_bulk(TtEditDoc *doc,const TtEditTableTicksBulk *e) 
        e->left<0 || e->right>=2+TT_TABLE_EFFECTS || e->left>e->right) {
         reject(doc,"Table selection out of range");return 0;
     }
-    if(e->op!=TT_BULK_PASTE && e->op!=TT_BULK_CLEAR) {
+    if(e->op!=TT_BULK_PASTE && e->op!=TT_BULK_CLEAR &&
+       e->op!=TT_BULK_TRANSPOSE && e->op!=TT_BULK_RELATIVE_BASE &&
+       e->op!=TT_BULK_ABSOLUTE_BASE) {
         reject(doc,"Unsupported table edit");return 0;
     }
+    if((e->op==TT_BULK_RELATIVE_BASE || e->op==TT_BULK_ABSOLUTE_BASE) &&
+       (e->base_note<0 || e->base_note>127)) {
+        reject(doc,"Base note out of range");return 0;
+    }
     if(e->op==TT_BULK_PASTE && !e->data) { reject(doc,"Nothing to paste");return 0; }
+    int scope=(e->scope&TT_CELL_SCOPE_EXPLICIT)?e->scope&TT_CELL_SCOPE_ALL:
+              e->scope?e->scope:TT_CELL_SCOPE_ALL;
     TtTable *table=&doc->song->table[e->table];
     for(int row=e->top;row<=e->bottom;++row)
         for(int field=e->left;field<=e->right;++field) {
+            if((e->scope&TT_CELL_SCOPE_EXPLICIT) &&
+               (field>=5 || !(scope&(1<<field))))continue;
             TtTableTick *dst=&table->tick[row];
+            if(e->op==TT_BULK_TRANSPOSE) {
+                if(field==0 && dst->note>=0)
+                    dst->note=clamp(dst->note+e->delta,12,127);
+                continue;
+            }
+            if(e->op==TT_BULK_RELATIVE_BASE ||
+               e->op==TT_BULK_ABSOLUTE_BASE) {
+                if(field!=0)continue;
+                if(e->op==TT_BULK_RELATIVE_BASE && dst->note>=0 &&
+                   dst->note!=e->base_note) {
+                    int difference=dst->note-e->base_note;
+                    if(difference>=-TT_NOTE_RELATIVE_MAX &&
+                       difference<=TT_NOTE_RELATIVE_MAX)
+                        dst->note=tt_note_relative(difference>=0,abs(difference));
+                } else if(e->op==TT_BULK_ABSOLUTE_BASE &&
+                          tt_note_is_relative(dst->note) &&
+                          !tt_note_is_left_relative(dst->note))
+                    dst->note=clamp(e->base_note+
+                        (tt_note_relative_positive(dst->note)?1:-1)*
+                        tt_note_relative_amount(dst->note),0,127);
+                continue;
+            }
             if(e->op==TT_BULK_CLEAR) {
                 if(field==0)dst->note=-1;
                 else if(field==1)dst->instrument=-1;
