@@ -891,17 +891,17 @@ int main(void) {
     assert(tracker.focus==FOCUS_WAVE && current_status()==perspective_status_visible);
     assert(!strcmp(current_status()[0].label,"Focus") &&
            !strcmp(current_status()[1].label,"Option") &&
-           !strcmp(current_status()[2].label,"Forward") &&
-           !strcmp(current_status()[3].label,"Back"));
+           !strcmp(current_status()[2].label,"Back") &&
+           !strcmp(current_status()[3].label,"Forward"));
     int saved_marker=tracker.marker,saved_view=tracker.view_start;
     int saved_instrument_type=tracker.wave.instrument_type;
     tracker.marker=0;tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
-    handle_key(2003);
+    handle_key(2004);
     assert(tracker.marker==1);
     tracker.marker=TT_MARKERS-1;
-    handle_key(2003);
-    assert(tracker.marker==TT_MARKERS-1);
     handle_key(2004);
+    assert(tracker.marker==TT_MARKERS-1);
+    handle_key(2003);
     assert(tracker.marker==TT_MARKERS-2);
     tracker.marker=saved_marker;tracker.view_start=saved_view;
     tracker.wave.instrument_type=saved_instrument_type;
@@ -912,7 +912,7 @@ int main(void) {
     int saved_field=tracker.field;
     tracker.focus=FOCUS_PHRASE;tracker.field=0;
     assert(strcmp(current_status()[0].label,"Focus")==0 &&
-           strcmp(current_status()[3].label,"Back")==0);
+           strcmp(current_status()[3].label,"Forward")==0);
     tracker.field=1;
     assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.field=2;
@@ -1788,7 +1788,7 @@ int main(void) {
             TT_EFFECT_S:byte_picker_original.effect));
     assert(!tracker.grid_value_editing);
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
-    handle_key(2003); /* Forward still opens while editing a byte value. */
+    handle_key(2004); /* Forward still opens while editing a byte value. */
     assert(tracker.byte_picker_dialog);
     handle_key(27);
     assert(!tracker.byte_picker_dialog && tracker.pattern.cell[0][0].value==-1);
@@ -2266,7 +2266,7 @@ int main(void) {
     assert(!dx7_grid_is_editing());
     assert(tracker.decimal_picker_dialog &&
            tracker.app.modal==tracker.decimal_picker_dialog);
-    handle_key(2003); /* Forward opens the FM decimal grid. */
+    handle_key(2004); /* Forward opens the FM decimal grid. */
     assert(tracker.decimal_picker_dialog &&
            tracker.decimal_picker_max==tt_dx7_max(parameter));
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_CURSOR,

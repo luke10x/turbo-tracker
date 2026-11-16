@@ -4565,7 +4565,7 @@ static const F80StatusItem *current_status(void) {
         (F80StatusItem){"Orders","(; O)",perspective_orders};
     static const F80StatusItem common_status[4]={
         {"1","Focus",status_focus},{"2","Option",status_option},
-        {"3","Forward",status_forward},{"4","Back",status_back}
+        {"3","Back",status_back},{"4","Forward",status_forward}
     };
     memcpy(perspective_status_visible,common_status,sizeof(common_status));
     if(tracker.status)tracker.status->status_count=4;
