@@ -38,8 +38,6 @@ typedef struct {
     F80Widget *pattern_lock_button;
     F80Widget *progress,*bpm_label,*details,*status;
     int focus,marker,zoom,view_start,step,channel,field,entry_octave,perspective;
-    int leader_pending;
-    Uint64 leader_deadline;
     int controller_toolbar_mode,controller_toolbar_index;
     int controller_screen_navigation;
     int note_input_length;

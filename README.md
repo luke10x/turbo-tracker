@@ -140,7 +140,7 @@ up to 32 named patterns, and up to 128 play-order entries. A pattern may appear
 repeatedly in the order or remain unused. **File > Song settings...** edits BPM
 (30–300), pattern rows (16–256), rows per beat (1–16), and initial ticks per row
 (1–48). Their model defaults are 120, 16, 4, and 12. The **Orders perspective**
-is available in **View** or with the leader sequence `; O`. It shows the ORD applet on the
+is available in **View** or by cycling perspectives with F6. It shows the ORD applet on the
 left and the pattern bank and play order in a flexible panel on the right.
 Shortening a pattern clears notes beyond its new
 last row. New creates an empty pattern and selects it for editing, Rename
@@ -199,7 +199,7 @@ starts, and can be changed elsewhere in the sequence.
 
 Sixteen ordered markers (`0`–`F`) define fifteen slices. Each slice may inherit
 the sample reference note or override it. **View > Instruments perspective**
-(`; I`) expands the waveform and places sample management and slice
+expands the waveform and places sample management and slice
 editing panels below it. The Slices panel shows the frame range and duration of
 each interval and edits its base note. Changing the sample reference note
 transposes all slice overrides. The Manage Samples panel

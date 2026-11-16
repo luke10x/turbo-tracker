@@ -411,8 +411,6 @@ typedef enum {
     TT_UI_SELECT_ORDER_AT_CELL,
     TT_UI_MODE_CONTEXT, TT_UI_SYNC_PATTERN_ORDER,
     TT_UI_SET_PERSPECTIVE,
-    TT_UI_LEADER_START, TT_UI_LEADER_CANCEL,
-    TT_UI_LEADER_TIMEOUT, TT_UI_LEADER_COMPLETE,
     TT_UI_FOCUS, TT_UI_FOCUS_ACTION, TT_UI_OPTION_ACTION,
     TT_UI_FOCUS_LIST_PEER, TT_UI_SCROLL_ORDER, TT_UI_SCROLL_GRID,
     TT_UI_SCROLL_GRID_FIELDS,
@@ -428,6 +426,8 @@ typedef enum {
     TT_UI_MARKER_SELECT,
     TT_UI_CONTROLLER_TOOLBAR_ENTER, TT_UI_CONTROLLER_TOOLBAR_MOVE,
     TT_UI_CONTROLLER_TOOLBAR_EXIT, TT_UI_CONTROLLER_MENU_MOVE,
+    TT_UI_SPECIAL_ACTION, TT_UI_PERSPECTIVE_CYCLE,
+    TT_UI_MENU_PULL, TT_UI_PLAY_TOOLBAR_FOCUS,
     TT_UI_CONTROLLER_SCREEN_NAV_START, TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
     TT_UI_CONTROLLER_SCREEN_NAV_EXIT,
     TT_UI_ZOOM_WAVE_AT,
@@ -468,6 +468,10 @@ static int tracker_focus_panel_next(int step);
 static int focused_order_activity_position(int *position);
 static void order_refresh(void);
 static int wave_editor_active(void);
+static const F80StatusItem *current_status(void);
+static void special_action(void);
+static void pull_menu(F80Widget *,void *);
+static void controller_navigation_activate(void);
 static F80Widget *dx7_focus_canvas(void);
 static void open_path_dialog(int action);
 static void leave_follow(void);
@@ -1155,22 +1159,6 @@ static int handle_ui_event(TtUiEvent event) {
         f80_grid_scroll(grid,event.a,event.b);
         return 1;
     }
-    if(event.type==TT_UI_LEADER_START) {
-        if(event.a<250 || event.a>5000)return 0;
-        tracker.leader_pending=1;
-        tracker.leader_deadline=SDL_GetTicks()+(Uint64)event.a;
-        tt_tracker_message("Leader: O Orders, I Instruments, X Main");
-        tt_tracker_log_event("UI","Leader shortcut prefix entered");
-        return 1;
-    }
-    if(event.type==TT_UI_LEADER_CANCEL || event.type==TT_UI_LEADER_TIMEOUT ||
-       event.type==TT_UI_LEADER_COMPLETE) {
-        if(!tracker.leader_pending)return 0;
-        tracker.leader_pending=0;tracker.leader_deadline=0;
-        if(event.type==TT_UI_LEADER_CANCEL)tt_tracker_message("Leader canceled");
-        else if(event.type==TT_UI_LEADER_TIMEOUT)tt_tracker_message("Leader timed out");
-        return 1;
-    }
     if(event.type==TT_UI_SYNC_PATTERN_ORDER) {
         if(tracker.play_mode!=PLAY_SONG)return 1;
         if(tracker.edit_order>=0 &&
@@ -1495,7 +1483,7 @@ static int handle_ui_event(TtUiEvent event) {
         tracker.controller_screen_navigation=0;
         if(tracker.app.menu && tracker.app.menu->menu_active)
             f80_menu_close(tracker.app.menu);
-        tracker.controller_toolbar_index=clamp(event.a,0,4);
+        if(event.a>=0)tracker.controller_toolbar_index=clamp(event.a,0,4);
         return 1;
     }
     if(event.type==TT_UI_CONTROLLER_TOOLBAR_MOVE) {
@@ -1512,6 +1500,38 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_CONTROLLER_MENU_MOVE) {
         if(!event.a)return 0;
         return controller_menu_move(event.a<0?-1:1);
+    }
+    if(event.type==TT_UI_SPECIAL_ACTION) {
+        if(tracker.app.modal)return 0;
+        tracker.controller_toolbar_mode=0;
+        tracker.controller_screen_navigation=0;
+        special_action();
+        tt_tracker_log_event("UI","Context special action invoked");
+        return 1;
+    }
+    if(event.type==TT_UI_PERSPECTIVE_CYCLE) {
+        if(tracker.app.modal)return 0;
+        tracker.controller_toolbar_mode=0;
+        tracker.controller_screen_navigation=0;
+        /* Use the same complete transitions as the View menu actions. */
+        if(tracker.perspective==TT_PERSPECTIVE_MAIN)
+            perspective_orders(NULL,NULL);
+        else if(tracker.perspective==TT_PERSPECTIVE_ORDERS)
+            perspective_instruments(NULL,NULL);
+        else perspective_main(NULL,NULL);
+        return 1;
+    }
+    if(event.type==TT_UI_MENU_PULL) {
+        if(!tracker.app.menu)return 0;
+        tracker.controller_toolbar_mode=0;
+        tracker.controller_screen_navigation=0;
+        pull_menu(NULL,NULL);
+        return 1;
+    }
+    if(event.type==TT_UI_PLAY_TOOLBAR_FOCUS) {
+        if(tracker.app.modal)return 0;
+        return handle_ui_event((TtUiEvent){
+            .type=TT_UI_CONTROLLER_TOOLBAR_ENTER,.a=-1});
     }
     if(event.type==TT_UI_CONTROLLER_SCREEN_NAV_START) {
         if(!tracker.app.root)return 0;
@@ -4001,9 +4021,9 @@ static void show_help(F80Widget *button,void *user) {
     (void)button;(void)user;
     static const char *lines[]={
         "File > Load WAV adds a sample; Open/Save Track handles the whole song.",
-        "Type ; then O for Orders, I for Instruments, or X for Main.",
+        "F6 cycles Main, Orders, and Instruments perspectives.",
         "F1 Focus (Shift in web); F2/Tab Option; F3/Enter Forward; F4/Esc Back.",
-        "F5 Main; F6 Instruments; F7 Orders; F8 Play/Pause; F9 Menu; F10 Exit.",
+        "F5 Special; F6 Perspective; F7 Menu; F8 focuses the Play toolbar; F10 Exit.",
         "Wave: Focus selects the next marker; 0-F selects a marker.",
         "Wave: Ctrl+Left/Right selects markers; Shift+Left/Right moves one.",
         "Wave: Up/Down zoom; Left/Right pans.",
@@ -4012,7 +4032,7 @@ static void show_help(F80Widget *button,void *user) {
         "O in the note field enters OFF; X/Y jump pattern or row; Z sets BPM in patterns, ticks per row in tables.",
         "Notes: type C-4, C#4, +=X, or -=X (X is hex semitones).",
         "Delete clears a field. Enter starts/stops playback. Ctrl+U/Y undo/redo.",
-        "Ctrl+O toggles the event console; F9 opens menu; F10 exits.",
+        "Ctrl+O toggles the event console; F7 opens the menu; F10 exits.",
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "File > Song settings changes BPM, pattern rows, and table ticks.",
         "Instruments > Source packs WAVs or selects an external shared file.",
@@ -4176,9 +4196,9 @@ static const F80MenuItem play_items[]={
     {"~L~oop song order",NULL,toggle_loop,1}
 };
 static const F80MenuItem view_items[]={
-    {"~M~ain perspective","; X",perspective_main,1},
-    {"~O~rders perspective","; O",perspective_orders,1},
-    {"~I~nstruments perspective","; I",perspective_instruments,1},
+    {"~M~ain perspective",NULL,perspective_main,1},
+    {"~O~rders perspective",NULL,perspective_orders,1},
+    {"~I~nstruments perspective",NULL,perspective_instruments,1},
     {"Wave zoom ~o~ut",NULL,zoom_out,1},{"Wave zoom ~i~n",NULL,zoom_in,1},
     {event_console_menu_label,"Ctrl+O",toggle_console,1}
 };
@@ -4477,6 +4497,10 @@ static void status_option(F80Widget *button,void *user) {
 }
 static void status_forward(F80Widget *button,void *user) {
     (void)button;(void)user;
+    if(tracker.controller_toolbar_mode) {
+        controller_navigation_activate();
+        return;
+    }
     int order_position;
     if(focused_order_activity_position(&order_position))
         handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_TOGGLE_ACTIVITY});
@@ -4499,27 +4523,6 @@ static void status_back(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(wave_editor_active())previous_marker(NULL,NULL);
     else handle_key(27);
-}
-static int process_leader_key(int key) {
-    if(!tracker.leader_pending) {
-        if(key==';')
-            handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_START,.a=1500});
-        return key==';';
-    }
-    if(key==27) {
-        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_CANCEL});
-        return 1;
-    }
-    int command=tolower((unsigned char)key);
-    if(command=='o' || command=='i' || command=='x') {
-        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_COMPLETE});
-        if(command=='o')show_order(NULL,NULL);
-        else if(command=='i')show_manage(NULL,NULL);
-        else perspective_main(NULL,NULL);
-        return 1;
-    }
-    handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_CANCEL});
-    return 0;
 }
 static const F80StatusItem *mode_status(const F80StatusItem *base) {
     memcpy(mode_status_visible,base,sizeof(mode_status_visible));
@@ -4565,13 +4568,13 @@ static const F80StatusItem *current_status(void) {
              columns>=70?8:4;
     for(int i=0;i<kept;++i)perspective_status_visible[i]=base[i];
     perspective_status_visible[kept]=tracker.perspective==TT_PERSPECTIVE_MAIN?
-        (F80StatusItem){"More","(; O)",perspective_orders}:
-        (F80StatusItem){"Back","(; X)",perspective_main};
+        (F80StatusItem){"More","Orders",perspective_orders}:
+        (F80StatusItem){"Back","Main",perspective_main};
     perspective_status_visible[kept+1]=tracker.perspective==TT_PERSPECTIVE_MAIN?
-        (F80StatusItem){"More","(; I)",perspective_instruments}:
+        (F80StatusItem){"More","Instruments",perspective_instruments}:
         tracker.perspective==TT_PERSPECTIVE_ORDERS?
-        (F80StatusItem){"Inst","(; I)",perspective_instruments}:
-        (F80StatusItem){"Orders","(; O)",perspective_orders};
+        (F80StatusItem){"Inst","Instruments",perspective_instruments}:
+        (F80StatusItem){"Orders","Orders",perspective_orders};
     static const F80StatusItem common_status[4]={
         {"1","Focus",status_focus},{"2","Option",status_option},
         {"3","Back",status_back},{"4","Forward",status_forward}
@@ -4579,6 +4582,23 @@ static const F80StatusItem *current_status(void) {
     memcpy(perspective_status_visible,common_status,sizeof(common_status));
     if(tracker.status)tracker.status->status_count=4;
     return perspective_status_visible;
+}
+static void special_action(void) {
+    if(tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected &&
+       tracker.inline_table_open) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+            .index=tracker.inline_table_index,
+            .a=tracker.inline_table_parent,.b=tracker.inline_table_channel});
+        return;
+    }
+    int table;
+    if(tracker.focus==FOCUS_PHRASE && !tracker.inline_table_selected &&
+       selected_pattern_table(&table)) {
+        toggle_inline_table(NULL,NULL);
+        return;
+    }
+    const F80StatusItem *items=current_status();
+    if(items && items[4].action)items[4].action(NULL,NULL);
 }
 static void controller_navigation_exit(void) {
     if(tracker.controller_toolbar_mode)
@@ -4606,16 +4626,6 @@ static void controller_navigation_activate(void) {
             tracker.follow_button,tracker.mode_button,tracker.pattern_lock_button};
         F80Widget *button=buttons[tracker.controller_toolbar_index];
         if(button && button->action)button->action(button,button->user);
-    }
-}
-static void controller_toolbar_move(int direction) {
-    if(tracker.controller_toolbar_mode)
-        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_MOVE,
-                                    .a=direction});
-    else {
-        controller_navigation_exit();
-        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_ENTER,
-                                    .a=direction>0?0:4});
     }
 }
 static void change_octave(int delta) {
@@ -5505,16 +5515,17 @@ static void handle_key(int key) {
         f80_key(&tracker.app,key);return;
     }
     if(key==2005) {
-        handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
-                                    .a=TT_PERSPECTIVE_MAIN});return;
+        handle_ui_event((TtUiEvent){.type=TT_UI_SPECIAL_ACTION});return;
     }
     if(key==2006) {
-        perspective_instruments(NULL,NULL);return;
+        handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});return;
     }
     if(key==2007) {
-        perspective_orders(NULL,NULL);return;
+        handle_ui_event((TtUiEvent){.type=TT_UI_MENU_PULL});return;
     }
-    if(key==2008) { toggle_play(NULL,NULL);return; }
+    if(key==2008) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_PLAY_TOOLBAR_FOCUS});return;
+    }
     if(key==9 || key==F80_KEY_BTAB) {
         tracker_focus_panel_next(key==9?1:-1);return;
     }
@@ -5540,11 +5551,6 @@ static void handle_key(int key) {
         widget_is_inside(tracker.app.focus,tracker.dx7_globals_panel) ||
         widget_is_inside(tracker.app.focus,tracker.dx7_operators_panel)) &&
        dx7_key(key))return;
-    if(tracker.leader_pending && process_leader_key(key))return;
-    if(key==';' && (!tracker.app.focus ||
-                    tracker.app.focus->kind!=F80_INPUT)) {
-        process_leader_key(key);return;
-    }
     if(wave_editor_active() && (key==10 || key==13)) {
         status_forward(NULL,NULL);return;
     }
@@ -5581,6 +5587,11 @@ static void handle_key(int key) {
         }
         controller_navigation_exit();
     } else if(tracker.controller_toolbar_mode) {
+        if(key==F80_KEY_LEFT || key==F80_KEY_RIGHT) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_MOVE,
+                .a=key==F80_KEY_RIGHT?1:-1});
+            return;
+        }
         if(key==9 || key==F80_KEY_BTAB) {
             handle_ui_event((TtUiEvent){
                 .type=TT_UI_CONTROLLER_SCREEN_NAV_START,
@@ -5591,6 +5602,7 @@ static void handle_key(int key) {
             controller_navigation_activate();
             return;
         }
+        if(key==27) { controller_navigation_exit();return; }
         controller_navigation_exit();
     }
     if(effect_name_focused() && (key==10 || key==13)) {
@@ -5880,13 +5892,14 @@ static void controller_action_input(TtPadAction action,int down) {
         return;
     }
     if(!down)return;
-    if(action==TT_PAD_TOP_LEFT || action==TT_PAD_TOP_RIGHT) {
-        int direction=action==TT_PAD_TOP_RIGHT?1:-1;
-        handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_MENU_MOVE,
-                                    .a=direction});
-    } else if(action==TT_PAD_BOTTOM_LEFT || action==TT_PAD_BOTTOM_RIGHT) {
-        int direction=action==TT_PAD_BOTTOM_RIGHT?1:-1;
-        controller_toolbar_move(direction);
+    if(action==TT_PAD_TOP_LEFT) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_SPECIAL_ACTION});
+    } else if(action==TT_PAD_BOTTOM_LEFT) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});
+    } else if(action==TT_PAD_TOP_RIGHT) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_MENU_PULL});
+    } else if(action==TT_PAD_BOTTOM_RIGHT) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_PLAY_TOOLBAR_FOCUS});
     } else if(action==TT_PAD_NEGATIVE) {
         controller_navigation_exit();handle_key(27);
     }
@@ -5907,10 +5920,16 @@ static void controller_button_action(SDL_GamepadButton button) {
        button==SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
        button==SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
        button==SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
-        if(controller_navigation_active())controller_navigation_exit();
         int key=button==SDL_GAMEPAD_BUTTON_DPAD_UP?F80_KEY_UP:
             button==SDL_GAMEPAD_BUTTON_DPAD_DOWN?F80_KEY_DOWN:
             button==SDL_GAMEPAD_BUTTON_DPAD_LEFT?F80_KEY_LEFT:F80_KEY_RIGHT;
+        if(tracker.controller_toolbar_mode &&
+           (key==F80_KEY_LEFT || key==F80_KEY_RIGHT)) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_CONTROLLER_TOOLBAR_MOVE,
+                .a=key==F80_KEY_RIGHT?1:-1});
+            return;
+        }
+        if(controller_navigation_active())controller_navigation_exit();
         if(controller_input.focus_held) {
             controller_input.focus_moved=1;
             key=key==F80_KEY_UP?F80_KEY_SHIFT_UP:key==F80_KEY_DOWN?F80_KEY_SHIFT_DOWN:
@@ -5928,7 +5947,12 @@ static void controller_button_input(SDL_GamepadButton button,int down) {
     controller_input.button_down[button]=(unsigned char)!!down;
     if(was_down==!!down)return;
     if(down) {
-        controller_input.repeat_at[button]=SDL_GetTicks()+350;
+        controller_input.repeat_at[button]=
+            button==SDL_GAMEPAD_BUTTON_DPAD_UP ||
+            button==SDL_GAMEPAD_BUTTON_DPAD_DOWN ||
+            button==SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
+            button==SDL_GAMEPAD_BUTTON_DPAD_RIGHT?
+                SDL_GetTicks()+350:0;
         controller_button_action(button);
     } else {
         controller_input.repeat_at[button]=0;
@@ -5941,7 +5965,7 @@ static void controller_trigger_input(int right,int down) {
     int was_down=controller_input.trigger_down[index];
     controller_input.trigger_down[index]=(unsigned char)!!down;
     if(was_down==!!down)return;
-    controller_input.trigger_repeat_at[index]=down?SDL_GetTicks()+350:0;
+    controller_input.trigger_repeat_at[index]=0;
     controller_action_input(right?TT_PAD_BOTTOM_RIGHT:TT_PAD_BOTTOM_LEFT,down);
 }
 static int controller_has_gamepad(SDL_JoystickID instance) {
@@ -6103,8 +6127,7 @@ static void controller_poll(void) {
     Uint64 now=SDL_GetTicks();
     const SDL_GamepadButton repeat_buttons[]={
         SDL_GAMEPAD_BUTTON_DPAD_UP,SDL_GAMEPAD_BUTTON_DPAD_DOWN,
-        SDL_GAMEPAD_BUTTON_DPAD_LEFT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
-        SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER};
+        SDL_GAMEPAD_BUTTON_DPAD_LEFT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT};
     for(size_t i=0;i<sizeof(repeat_buttons)/sizeof(repeat_buttons[0]);++i) {
         SDL_GamepadButton button=repeat_buttons[i];
         if(controller_input.button_down[button] &&
@@ -6114,14 +6137,6 @@ static void controller_poll(void) {
             controller_input.repeat_at[button]=now+110;
         }
     }
-    for(int side=0;side<2;++side)
-        if(controller_input.trigger_down[side] &&
-           controller_input.trigger_repeat_at[side] &&
-           now>=controller_input.trigger_repeat_at[side]) {
-            controller_action_input(side?TT_PAD_BOTTOM_RIGHT:
-                TT_PAD_BOTTOM_LEFT,1);
-            controller_input.trigger_repeat_at[side]=now+110;
-        }
 }
 static void controller_shutdown(void) {
     controller_clear_held_state();
@@ -7156,8 +7171,6 @@ static int frame(void *user) {
 #endif
     controller_poll();
     tt_play_advance();
-    if(tracker.leader_pending && SDL_GetTicks()>=tracker.leader_deadline)
-        handle_ui_event((TtUiEvent){.type=TT_UI_LEADER_TIMEOUT});
     update_labels();
     int rows,cols;getmaxyx(stdscr,rows,cols);
     status_columns=cols;

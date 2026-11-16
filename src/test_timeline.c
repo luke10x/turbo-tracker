@@ -483,6 +483,16 @@ int main(void) {
         .index=5,.a=0,.b=5}));
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
         .index=5,.a=0,.b=1}));
+    tracker.inline_table_open=0;
+    tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;tracker.field=2;
+    tracker.pattern.cell[0][1].effect=TT_EFFECT_T;
+    tracker.pattern.cell[0][1].value=3;
+    handle_key(2005); /* Special opens a selected TBL effect. */
+    assert(tracker.inline_table_open && tracker.inline_table_index==3);
+    handle_key(2005); /* Special also closes its expanded table. */
+    assert(!tracker.inline_table_open);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
+        .index=5,.a=0,.b=1}));
     tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;tracker.field=2;
     handle_key(F80_KEY_DOWN);
     assert(tracker.inline_table_selected && tracker.inline_table_tick==0);
@@ -944,18 +954,17 @@ int main(void) {
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_SET_PERSPECTIVE,
                                        .a=TT_PERSPECTIVE_MAIN}));
     tracker.app.modal=NULL;tracker.console_visible=0;
-    handle_key(';');handle_key('x');
-    assert(!tracker.leader_pending &&
-           tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.playing);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});
+    assert(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.playing);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});
+    assert(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS && tracker.playing);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});
+    assert(tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.playing);
     tracker.wave_row=tracker.grid_row=tracker.phrase_frame=tracker.instrument_panels=NULL;
     tracker.order_frame=tracker.wave_frame=tracker.wave_canvas=tracker.order_dialog=NULL;
     tracker.manage_dialog=tracker.slices_dialog=NULL;
     tracker.playing=0;
     tracker.focus=FOCUS_PHRASE;
-    handle_key(';');
-    assert(tracker.leader_pending);
-    handle_key(27);
-    assert(!tracker.leader_pending);
     F80Widget pattern_choice={0};pattern_choice.cursor=0;
     tracker.order_list=&pattern_choice;
     order_panel_selected(&pattern_choice,NULL);
@@ -1124,12 +1133,6 @@ int main(void) {
     assert(tracker.app.menu->menu_active && tracker.app.menu->menu_index==0 &&
            tracker.app.menu->menu_item==0);
     controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
-    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
-    assert(tracker.app.menu->menu_index==0 && tracker.app.menu->menu_item==2);
-    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
-    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
-    assert(tracker.app.menu->menu_index==1 && tracker.app.menu->menu_item==0);
-    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,0);
     f80_menu_close(tracker.app.menu);
     F80Widget fake_controller_play={.action=count_header_click,.user=(void *)2};
     F80Widget fake_controller_stop={.action=count_header_click,.user=(void *)2};
@@ -1139,16 +1142,14 @@ int main(void) {
     controller_trigger_input(1,1);
     assert(tracker.controller_toolbar_mode &&
            tracker.controller_toolbar_index==0);
+    assert(header_clicks[2]==0); /* R2 focuses the toolbar; it does not press Play. */
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,1);
+    assert(tracker.controller_toolbar_index==1);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_RIGHT,0);
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
     assert(tracker.controller_toolbar_mode && header_clicks[2]==1);
     controller_trigger_input(1,0);
-    controller_trigger_input(1,1);
-    assert(tracker.controller_toolbar_mode &&
-           tracker.controller_toolbar_index==1);
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
-    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
-    assert(tracker.controller_toolbar_mode && header_clicks[2]==2);
-    controller_trigger_input(1,0);
     controller_navigation_exit();
     tracker.play_button=NULL;tracker.stop_button=NULL;tracker.app.menu=NULL;
     memset(&controller_input,0,sizeof(controller_input));
@@ -1226,8 +1227,7 @@ int main(void) {
     assert(tracker.app.focus==marker_list); /* Focus cycles controls in this panel. */
     f80_focus_next(&tracker.app,-1);
     assert(tracker.app.focus==selector_sample_list);
-    controller_action_input(TT_PAD_TOP_RIGHT,1);
-    assert(tracker.app.focus==selector_sample_list); /* R1 is menu traversal. */
+    /* R1 now opens the menu, so do not invoke it without a menubar here. */
     tracker.instrument_selector_frame=NULL;
     tracker.manage_list=NULL;tracker.slices_list=NULL;
     tracker.perspective=TT_PERSPECTIVE_MAIN;
@@ -2018,26 +2018,32 @@ int main(void) {
     tracker.instrument_selector_frame=NULL;
     tracker.order_dialog=&shortcut_order_dialog;
     tracker.manage_dialog=&shortcut_manage;tracker.slices_dialog=&shortcut_slices;
-    handle_key(22);
-    handle_key(2005); /* F5 */
+    tracker.perspective=TT_PERSPECTIVE_MAIN;
+    handle_key(2006); /* F6 cycles perspectives. */
+    assert(tracker.perspective==TT_PERSPECTIVE_ORDERS);
+    handle_key(2006);
+    assert(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS);
+    handle_key(2006);
     assert(tracker.perspective==TT_PERSPECTIVE_MAIN &&
-           !tracker.selecting && !tracker.visual_selecting);
-    handle_key(22);
-    handle_key(2006); /* F6 */
-    assert(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
            !tracker.selecting && !tracker.visual_selecting);
     handle_key(22);
     handle_key(27);
     assert(!tracker.selecting && !tracker.visual_selecting);
-    handle_key(22);
-    handle_key(2007); /* F7 */
-    assert(tracker.perspective==TT_PERSPECTIVE_ORDERS &&
-           !tracker.selecting && !tracker.visual_selecting);
+    tracker.app.menu=f80_add(&shortcut_phrase,
+        f80_menubar(controller_menus,2));
+    handle_key(2007); /* F7 pulls down the menu. */
+    assert(tracker.app.menu->menu_active);
+    f80_menu_close(tracker.app.menu);
+    F80Widget fake_shortcut_play={.action=count_header_click,.user=(void *)2};
+    tracker.play_button=&fake_shortcut_play;header_clicks[2]=0;
+    tracker.controller_toolbar_index=0;
     int playing_before_f8=tracker.playing;
-    handle_key(2008); /* F8 toggles playback. */
-    assert(tracker.playing!=playing_before_f8);
-    handle_key(2008);
-    assert(tracker.playing==playing_before_f8);
+    handle_key(2008); /* F8 focuses Play without activating it. */
+    assert(tracker.controller_toolbar_mode && tracker.controller_toolbar_index==0 &&
+           tracker.playing==playing_before_f8 && header_clicks[2]==0);
+    handle_key(13); /* Forward activates the highlighted Play button. */
+    assert(tracker.controller_toolbar_mode && header_clicks[2]==1);
+    tracker.play_button=NULL;tracker.app.menu=NULL;
     tracker.order_dialog=NULL;tracker.manage_dialog=NULL;tracker.slices_dialog=NULL;
     int original_note=tracker.pattern.cell[0][4].note;
     TtEditEvent change={.type=TT_EDIT_CELL_SET};
