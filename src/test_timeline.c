@@ -555,11 +555,13 @@ int main(void) {
     tracker.step=1;tracker.field=0;clear_note_input();
     handle_key('c');handle_key('-');handle_key('4');
     assert(tracker.pattern.cell[1][1].note==60);
-    tracker.focus=FOCUS_WAVE;tracker.started=tracker.playing=1;
+    tracker.focus=FOCUS_WAVE;tracker.perspective=TT_PERSPECTIVE_MAIN;
+    tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
+    tracker.marker=0;tracker.started=tracker.playing=1;
     handle_key(13);
-    assert(tracker.started && !tracker.playing);
+    assert(tracker.started && tracker.playing && tracker.marker==1);
     handle_key(' ');
-    assert(!tracker.playing);
+    assert(tracker.playing);
 
     memset(&tracker,0,sizeof(tracker));
     assert(setenv("INIT_SONG","examples/time-stretch/time-stretch.ttt",1)==0);
@@ -894,11 +896,13 @@ int main(void) {
     int saved_marker=tracker.marker,saved_view=tracker.view_start;
     int saved_instrument_type=tracker.wave.instrument_type;
     tracker.marker=0;tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
-    handle_key(2001);
+    handle_key(2003);
     assert(tracker.marker==1);
     tracker.marker=TT_MARKERS-1;
-    handle_key(2001);
-    assert(tracker.marker==0);
+    handle_key(2003);
+    assert(tracker.marker==TT_MARKERS-1);
+    handle_key(2004);
+    assert(tracker.marker==TT_MARKERS-2);
     tracker.marker=saved_marker;tracker.view_start=saved_view;
     tracker.wave.instrument_type=saved_instrument_type;
     tracker.focus=FOCUS_ORDER;
@@ -1688,8 +1692,10 @@ int main(void) {
     instrument_wave_frame.rect=f80_rect(0,1,80,8);
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
     tracker.zoom=0;
-    handle_mouse(0,1,-1); /* instrument view zooms from the wave frame edge too */
+    handle_mouse(0,1,1); /* instrument view zooms from the wave frame edge too */
     assert(tracker.zoom==1);
+    handle_mouse(0,1,-1);
+    assert(tracker.zoom==0);
     tracker.zoom=0;
     tracker.perspective=perspective_before;
     tracker.wave_frame=NULL;
@@ -2116,6 +2122,32 @@ int main(void) {
     assert(tracker.song.pattern_count==patterns_before &&
            tracker.song.order_count==orders_before &&
            tracker.song.order_active[0]==!was_active);
+    int saved_wave_marker=tracker.marker;
+    int saved_wave_zoom=tracker.zoom;
+    int saved_wave_frames=tracker.wave.frames;
+    int saved_wave_focus=tracker.focus;
+    int saved_wave_perspective=tracker.perspective;
+    int saved_wave_instrument_type=tracker.wave.instrument_type;
+    F80Widget *saved_wave_modal=tracker.app.modal;
+    int saved_wave_console=tracker.console_visible;
+    tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
+    tracker.focus=FOCUS_WAVE;tracker.perspective=TT_PERSPECTIVE_MAIN;
+    tracker.app.modal=NULL;tracker.console_visible=0;
+    tracker.wave.frames=1024;tracker.zoom=2;
+    tracker.marker=2;tracker.playing=1;
+    handle_key(F80_KEY_UP);
+    assert(tracker.zoom==3 && tracker.playing);
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.zoom==2 && tracker.playing);
+    handle_key(13); /* Enter is Forward in the waveform editor. */
+    assert(tracker.marker==3 && tracker.playing);
+    handle_key(27); /* Esc is Back here, so it selects the prior marker. */
+    assert(tracker.marker==2 && tracker.playing);
+    tracker.marker=saved_wave_marker;tracker.focus=saved_wave_focus;
+    tracker.zoom=saved_wave_zoom;tracker.wave.frames=saved_wave_frames;
+    tracker.perspective=saved_wave_perspective;
+    tracker.wave.instrument_type=saved_wave_instrument_type;
+    tracker.app.modal=saved_wave_modal;tracker.console_visible=saved_wave_console;
     /* Editor inputs must emit validated edits; navigation remains UI-only. */
     memset(&tracker,0,sizeof(tracker));tt_song_init(&tracker.song);
     dx7_grids_init();

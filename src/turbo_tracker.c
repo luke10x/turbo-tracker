@@ -425,6 +425,7 @@ typedef enum {
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
     TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
     TT_UI_ORDER_TOGGLE_ACTIVITY,
+    TT_UI_MARKER_SELECT,
     TT_UI_CONTROLLER_TOOLBAR_ENTER, TT_UI_CONTROLLER_TOOLBAR_MOVE,
     TT_UI_CONTROLLER_TOOLBAR_EXIT, TT_UI_CONTROLLER_MENU_MOVE,
     TT_UI_CONTROLLER_SCREEN_NAV_START, TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
@@ -466,6 +467,7 @@ static void focus_marker(int marker);
 static int tracker_focus_panel_next(int step);
 static int focused_order_activity_position(int *position);
 static void order_refresh(void);
+static int wave_editor_active(void);
 static F80Widget *dx7_focus_canvas(void);
 static void open_path_dialog(int action);
 static void leave_follow(void);
@@ -797,20 +799,14 @@ static int handle_ui_event(TtUiEvent event) {
             f80_focus_next(&tracker.app,1);
             return 1;
         }
-        int wave_editor=tracker.wave.instrument_type==TT_INSTRUMENT_SAMPLE &&
-            ((tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.focus==FOCUS_WAVE) ||
-             widget_is_inside(tracker.app.focus,tracker.wave_frame));
-        if(wave_editor)
-            focus_marker((clamp(tracker.marker,0,TT_MARKERS-1)+1)%TT_MARKERS);
-        else if(tracker.focus==FOCUS_PHRASE && !tracker.grid_value_editing) {
+        if(tracker.focus==FOCUS_PHRASE && !tracker.grid_value_editing) {
             /* Focus is a pane action. Space advances grid subcells; Focus
                remains available for visual selection with a direction key. */
         } else {
             f80_focus_next(&tracker.app,1);
             tracker_note_panel_focus(tracker.app.focus);
         }
-        tt_tracker_log_event("UI",wave_editor?"Next wave marker focused":
-            tracker.focus==FOCUS_PHRASE?
+        tt_tracker_log_event("UI",tracker.focus==FOCUS_PHRASE?
                 "Grid Focus reserved for directional selection":
                 "Focus advanced within the current pane");
         return 1;
@@ -1422,6 +1418,14 @@ static int handle_ui_event(TtUiEvent event) {
         if(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.order_dialog &&
            tracker.order_bank && tracker.order_seq)order_refresh();
         tt_tracker_log_event("EDIT","Order activity toggled");
+        return 1;
+    }
+    if(event.type==TT_UI_MARKER_SELECT) {
+        if(!wave_editor_active())return 0;
+        int previous=tracker.marker;
+        focus_marker(event.index);
+        tt_tracker_log_event("UI",tracker.marker<previous?
+            "Previous wave marker focused":"Next wave marker focused");
         return 1;
     }
     if(event.type==TT_UI_BEGIN_VISUAL_SELECTION) {
@@ -2201,13 +2205,13 @@ static void zoom_in(F80Widget *button,void *user) {
 }
 static void previous_marker(F80Widget *button,void *user) {
     (void)button;(void)user;
-    focus_marker(tracker.marker-1);
-    tt_tracker_message("Previous marker selected");
+    handle_ui_event((TtUiEvent){.type=TT_UI_MARKER_SELECT,
+        .index=clamp(tracker.marker-1,0,TT_MARKERS-1)});
 }
 static void next_marker(F80Widget *button,void *user) {
     (void)button;(void)user;
-    focus_marker(tracker.marker+1);
-    tt_tracker_message("Next marker selected");
+    handle_ui_event((TtUiEvent){.type=TT_UI_MARKER_SELECT,
+        .index=clamp(tracker.marker+1,0,TT_MARKERS-1)});
 }
 static void set_effect_slot(TtCell *cell,int slot,int effect) {
     TtPatternEffect *fx=tt_cell_effect(cell,slot);
@@ -4226,6 +4230,11 @@ static int focused_order_activity_position(int *position) {
     }
     return 0;
 }
+static int wave_editor_active(void) {
+    return tracker.wave.instrument_type==TT_INSTRUMENT_SAMPLE &&
+        ((tracker.perspective==TT_PERSPECTIVE_MAIN && tracker.focus==FOCUS_WAVE) ||
+         widget_is_inside(tracker.app.focus,tracker.wave_frame));
+}
 static void toggle_order_active(F80Widget *button,void *user) {
     (void)button;(void)user;
     handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_TOGGLE_ACTIVITY});
@@ -4462,6 +4471,7 @@ static void status_forward(F80Widget *button,void *user) {
     int order_position;
     if(focused_order_activity_position(&order_position))
         handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_TOGGLE_ACTIVITY});
+    else if(wave_editor_active())next_marker(NULL,NULL);
     else if(tracker.focus==FOCUS_PHRASE && tracker.field==0 &&
        !tracker.inline_table_selected)
         handle_ui_event((TtUiEvent){.type=TT_UI_NOTE_PICKER_OPEN});
@@ -4477,7 +4487,9 @@ static void status_forward(F80Widget *button,void *user) {
     else handle_key(10);
 }
 static void status_back(F80Widget *button,void *user) {
-    (void)button;(void)user;handle_key(27);
+    (void)button;(void)user;
+    if(wave_editor_active())previous_marker(NULL,NULL);
+    else handle_key(27);
 }
 static int process_leader_key(int key) {
     if(!tracker.leader_pending) {
@@ -5524,6 +5536,12 @@ static void handle_key(int key) {
                     tracker.app.focus->kind!=F80_INPUT)) {
         process_leader_key(key);return;
     }
+    if(wave_editor_active() && (key==10 || key==13)) {
+        status_forward(NULL,NULL);return;
+    }
+    if(wave_editor_active() && key==27) {
+        status_back(NULL,NULL);return;
+    }
     if((key==10 || key==13) && focused_order_activity_position(
            &(int){0})) {
         handle_ui_event((TtUiEvent){.type=TT_UI_ORDER_TOGGLE_ACTIVITY});
@@ -5678,8 +5696,8 @@ static void handle_key(int key) {
         else if(key==F80_KEY_CTRL_RIGHT)next_marker(NULL,NULL);
         else if(key==F80_KEY_SHIFT_LEFT)value_down(NULL,NULL);
         else if(key==F80_KEY_SHIFT_RIGHT)value_up(NULL,NULL);
-        else if(key==F80_KEY_UP)zoom_wave(-1);
-        else if(key==F80_KEY_DOWN)zoom_wave(1);
+        else if(key==F80_KEY_UP)zoom_wave(1);
+        else if(key==F80_KEY_DOWN)zoom_wave(-1);
         else if(key==F80_KEY_LEFT)pan_wave(-1);
         else if(key==F80_KEY_RIGHT)pan_wave(1);
         else if(key=='+' || key=='=')zoom_wave(1);
@@ -6320,7 +6338,7 @@ static void handle_mouse(int x,int y,int wheel) {
             }
             return;
         }
-        if(wheel) { zoom_wave(wheel<0?1:-1);return; }
+        if(wheel) { zoom_wave(wheel<0?-1:1);return; }
         if(y==r.y+r.h-1) {
             int local=x-r.x,visible=visible_frames();
             if(local==0)pan_wave(-1);
