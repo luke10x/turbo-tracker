@@ -1387,19 +1387,25 @@ int main(void) {
     tracker.phrase_canvas=&grid;
     TtWave saved_wave=tracker.wave;
     int saved_zoom=tracker.zoom,saved_view_start=tracker.view_start;
+    int saved_pinch_marker=tracker.marker;
+    int saved_marker_frame=tracker.phrase.marker[1];
     F80Rect saved_wave_rect=wave.rect;
     float pinch_pcm[1024]={0};
     tracker.wave=(TtWave){.pcm=pinch_pcm,.frames=1024,.rate=44100,
                           .instrument_type=TT_INSTRUMENT_SAMPLE};
-    tracker.zoom=tracker.view_start=0;
+    tracker.zoom=0;tracker.view_start=200;
+    tracker.marker=1;tracker.phrase.marker[1]=900;
     wave.rect=f80_rect(10,0,100,4);
     int pinch_anchor=tracker.view_start+50*visible_frames()/wave.rect.w;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_ZOOM_WAVE_AT,
                                       .index=1,.a=60}));
     assert(tracker.zoom==1 && tracker.view_start+
            50*visible_frames()/wave.rect.w==pinch_anchor);
+    assert(tracker.view_start!=tracker.phrase.marker[1]-visible_frames()/2);
     tracker.wave=saved_wave;tracker.zoom=saved_zoom;
     tracker.view_start=saved_view_start;
+    tracker.marker=saved_pinch_marker;
+    tracker.phrase.marker[1]=saved_marker_frame;
     wave.rect=saved_wave_rect;
     wave.visible=1;
     grid.rect=f80_rect(0,0,80,30);

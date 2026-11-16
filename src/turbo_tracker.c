@@ -3386,6 +3386,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             else if(pattern_range_selected)
                 pair=tracker.grid_selection_invalid?15:65;
             if(!inline_line && tracker.inline_table_open &&
+               !tracker.inline_table_selected &&
                base_global==tracker.inline_table_parent && channel==tracker.inline_table_channel &&
                tracker.field>=2 && channel==tracker.channel &&
                (field==(tracker.field&~1) || field==(tracker.field|1)))pair=59;
@@ -6994,7 +6995,11 @@ static void handle_mouse(int x,int y,int wheel) {
             }
             return;
         }
-        if(wheel) { zoom_wave(wheel<0?-1:1);return; }
+        if(wheel) {
+            handle_ui_event((TtUiEvent){.type=TT_UI_ZOOM_WAVE_AT,
+                .index=wheel<0?-1:1,.a=x});
+            return;
+        }
         if(y==r.y+r.h-1) {
             int local=x-r.x,visible=visible_frames();
             if(local==0)pan_wave(-1);

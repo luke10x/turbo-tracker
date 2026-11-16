@@ -159,6 +159,7 @@ function updateWavePinch() {
   const centerX = (a.lastClientX + b.lastClientX) / 2;
   const centerY = (a.lastClientY + b.lastClientY) / 2;
   const [x] = cellAt(centerX, centerY);
+  // Spreading the fingers increases distance and zooms in at their midpoint.
   const direction = Math.sign(delta);
   for (let step = 0; step < Math.abs(delta); ++step)
     Module.ccall('tt_tracker_zoom_wave_touch', null,
@@ -493,7 +494,26 @@ if (!pointerGestures) for (const type of ['touchstart', 'touchmove', 'touchend',
 }
 let lastWheelStepAt = -Infinity;
 let lastWheelDirection = 0;
+let lastPinchStepAt = -Infinity;
+let lastPinchDirection = 0;
 term.element.addEventListener('wheel', event => {
+  // Desktop trackpad pinch is delivered as Ctrl+wheel. Its delta is opposite
+  // to finger spacing; use the pointer position as the pinch focal point.
+  if (event.ctrlKey && window.f80ApplicationId === 'turbo-tracker') {
+    const [x, y] = cell(event);
+    if (sampleWaveAt(x, y) && event.deltaY) {
+      const direction = -Math.sign(event.deltaY);
+      const now = performance.now();
+      if (direction !== lastPinchDirection || now - lastPinchStepAt >= 60) {
+        Module.ccall('tt_tracker_zoom_wave_touch', null,
+          ['number', 'number'], [direction, x]);
+        lastPinchStepAt = now;
+        lastPinchDirection = direction;
+      }
+      event.preventDefault();
+      return;
+    }
+  }
   const rows = Math.sign(event.deltaY);
   const now = performance.now();
   // Browsers can emit a burst of accelerated pixel-wheel events. Keep the
