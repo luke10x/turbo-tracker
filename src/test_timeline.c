@@ -895,14 +895,20 @@ int main(void) {
     assert(tracker.pattern_index==0 && tracker.edit_order==0 && tracker.phrase_scroll==0);
     assert(tracker.play_order==0 && tracker.active_order_index==0);
     tracker.focus=FOCUS_WAVE;
+    F80Widget fake_statusbar={0};tracker.status=&fake_statusbar;
     handle_key(9);
     assert(tracker.focus==FOCUS_WAVE);
     handle_key(9);
-    assert(tracker.focus==FOCUS_WAVE && current_status()==perspective_status_visible);
+    assert(tracker.focus==FOCUS_WAVE);
+    current_status();
+    assert(tracker.status->status_count==6);
+    assert(!strcmp(current_status()[0].key,"F1") &&
+           !strcmp(current_status()[5].key,"F6"));
     assert(!strcmp(current_status()[0].label,"Focus") &&
-           !strcmp(current_status()[1].label,"Option") &&
+           !strcmp(current_status()[1].label,"Pane") &&
            !strcmp(current_status()[2].label,"Back") &&
-           !strcmp(current_status()[3].label,"Forward"));
+           !strcmp(current_status()[3].label,"Next") &&
+           !strcmp(current_status()[5].label,"Persp"));
     int saved_marker=tracker.marker,saved_view=tracker.view_start;
     int saved_instrument_type=tracker.wave.instrument_type;
     tracker.marker=0;tracker.wave.instrument_type=TT_INSTRUMENT_SAMPLE;
@@ -918,17 +924,18 @@ int main(void) {
     tracker.focus=FOCUS_ORDER;
     assert(strcmp(current_status()[0].label,"Focus")==0);
     tracker.play_mode=PLAY_PATTERN;
-    assert(strcmp(current_status()[1].label,"Option")==0);
+    assert(strcmp(current_status()[1].label,"Pane")==0);
     int saved_field=tracker.field;
     tracker.focus=FOCUS_PHRASE;tracker.field=0;
-    assert(strcmp(current_status()[0].label,"Focus")==0 &&
-           strcmp(current_status()[3].label,"Forward")==0);
+    assert(strcmp(current_status()[0].label,"No-op")==0 &&
+           strcmp(current_status()[3].label,"Pick")==0 &&
+           strcmp(current_status()[4].label,"Off")==0);
     tracker.field=1;
-    assert(strcmp(current_status()[0].label,"Focus")==0);
+    assert(strcmp(current_status()[4].label,"Slice")==0);
     tracker.field=2;
-    assert(strcmp(current_status()[0].label,"Focus")==0);
+    assert(strcmp(current_status()[4].label,"MVL")==0);
     tracker.field=3;
-    assert(strcmp(current_status()[0].label,"Focus")==0);
+    assert(strcmp(current_status()[4].label,"Down")==0);
     tracker.field=saved_field;tracker.focus=FOCUS_ORDER;
     F80Widget fake_wave_row={.visible=1},fake_grid_row={.visible=1},
         fake_phrase_frame={.visible=1};
@@ -1731,7 +1738,7 @@ int main(void) {
     edit_history=tt_edit_history_new(&history_doc);
     assert(edit_history);
     tracker.focus=FOCUS_PHRASE;tracker.field=2;tracker.step=0;tracker.channel=0;
-    assert(strcmp(current_status()[0].label,"Focus")==0);
+    assert(strcmp(current_status()[0].label,"No-op")==0);
     TtCell picker_original=tracker.pattern.cell[0][0];
     effect_picker_open(NULL,NULL);
     assert(tracker.effect_picker_labels[17][0]=='R' &&
@@ -2092,7 +2099,7 @@ int main(void) {
     tracker.wave_row=&wave_row;tracker.grid_row=&grid_row;
     tracker.phrase_frame=&phrase_frame;
     tracker.details=&details;tracker.status=&status;tracker.console=&console;
-    current_status();assert(status.status_count==4);
+    current_status();assert(status.status_count==6);
     int logged=event_log_count;
     view_items[5].action(NULL,NULL);
     assert(tracker.console_visible && root.window_role==F80_WINDOW_CONSOLE);
@@ -2290,11 +2297,10 @@ int main(void) {
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_EDITING,.a=0}));
     assert(!dx7_grid_is_editing());
     int old_decimal_value=tracker.wave.dx7.data[parameter];
-    handle_key(13); /* Forward opens autocomplete instead of toggling edit. */
+    handle_key(2004); /* Forward opens autocomplete instead of toggling edit. */
     assert(!dx7_grid_is_editing());
     assert(tracker.decimal_picker_dialog &&
            tracker.app.modal==tracker.decimal_picker_dialog);
-    handle_key(2004); /* Forward opens the FM decimal grid. */
     assert(tracker.decimal_picker_dialog &&
            tracker.decimal_picker_max==tt_dx7_max(parameter));
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_CURSOR,

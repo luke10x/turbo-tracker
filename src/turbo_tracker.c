@@ -114,7 +114,6 @@ static F80Widget *order_link_button,*order_unlink_button,*order_close_button;
 static void order_remove(F80Widget *,void *);
 static F80Wrap manage_actions,sample_actions,fm_actions,slices_actions,source_actions;
 static F80Widget *manage_buttons[5],*sample_buttons[3],*fm_buttons[3],*slices_buttons[6];
-static int status_columns=80;
 enum { TT_CONTROLLER_MAX_DEVICES=8 };
 static struct {
     SDL_Gamepad *gamepad[TT_CONTROLLER_MAX_DEVICES];
@@ -470,6 +469,9 @@ static void order_refresh(void);
 static int wave_editor_active(void);
 static const F80StatusItem *current_status(void);
 static void special_action(void);
+static void status_special(F80Widget *,void *);
+static void status_perspective(F80Widget *,void *);
+static void handle_table_key(int key);
 static void pull_menu(F80Widget *,void *);
 static void controller_navigation_activate(void);
 static F80Widget *dx7_focus_canvas(void);
@@ -4476,7 +4478,35 @@ static const F80StatusItem reference_status[]={
 static F80StatusItem selection_visible[10];
 static F80StatusItem pattern_status_visible[10];
 static F80StatusItem mode_status_visible[10];
-static F80StatusItem perspective_status_visible[10];
+typedef enum {
+    STATUS_CONTEXT_MODAL, STATUS_CONTEXT_TABLE_DIALOG,
+    STATUS_CONTEXT_GRID_NOTE, STATUS_CONTEXT_GRID_INSTRUMENT,
+    STATUS_CONTEXT_GRID_EFFECT, STATUS_CONTEXT_GRID_VALUE,
+    STATUS_CONTEXT_GRID_INLINE, STATUS_CONTEXT_GRID_SELECTION,
+    STATUS_CONTEXT_ORDER, STATUS_CONTEXT_ORDERS,
+    STATUS_CONTEXT_WAVE, STATUS_CONTEXT_SYNTH, STATUS_CONTEXT_INSTRUMENT,
+    STATUS_CONTEXT_OTHER, STATUS_CONTEXT_COUNT
+} TtStatusContext;
+typedef struct {
+    const char *alias[6];
+    unsigned relevant;
+} TtStatusProfile;
+static const TtStatusProfile status_profiles[STATUS_CONTEXT_COUNT]={
+    [STATUS_CONTEXT_MODAL]={{"Focus","Pane","Back","Enter","No-op","No-op"},0x0f},
+    [STATUS_CONTEXT_TABLE_DIALOG]={{"Focus","Pane","Back","Enter","Copy","Cut"},0x3f},
+    [STATUS_CONTEXT_GRID_NOTE]={{"Focus","Pane","Back","Pick","Off","Persp"},0x3a},
+    [STATUS_CONTEXT_GRID_INSTRUMENT]={{"Focus","Pane","Back","Pick","Slice","Persp"},0x3a},
+    [STATUS_CONTEXT_GRID_EFFECT]={{"Focus","Pane","Back","Pick","MVL","Persp"},0x3a},
+    [STATUS_CONTEXT_GRID_VALUE]={{"Focus","Pane","Back","Hex","Down","Persp"},0x3a},
+    [STATUS_CONTEXT_GRID_INLINE]={{"Focus","Pane","Back","Edit","Hide","Persp"},0x3e},
+    [STATUS_CONTEXT_GRID_SELECTION]={{"Focus","Pane","Back","Play","Copy","Persp"},0x3e},
+    [STATUS_CONTEXT_ORDER]={{"Focus","Pane","Back","Toggle","Follow","Persp"},0x3f},
+    [STATUS_CONTEXT_ORDERS]={{"Focus","Pane","Back","Toggle","Follow","Persp"},0x3f},
+    [STATUS_CONTEXT_WAVE]={{"Focus","Pane","Back","Next","Move","Persp"},0x3f},
+    [STATUS_CONTEXT_SYNTH]={{"Focus","Pane","Back","Edit","Down","Persp"},0x3f},
+    [STATUS_CONTEXT_INSTRUMENT]={{"Focus","Pane","Back","Edit","Down","Persp"},0x3f},
+    [STATUS_CONTEXT_OTHER]={{"No-op","No-op","No-op","No-op","No-op","No-op"},0}
+};
 static void perspective_orders(F80Widget *button,void *user) {
     (void)button;(void)user;show_order(NULL,NULL);
 }
@@ -4497,6 +4527,7 @@ static void status_option(F80Widget *button,void *user) {
 }
 static void status_forward(F80Widget *button,void *user) {
     (void)button;(void)user;
+    if(tracker.app.modal) { handle_key(13);return; }
     if(tracker.controller_toolbar_mode) {
         controller_navigation_activate();
         return;
@@ -4521,6 +4552,7 @@ static void status_forward(F80Widget *button,void *user) {
 }
 static void status_back(F80Widget *button,void *user) {
     (void)button;(void)user;
+    if(tracker.app.modal) { handle_key(27);return; }
     if(wave_editor_active())previous_marker(NULL,NULL);
     else handle_key(27);
 }
@@ -4535,9 +4567,8 @@ static const F80StatusItem *mode_status(const F80StatusItem *base) {
     }
     return mode_status_visible;
 }
-static const F80StatusItem *current_status(void) {
-    int columns=status_columns;
-    const F80StatusItem *base;
+static const F80StatusItem *context_status_base(void) {
+    const F80StatusItem *base=wave_status;
     if(tracker.focus==FOCUS_WAVE)base=tracker.wave.instrument_type==TT_INSTRUMENT_DX7?synth_status:wave_status;
     else if(tracker.focus==FOCUS_ORDER)base=mode_status(order_status);
     else if(tracker.focus==FOCUS_REFERENCE)base=reference_status;
@@ -4564,24 +4595,90 @@ static const F80StatusItem *current_status(void) {
             base=pattern_status_visible;
         }
     }
-    int kept=tracker.focus==FOCUS_PHRASE && !tracker.inline_table_selected?8:
-             columns>=70?8:4;
-    for(int i=0;i<kept;++i)perspective_status_visible[i]=base[i];
-    perspective_status_visible[kept]=tracker.perspective==TT_PERSPECTIVE_MAIN?
-        (F80StatusItem){"More","Orders",perspective_orders}:
-        (F80StatusItem){"Back","Main",perspective_main};
-    perspective_status_visible[kept+1]=tracker.perspective==TT_PERSPECTIVE_MAIN?
-        (F80StatusItem){"More","Instruments",perspective_instruments}:
-        tracker.perspective==TT_PERSPECTIVE_ORDERS?
-        (F80StatusItem){"Inst","Instruments",perspective_instruments}:
-        (F80StatusItem){"Orders","Orders",perspective_orders};
-    static const F80StatusItem common_status[4]={
-        {"1","Focus",status_focus},{"2","Option",status_option},
-        {"3","Back",status_back},{"4","Forward",status_forward}
-    };
-    memcpy(perspective_status_visible,common_status,sizeof(common_status));
-    if(tracker.status)tracker.status->status_count=4;
-    return perspective_status_visible;
+    return base;
+}
+static TtStatusContext status_context(void) {
+    if(tracker.app.modal==tracker.table_dialog && tracker.table_dialog)
+        return STATUS_CONTEXT_TABLE_DIALOG;
+    if(tracker.app.modal)return STATUS_CONTEXT_MODAL;
+    if(tracker.selecting || tracker.visual_selecting)
+        return STATUS_CONTEXT_GRID_SELECTION;
+    if(tracker.inline_table_selected)return STATUS_CONTEXT_GRID_INLINE;
+    if(tracker.perspective==TT_PERSPECTIVE_ORDERS)
+        return STATUS_CONTEXT_ORDERS;
+    if(tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS) {
+        if(tracker.wave.instrument_type==TT_INSTRUMENT_DX7)
+            return STATUS_CONTEXT_SYNTH;
+        return STATUS_CONTEXT_INSTRUMENT;
+    }
+    if(tracker.focus==FOCUS_WAVE)return STATUS_CONTEXT_WAVE;
+    if(tracker.focus==FOCUS_ORDER)return STATUS_CONTEXT_ORDER;
+    if(tracker.focus==FOCUS_REFERENCE)return STATUS_CONTEXT_INSTRUMENT;
+    if(tracker.focus==FOCUS_PHRASE) {
+        if(tracker.field==0)return STATUS_CONTEXT_GRID_NOTE;
+        if(tracker.field==1)return STATUS_CONTEXT_GRID_INSTRUMENT;
+        return tracker.field%2==0?STATUS_CONTEXT_GRID_EFFECT:
+                                  STATUS_CONTEXT_GRID_VALUE;
+    }
+    return STATUS_CONTEXT_OTHER;
+}
+static void status_special(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.app.modal==tracker.table_dialog && tracker.table_dialog)
+        handle_table_key(2005);
+    else if(!tracker.app.modal)
+        handle_ui_event((TtUiEvent){.type=TT_UI_SPECIAL_ACTION});
+}
+static void status_perspective(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    if(tracker.app.modal==tracker.table_dialog && tracker.table_dialog)
+        handle_table_key(2006);
+    else if(!tracker.app.modal)
+        handle_ui_event((TtUiEvent){.type=TT_UI_PERSPECTIVE_CYCLE});
+}
+static const F80StatusItem *current_status(void) {
+    static const char *const keys[]={"F1","F2","F3","F4","F5","F6"};
+    static F80Action const actions[]={status_focus,status_option,status_back,
+        status_forward,status_special,status_perspective};
+    static F80StatusItem items[6];
+    TtStatusContext context=status_context();
+    const TtStatusProfile *profile=&status_profiles[context];
+    unsigned relevant=profile->relevant;
+    if(context==STATUS_CONTEXT_TABLE_DIALOG) {
+        relevant=0x3f;
+    } else if(context==STATUS_CONTEXT_MODAL) {
+        relevant=0x0f;
+    } else {
+        if(context==STATUS_CONTEXT_GRID_NOTE ||
+           context==STATUS_CONTEXT_GRID_INSTRUMENT ||
+           context==STATUS_CONTEXT_GRID_EFFECT ||
+           context==STATUS_CONTEXT_GRID_VALUE) {
+            if(tracker.grid_value_editing)relevant|=1u;
+            else relevant&=~1u;
+            if(!(tracker.selecting || tracker.visual_selecting))
+                relevant&=~(1u<<2);
+        }
+        if((context==STATUS_CONTEXT_ORDER ||
+            context==STATUS_CONTEXT_ORDERS) && !tracker.order_range_active)
+            relevant&=~(1u<<2);
+        if(!(context==STATUS_CONTEXT_TABLE_DIALOG) &&
+           !context_status_base()[4].action)
+            relevant&=~(1u<<4);
+    }
+    for(int i=0;i<6;++i) {
+        int enabled=(relevant&(1u<<i))!=0;
+        const char *alias=enabled?profile->alias[i]:"No-op";
+        if(i==4 && enabled && tracker.focus==FOCUS_PHRASE &&
+           !tracker.inline_table_selected) {
+            int table;
+            if(selected_pattern_table(&table))
+                alias=tracker.inline_table_open &&
+                    tracker.inline_table_index==table?"Hide":"Tbl";
+        }
+        items[i]=(F80StatusItem){keys[i],alias,enabled?actions[i]:NULL};
+    }
+    if(tracker.status)tracker.status->status_count=6;
+    return items;
 }
 static void special_action(void) {
     if(tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected &&
@@ -4597,7 +4694,7 @@ static void special_action(void) {
         toggle_inline_table(NULL,NULL);
         return;
     }
-    const F80StatusItem *items=current_status();
+    const F80StatusItem *items=context_status_base();
     if(items && items[4].action)items[4].action(NULL,NULL);
 }
 static void controller_navigation_exit(void) {
@@ -7173,7 +7270,6 @@ static int frame(void *user) {
     tt_play_advance();
     update_labels();
     int rows,cols;getmaxyx(stdscr,rows,cols);
-    status_columns=cols;
     const F80StatusItem *items=current_status();
     tracker.status->status_items=items;
     int editing=0;
