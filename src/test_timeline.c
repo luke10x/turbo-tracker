@@ -1385,6 +1385,11 @@ int main(void) {
     tracker.phrase_scroll=0;
     handle_mouse(10,5,0); /* an editable cell is manual navigation */
     assert(tracker.follow==0 && tracker.step==2);
+    tracker_grid_tap(5,5); /* First tap moves from instrument to note. */
+    assert(tracker.app.modal==NULL);
+    tracker_grid_tap(5,5); /* A short tap on the active note opens completion. */
+    assert(tracker.app.modal==tracker.note_picker_dialog);
+    handle_key(13); /* Keep the note and close the picker through its handler. */
     int scroll_before_wheel=tracker.phrase_scroll;
     tracker.reveal_cursor=1;
     tracker.follow=1;
@@ -2209,6 +2214,23 @@ int main(void) {
     assert(tracker.dx7_operators_grid.fields==22 &&
            tracker.dx7_operators_grid.show_h &&
            tracker.dx7_operators_grid.read_only[0]);
+    F80Rect saved_operator_grid_rect=tracker.dx7_operators_grid.rect;
+    int saved_operator_row=tracker.dx7_operators_grid.row;
+    int saved_operator_field=tracker.dx7_operators_grid.field;
+    int saved_dx7_grid_kind=tracker.dx7_grid_kind;
+    f80_grid_layout(&tracker.dx7_operators_grid,f80_rect(0,0,80,9));
+    tracker.dx7_operators_grid.row=0;tracker.dx7_operators_grid.field=0;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_MOUSE,
+        .index=1,.a=13,.b=1})); /* First click selects a parameter. */
+    assert(!tracker.app.modal);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GRID_MOUSE,
+        .index=1,.a=13,.b=1})); /* Second click opens its decimal completion. */
+    assert(tracker.app.modal==tracker.decimal_picker_dialog);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_CLEAR}));
+    tracker.dx7_operators_grid.rect=saved_operator_grid_rect;
+    tracker.dx7_operators_grid.row=saved_operator_row;
+    tracker.dx7_operators_grid.field=saved_operator_field;
+    tracker.dx7_grid_kind=saved_dx7_grid_kind;
     assert(tracker.dx7_pitch_grid.rows==1 && tracker.dx7_pitch_grid.fields==8 &&
            tracker.dx7_pitch_grid.gutter_width==16 &&
            !strcmp(tracker.dx7_pitch_grid.corner,""));

@@ -201,12 +201,17 @@ int f80_grid_mouse(F80Grid *g,int x,int y,int wheel) {
         return 1;
     }
     if(y>r.y && g->rows && g->fields) {
-        g->row=bound(g->scroll_y+y-r.y-1,0,g->rows-1);
-        if(x>=data_x && x<data_x+data_width)
-            g->field=grid_field_at(g,g->scroll_x+x-data_x);
+        int row=bound(g->scroll_y+y-r.y-1,0,g->rows-1);
+        int field=g->field;
+        int hit_cell=x>=data_x && x<data_x+data_width;
+        if(hit_cell)field=grid_field_at(g,g->scroll_x+x-data_x);
+        int active_cell=hit_cell && row==g->row && field==g->field;
+        g->row=row;g->field=field;
         g->selecting=0;
+        return active_cell?F80_GRID_MOUSE_ACTIVE_CELL:
+                           F80_GRID_MOUSE_HANDLED;
     }
-    return 1;
+    return F80_GRID_MOUSE_HANDLED;
 }
 void f80_grid_hold(F80Grid *g) {
     g->anchor_row=g->row;g->anchor_field=g->field;g->selecting=1;

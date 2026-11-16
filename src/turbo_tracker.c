@@ -1144,7 +1144,11 @@ static int handle_ui_event(TtUiEvent event) {
             f80_grid_set_editing(&tracker.dx7_globals_grid,0);
             f80_grid_set_editing(&tracker.dx7_pitch_grid,0);
             f80_grid_set_editing(&tracker.dx7_operators_grid,0);
-            return f80_grid_mouse(grid,event.a,event.b,0);
+            int result=f80_grid_mouse(grid,event.a,event.b,0);
+            if(result==F80_GRID_MOUSE_ACTIVE_CELL &&
+               dx7_selected_parameter()>=0)
+                handle_ui_event((TtUiEvent){.type=TT_UI_DECIMAL_PICKER_OPEN});
+            return result;
         }
         tracker.app.focus=dx7_focus_canvas();
         tracker.focus=FOCUS_WAVE;
@@ -2688,8 +2692,13 @@ static void dx7_mouse(F80Rect r,int x,int y,int wheel) {
     dx7_global_items(r,r.y,items,labels,values);
     for(int field=0;field<11;++field)
         if(f80_contains(items[field],x,y)) {
+            int already_active=tracker.dx7_grid_kind==0 &&
+                               tracker.dx7_globals_grid.field==field;
             handle_ui_event((TtUiEvent){.type=TT_UI_DX7_GLOBAL_SELECT,
                                         .index=field});
+            if(already_active && dx7_global_parameter(field)>=0)
+                handle_ui_event((TtUiEvent){
+                    .type=TT_UI_DECIMAL_PICKER_OPEN});
             return;
         }
 }
@@ -6454,6 +6463,57 @@ static void handle_mouse(int x,int y,int wheel) {
     }
     f80_mouse(&tracker.app,x,y,wheel);
 }
+static int tracker_grid_tap_hits_cell(int x,int y) {
+    if(!tracker.phrase_canvas)return 0;
+    F80Rect r=tracker.phrase_canvas->rect;
+    if(x<r.x+5 || x>=r.x+r.w-1 || y<r.y+3 || y>=r.y+r.h)return 0;
+    int global=tracker.phrase_scroll+y-r.y-3;
+    if(global<0 || global>=grid_total_rows() ||
+       grid_is_inline_table_row(global,NULL))return 0;
+    int position=r.x+5;
+    for(int index=tracker.field_scroll;index<pattern_field_count() &&
+        position<r.x+r.w-1;++index) {
+        int channel,field;pattern_field_at(index,&channel,&field);
+        if(channel==tracker.inline_table_channel && field>7) {
+            position+=pattern_field_width(field);
+            continue;
+        }
+        if(index>tracker.field_scroll && field==0)++position;
+        int width=pattern_field_width(field);
+        if(x>=position && x<position+width)
+            return channel==tracker.channel && field==tracker.field;
+        position+=width;
+    }
+    return 0;
+}
+static void tracker_grid_tap(int x,int y) {
+    if(!tracker.phrase_canvas || tracker.app.modal)return;
+    F80Rect r=tracker.phrase_canvas->rect;
+    int global=tracker.phrase_scroll+y-r.y-3;
+    int editable=tracker.focus==FOCUS_PHRASE &&
+        (!tracker.phrase_frame || tracker.phrase_frame->visible) &&
+        x>=r.x+5 && x<r.x+r.w-1 && y>=r.y+3 && y<r.y+r.h &&
+        global>=0 && global<grid_total_rows() &&
+        !grid_is_inline_table_row(global,NULL) &&
+        !tracker.visual_selecting;
+    int same_focus=tracker.focus==FOCUS_PHRASE &&
+                   !tracker.inline_table_selected;
+    int prior_order=tracker.edit_order,prior_pattern=tracker.pattern_index;
+    int prior_step=tracker.step,prior_channel=tracker.channel;
+    int prior_field=tracker.field;
+    handle_mouse(x,y,0);
+    if(!editable || !same_focus || prior_order!=tracker.edit_order ||
+       prior_pattern!=tracker.pattern_index || prior_step!=tracker.step ||
+       prior_channel!=tracker.channel || prior_field!=tracker.field ||
+       !tracker_grid_tap_hits_cell(x,y) ||
+       tracker.visual_selecting)return;
+    if(tracker.field==0)
+        handle_ui_event((TtUiEvent){.type=TT_UI_NOTE_PICKER_OPEN});
+    else if(effect_name_focused())
+        handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_OPEN});
+    else if(pattern_byte_value_focused())
+        handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_OPEN});
+}
 static int begin_touch_selection(int x,int y) {
     F80Rect r=tracker.phrase_canvas->rect;
     if(tracker.app.modal || x<r.x+5 || x>=r.x+r.w-1 ||
@@ -6639,6 +6699,9 @@ static void move_wave_marker_touch(int x) {
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_pointer_down(int x,int y) {
     tracker_grid_pointer_down(x,y);
+}
+EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_tap(int x,int y) {
+    tracker_grid_tap(x,y);
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_grid_pointer_move(int x,int y) {
     tracker_grid_pointer_move(x,y);
@@ -6937,6 +7000,8 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
         if(native_touch.down) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
             if(native_touch.selecting || native_touch.moved)native_move(x,y);
+            else if(native_touch.kind==NATIVE_TOUCH_GRID)
+                tracker_grid_tap(native_touch.x,native_touch.y);
             else handle_mouse(native_touch.x,native_touch.y,0);
             if(native_touch.kind==NATIVE_TOUCH_GRID)tracker_grid_pointer_up();
             if(native_touch.kind==NATIVE_TOUCH_SCROLL)
@@ -6955,14 +7020,24 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
         if(native_touch.down) {
             if(x!=native_touch.x || y!=native_touch.y)native_touch.moved=1;
             if(!native_touch.moved && !native_touch.selecting) {
-                if(native_touch.kind!=NATIVE_TOUCH_GRID)
+                if(native_touch.kind==NATIVE_TOUCH_GRID)
+                    tracker_grid_tap(native_touch.x,native_touch.y);
+                else
                     handle_mouse(native_touch.x,native_touch.y,0);
             } else native_move(x,y);
             if(native_touch.kind==NATIVE_TOUCH_GRID)tracker_grid_pointer_up();
             if(native_touch.kind==NATIVE_TOUCH_SCROLL)
                 f80_scroll_drag_end(&tracker.app);
             native_touch.down=native_touch.kind=0;
-        } else handle_mouse(x,y,0);
+        } else {
+            F80Rect r=tracker.phrase_canvas?tracker.phrase_canvas->rect:
+                      f80_rect(0,0,0,0);
+            if(tracker.phrase_canvas &&
+               (!tracker.phrase_frame || tracker.phrase_frame->visible) &&
+               x>=r.x+5 && x<r.x+r.w-1 && y>=r.y+3 && y<r.y+r.h)
+                tracker_grid_tap(x,y);
+            else handle_mouse(x,y,0);
+        }
     }
 }
 static void native_mouse_events(void) {

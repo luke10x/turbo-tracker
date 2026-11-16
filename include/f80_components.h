@@ -7,6 +7,8 @@
 enum { F80_GRID_MAX_FIELDS=32 };
 enum { F80_GRID_KEY_IGNORED=0, F80_GRID_KEY_HANDLED=1,
        F80_GRID_KEY_EDIT_VALUE=2 };
+enum { F80_GRID_MOUSE_IGNORED=0, F80_GRID_MOUSE_HANDLED=1,
+       F80_GRID_MOUSE_ACTIVE_CELL=2 };
 typedef void (*F80GridText)(void *user,int row,int field,char *out,size_t size);
 typedef struct {
     F80Rect rect;
@@ -53,6 +55,8 @@ void f80_grid_resize(F80Grid *grid,int rows);
 int f80_grid_content_width(const F80Grid *grid);
 void f80_grid_scroll(F80Grid *grid,int columns,int rows);
 int f80_grid_key(F80Grid *grid,int key);
+/* Clicking the already selected data cell returns ACTIVE_CELL, allowing the
+   owning view to open its value editor or completion UI. */
 int f80_grid_mouse(F80Grid *grid,int x,int y,int wheel);
 void f80_grid_hold(F80Grid *grid);
 void f80_grid_drag(F80Grid *grid,int x,int y);

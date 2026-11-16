@@ -402,15 +402,15 @@ function endContact(id, x, y, cancelled, clientX, clientY) {
       moveTouch(start, x, y, clientX, clientY);
     if (start.pointerType !== 'touch') {
       if (!start.tapMoved && !start.holdStarted) {
-        call('curses_push_mouse', [x, y, 0]);
-        call('tt_tracker_flush_input', []);
+        Module.ccall('tt_tracker_grid_tap', null,
+          ['number', 'number'], [x, y]);
       }
       Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
     } else if (start.holdStarted)
       Module.ccall('tt_tracker_grid_pointer_up', null, [], []);
     else if (!start.tapMoved) {
-      call('curses_push_mouse', [x, y, 0]);
-      call('tt_tracker_flush_input', []);
+      Module.ccall('tt_tracker_grid_tap', null,
+        ['number', 'number'], [x, y]);
     }
     editingCommitted = false;
     if (touchKeyboard) resized();
