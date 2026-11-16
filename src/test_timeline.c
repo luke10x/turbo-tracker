@@ -1054,7 +1054,7 @@ int main(void) {
     tracker.step=10;tracker.channel=0;tracker.field=0;
     tracker.pattern.cell[10][0].note=48;
     tracker.playing=0;
-    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
     assert(tracker.grid_value_editing && !tracker.playing);
     tracker.app.tick=0;assert(grid_value_edit_pair()==7);
     tracker.app.tick=9;assert(grid_value_edit_pair()==3);
@@ -1063,7 +1063,7 @@ int main(void) {
     assert(tracker.pattern.cell[10][0].note==61 && !tracker.playing);
     handle_key(F80_KEY_DOWN);handle_key(F80_KEY_LEFT);
     assert(tracker.pattern.cell[10][0].note==48);
-    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=0}));
     assert(!tracker.grid_value_editing && !tracker.playing);
     tracker.field=1;tracker.pattern.cell[10][0].instrument=0x22;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_GRID_VALUE_EDITING,.a=1}));
@@ -1084,20 +1084,24 @@ int main(void) {
     memset(&controller_input,0,sizeof(controller_input));
     tracker.field=0;tracker.pattern.cell[10][0].note=48;tracker.playing=1;
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
+    assert(tracker.note_picker_dialog && tracker.app.modal==tracker.note_picker_dialog);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
     controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_UP,1);
-    controller_button_input(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,1);
-    controller_button_input(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,1);
-    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==60 &&
+    assert(tracker.note_picker_cursor==24 && tracker.playing);
+    controller_button_input(SDL_GAMEPAD_BUTTON_DPAD_UP,0);
+    controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,1);
+    assert(!tracker.note_picker_dialog && tracker.pattern.cell[10][0].note==36 &&
            tracker.playing);
     controller_button_input(SDL_GAMEPAD_BUTTON_SOUTH,0);
-    assert(!tracker.grid_value_editing && tracker.playing);
     memset(&controller_input,0,sizeof(controller_input));
     tracker.pattern.cell[10][0].note=48;
     controller_raw_button(0,1); /* Unmapped Xbox fallback: A */
+    assert(tracker.note_picker_dialog);
     controller_raw_hat(SDL_HAT_UP);
-    controller_raw_button(4,1); /* LB */
-    controller_raw_button(5,1); /* RB */
-    assert(tracker.grid_value_editing && tracker.pattern.cell[10][0].note==60 &&
+    assert(tracker.note_picker_cursor==24 && tracker.playing);
+    controller_raw_button(0,0);
+    controller_raw_button(0,1);
+    assert(!tracker.note_picker_dialog && tracker.pattern.cell[10][0].note==36 &&
            tracker.playing);
     controller_raw_button(0,0);
     controller_raw_hat(SDL_HAT_CENTERED);
@@ -1730,14 +1734,18 @@ int main(void) {
            !strcmp(tracker.effect_picker_labels[23],"MVL") &&
            !strcmp(tracker.effect_picker_labels[33],"QRS"));
     assert(tracker.effect_picker_canvas &&
-           tracker.effect_picker_dialog->child_count==2);
+           tracker.effect_picker_dialog->child_count==1);
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_CURSOR,
                                        .index=17}));
     handle_key(13);
     assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_R &&
            tracker.effect_picker_dialog==NULL);
     effect_picker_open(NULL,NULL); /* A second open must create a new modal. */
-    handle_key(27);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_CURSOR,
+                                       .index=35}));
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.effect_picker_cursor==36); /* Bottom-row ... clears it. */
+    handle_key(13);
     assert(tracker.pattern.cell[0][0].effect==TT_EFFECT_NONE &&
            tracker.effect_picker_dialog==NULL);
     handle_key(10); /* Grid Accept opens autocomplete on an effect-name cell. */
@@ -1761,7 +1769,9 @@ int main(void) {
     handle_key(13); /* Forward opens the byte picker on effect-value cells. */
     assert(tracker.byte_picker_dialog &&
            tracker.app.modal==tracker.byte_picker_dialog &&
-           tracker.byte_picker_cursor==0);
+           tracker.byte_picker_cursor==256);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=0}));
     handle_key(F80_KEY_RIGHT);handle_key(F80_KEY_DOWN);
     assert(tracker.byte_picker_cursor==0x11);
     handle_key(13);
@@ -1783,9 +1793,31 @@ int main(void) {
     controller_action_input(TT_PAD_AFFIRMATIVE,0);
     handle_key(27);
     assert(!tracker.byte_picker_dialog);
+    handle_key(13);
+    assert(tracker.byte_picker_dialog && tracker.byte_picker_cursor==256);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=260})); /* $3 register reference */
+    handle_key(13);
+    assert(tt_effect_is_register(tracker.pattern.cell[0][0].value) &&
+           tt_effect_value_register(tracker.pattern.cell[0][0].value)==3);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    handle_key(13);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=240})); /* F0 */
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.byte_picker_cursor==257); /* $0, aligned under F0. */
+    handle_key(F80_KEY_UP);assert(tracker.byte_picker_cursor==240);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=255})); /* FF */
+    handle_key(F80_KEY_DOWN);
+    assert(tracker.byte_picker_cursor==272); /* $F, aligned under FF. */
+    handle_key(13);
+    assert(tt_effect_is_register(tracker.pattern.cell[0][0].value) &&
+           tt_effect_value_register(tracker.pattern.cell[0][0].value)==15);
+    assert(tt_edit_undo(edit_history,&history_doc));
     tracker.field=1;
     handle_key(13); /* The grid instrument cell uses the same byte chooser. */
-    assert(tracker.byte_picker_dialog && tracker.byte_picker_cursor==0);
+    assert(tracker.byte_picker_dialog && tracker.byte_picker_cursor==256);
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
                                        .index=0x2a}));
     handle_key(13);
@@ -1798,6 +1830,51 @@ int main(void) {
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tt_edit_undo(edit_history,&history_doc));
+    int note_picker_original=tracker.pattern.cell[0][0].note;
+    tracker.field=0;tracker.pattern.cell[0][0].note=76; /* E-5 */
+    handle_key(13);
+    assert(tracker.note_picker_dialog &&
+           tracker.app.modal==tracker.note_picker_dialog);
+    handle_key(F80_KEY_LEFT);
+    assert(tracker.note_picker_cursor==63); /* D#5 */
+    handle_key(F80_KEY_RIGHT);handle_key(F80_KEY_UP);
+    assert(tracker.note_picker_cursor==52); /* E-4 */
+    handle_key(13);
+    assert(tracker.pattern.cell[0][0].note==64); /* E-4 */
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.pattern.cell[0][0].note==76);
+    tracker.pattern.cell[0][0].note=99; /* D#7 is the bottom octave. */
+    handle_key(13);handle_key(F80_KEY_DOWN);
+    assert(tracker.note_picker_cursor==99); /* +04 */
+    handle_key(13);
+    assert(tt_note_is_relative(tracker.pattern.cell[0][0].note) &&
+           tt_note_relative_positive(tracker.pattern.cell[0][0].note) &&
+           tt_note_relative_amount(tracker.pattern.cell[0][0].note)==4);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    tracker.pattern.cell[0][0].note=99;
+    handle_key(13);handle_key(F80_KEY_DOWN);handle_key(F80_KEY_DOWN);
+    assert(tracker.note_picker_cursor==111); /* >04 */
+    handle_key(F80_KEY_UP);assert(tracker.note_picker_cursor==99); /* Back to +04. */
+    handle_key(F80_KEY_DOWN);handle_key(13);
+    assert(tt_note_is_left_relative(tracker.pattern.cell[0][0].note) &&
+           tt_note_relative_amount(tracker.pattern.cell[0][0].note)==4);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    tracker.pattern.cell[0][0].note=99;
+    handle_key(13);handle_key(F80_KEY_DOWN);handle_key(F80_KEY_DOWN);
+    handle_key(F80_KEY_DOWN);handle_key(13);
+    assert(tracker.pattern.cell[0][0].note==TT_NOTE_OFF);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    handle_key(13);handle_key(F80_KEY_DOWN);handle_key(F80_KEY_DOWN);
+    handle_key(F80_KEY_DOWN);handle_key(F80_KEY_RIGHT);handle_key(F80_KEY_RIGHT);
+    assert(tracker.note_picker_cursor==122); /* REF */
+    handle_key(13);
+    assert(!tracker.note_picker_dialog && tracker.pattern.cell[0][0].note==99);
+    handle_key(13);handle_key(F80_KEY_DOWN);handle_key(F80_KEY_DOWN);
+    handle_key(F80_KEY_DOWN);handle_key(F80_KEY_RIGHT);handle_key(13);
+    assert(tracker.pattern.cell[0][0].note==-1); /* ... clears the note. */
+    assert(tt_edit_undo(edit_history,&history_doc));
+    tracker.pattern.cell[0][0].note=note_picker_original;
+    tracker.field=3;
     F80Widget order_input={0};
     order_input.kind=F80_LISTBOX;
     order_input.range_cursor_pair=F80_PAIR_RANGE_CURSOR;
@@ -1808,9 +1885,46 @@ int main(void) {
     assert(f80_listbox_row_pair(&order_input,2)==65);
     assert(f80_listbox_row_pair(&order_input,0)==F80_PAIR_LIST_INACTIVE);
     F80Widget *saved_order_list=tracker.order_list;
+    F80Widget *saved_order_seq=tracker.order_seq;
+    F80Widget *saved_app_focus=tracker.app.focus;
+    F80Widget *saved_modal=tracker.app.modal;
+    int saved_console=tracker.console_visible;
     int saved_focus=tracker.focus,saved_mode=tracker.play_mode;
+    int saved_perspective=tracker.perspective;
+    int saved_playing=tracker.playing;
+    tracker.song.order_count=3;
+    tracker.song.order[0]=0;tracker.song.order[1]=1;tracker.song.order[2]=2;
+    tracker.song.order_active[0]=1;
     tracker.order_list=&order_input;tracker.focus=FOCUS_ORDER;tracker.play_mode=PLAY_SONG;
+    tracker.perspective=TT_PERSPECTIVE_MAIN;tracker.app.focus=&order_input;
+    order_input.cursor=0;
+    tracker.app.modal=NULL;tracker.console_visible=0;
     tracker.app.running=1;
+    tracker.playing=1;
+    int focused_order= -1;
+    assert(focused_order_activity_position(&focused_order) && focused_order==0);
+    unsigned char order_activity=tracker.song.order_active[0];
+    handle_key(13);
+    assert(tracker.song.order_active[0]==!order_activity && tracker.playing);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.song.order_active[0]==order_activity);
+    status_forward(NULL,NULL);
+    assert(tracker.song.order_active[0]==!order_activity && tracker.playing);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.song.order_active[0]==order_activity);
+    tracker.perspective=TT_PERSPECTIVE_ORDERS;
+    tracker.order_seq=&order_input;tracker.app.focus=&order_input;
+    tracker.order_list->cursor=0;
+    handle_key(13);
+    assert(tracker.song.order_active[0]==!order_activity && tracker.playing);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.song.order_active[0]==order_activity);
+    status_forward(NULL,NULL);
+    assert(tracker.song.order_active[0]==!order_activity && tracker.playing);
+    assert(tt_edit_undo(edit_history,&history_doc));
+    assert(tracker.song.order_active[0]==order_activity);
+    tracker.perspective=TT_PERSPECTIVE_MAIN;tracker.order_seq=saved_order_seq;
+    tracker.app.focus=&order_input;
     tracker.order_range_active=0;tracker.order_list->cursor=0;
     handle_key(22);tt_play_flush();
     assert(tracker.order_range_active);
@@ -1835,7 +1949,11 @@ int main(void) {
     assert(tracker.song.order_active[0]==!activity_before);
     assert(tt_edit_undo(edit_history,&history_doc));
     assert(tracker.song.order_active[0]==activity_before);
-    tracker.order_list=saved_order_list;tracker.focus=saved_focus;tracker.play_mode=saved_mode;
+    tracker.order_list=saved_order_list;tracker.order_seq=saved_order_seq;
+    tracker.app.focus=saved_app_focus;tracker.focus=saved_focus;
+    tracker.app.modal=saved_modal;tracker.console_visible=saved_console;
+    tracker.play_mode=saved_mode;tracker.perspective=saved_perspective;
+    tracker.playing=saved_playing;
     tracker.focus=FOCUS_PHRASE;
     tracker.anchor_step=2;tracker.step=3;
     tracker.anchor_channel=0;tracker.channel=1;
@@ -1988,8 +2106,10 @@ int main(void) {
     int patterns_before=tracker.song.pattern_count,orders_before=tracker.song.order_count;
     order_choice.item_count=orders_before;order_choice.cursor=0;
     tracker.order_list=&order_choice;
+    tracker.app.focus=&order_choice;
     tracker.focus=FOCUS_ORDER;
     tracker.play_mode=PLAY_SONG;
+    tracker.perspective=TT_PERSPECTIVE_MAIN;
     unsigned char was_active=tracker.song.order_active[0];
     assert(!strcmp(order_status[7].label,"Act"));
     order_status[7].action(NULL,NULL);

@@ -72,12 +72,14 @@ typedef struct {
     TableVoice table_voice[TT_CHANNELS];
     F80Widget *table_dialog,*table_panel,*table_canvas,*table_name,*table_name_label;
     F80Widget *table_scrollbar,*table_buttons[5];
-    F80Widget *effect_picker_dialog,*effect_picker_help,*effect_picker_canvas;
+    F80Widget *effect_picker_dialog,*effect_picker_canvas;
     char effect_picker_labels[36][6];
     int effect_picker_cursor;
-    F80Widget *byte_picker_dialog,*byte_picker_help,*byte_picker_canvas;
+    F80Widget *byte_picker_dialog,*byte_picker_canvas;
     int byte_picker_cursor;
-    F80Widget *decimal_picker_dialog,*decimal_picker_help,*decimal_picker_canvas;
+    F80Widget *note_picker_dialog,*note_picker_canvas;
+    int note_picker_cursor;
+    F80Widget *decimal_picker_dialog,*decimal_picker_canvas;
     int decimal_picker_cursor,decimal_picker_min,decimal_picker_max;
     int decimal_picker_parameter;
     F80Grid table_grid;
