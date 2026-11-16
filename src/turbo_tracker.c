@@ -2937,6 +2937,29 @@ static int pattern_field_width(int field) {
     if(field==1 || field%2==0)return 3;
     return 2;
 }
+static int pattern_cell_effect_count(const TtCell *cell) {
+    int count=0;
+    for(int slot=0;slot<3;++slot)
+        count+=tt_cell_effect_const(cell,slot)->command!=TT_EFFECT_NONE;
+    return count;
+}
+static int pattern_row_field_extra(const TtPattern *pattern,int row,
+                                   int channel,int field) {
+    int extra=0;
+    for(int ch=0;ch<channel;++ch) {
+        int count=pattern_cell_effect_count(&pattern->cell[row][ch]);
+        if(count>1)extra+=count-1;
+    }
+    if(field<4)return extra;
+    const TtCell *cell=&pattern->cell[row][channel];
+    int slot=(field-2)/2;
+    if(tt_cell_effect_const(cell,slot)->command!=TT_EFFECT_NONE)
+        for(int prior=0;prior<slot;++prior)
+            if(tt_cell_effect_const(cell,prior)->command!=TT_EFFECT_NONE) {
+                ++extra;break;
+            }
+    return extra;
+}
 static int inline_table_column_width(int column) {
     return column==0?3:column==1?2:5;
 }
@@ -3040,18 +3063,14 @@ static void paint_phrase(F80Widget *canvas,void *user) {
     for(int index=tracker.field_scroll;index<field_count && x<right;++index) {
         int channel,field;pattern_field_at(index,&channel,&field);
         if(index>tracker.field_scroll && field==0) {
-            for(int y=r.y;y<r.y+r.h;++y) {
-                int line=y-r.y-3;
-                if(line>=0 && line<r.h-3 &&
-                   grid_is_inline_table_row(tracker.phrase_scroll+line,NULL))continue;
-                f80_put(y,x,"│",1,10,0);
-            }
             if(++x>=right)break;
         }
         int width=pattern_field_width(field),visible=width;
         if(visible>right-x)visible=right-x;
-        if(start[channel]<0)start[channel]=x;
-        end[channel]=x+visible;
+        int cursor_x=x+pattern_row_field_extra(&tracker.pattern,tracker.step,
+                                                channel,field);
+        if(start[channel]<0)start[channel]=cursor_x;
+        end[channel]=cursor_x+visible;
         float level=tt_audio_level(channel);
         if(level>1)level=1;
         int pixels=(int)(level*24+.5f);
@@ -3085,9 +3104,6 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                         (void)sel_left;(void)sel_right;
                         row_selected=table_tick>=sel_top && table_tick<=sel_bottom;
                     }
-                    if(row_selected)
-                        for(int fill=table_x;fill<right;++fill)
-                            f80_put(r.y+3+line,fill," ",1,65,0);
                     for(int column=0;column<TT_TABLE_RENDER_COLUMNS;++column) {
                         int width=inline_table_column_width(column);
                         int visible=width;
@@ -3126,10 +3142,15 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                              tracker.inline_table_field==3+(column-2)*2);
                         int pair=!highlighted?66:playhead?4:empty?1:
                             column==0?4:column==1?8:9;
-                        if(selected)pair=65;
+                        if(row_selected)pair=65;
+                        else if(selected)pair=3;
                         f80_put(r.y+3+line,table_x,shown,visible,pair,
                                 highlighted && playhead);
-                        table_x+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
+                        if(column<TT_TABLE_RENDER_COLUMNS-1) {
+                            if(row_selected && table_x+width<right)
+                                f80_put(r.y+3+line,table_x+width," ",1,65,0);
+                            table_x+=width+1;
+                        } else table_x+=width;
                     }
                 }
                 continue;
@@ -3137,10 +3158,17 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             const TtPattern *pattern=pattern_index==tracker.pattern_index?
                 &tracker.pattern:&tracker.song.pattern[pattern_index];
             const TtCell *cell=&pattern->cell[row][channel];
+            int field_x=x+(inline_line?0:
+                pattern_row_field_extra(pattern,row,channel,field));
+            int row_visible=right-field_x;
+            if(row_visible>width)row_visible=width;
+            if(row_visible<0)row_visible=0;
+            if(!inline_line && field==0 && channel>0 && field_x>r.x+5)
+                f80_put(r.y+3+line,field_x-1,"│",1,10,0);
             char shown[6]=".....";
             int empty=0;
             if(inline_line && channel!=tracker.inline_table_channel) {
-                memset(shown,' ',sizeof(shown));shown[visible]=0;empty=1;
+                memset(shown,' ',sizeof(shown));shown[row_visible]=0;empty=1;
             } else if(inline_line && channel==tracker.inline_table_channel) {
                 const TtTableTick *tick=&tracker.song.table[tracker.inline_table_index].tick[table_tick];
                 if(field==0) {
@@ -3163,7 +3191,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                     else { memcpy(shown,"..",3);empty=1; }
                 }
             } else if(field>7) {
-                memset(shown,' ',sizeof(shown));shown[visible]=0;empty=1;
+                memset(shown,' ',sizeof(shown));shown[row_visible]=0;empty=1;
             } else if(field==0) {
                 tracker_pattern_note_text(cell->note,shown);
                 empty=cell->note==-1;
@@ -3179,7 +3207,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                 else memcpy(shown,pair+3,3);
                 empty=fx->command==TT_EFFECT_NONE;
             }
-            int editrow=!inline_line && !tracker.inline_table_selection_active &&
+            int editrow=!inline_line && !tracker.inline_table_selected &&
+                !tracker.inline_table_selection_active &&
                 editable && tracker.focus==FOCUS_PHRASE && row==tracker.step;
             int editcol=tracker.focus==FOCUS_PHRASE && channel==tracker.channel;
             if(editrow && editcol && field==0 && tracker.note_input_length)
@@ -3207,12 +3236,12 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                base_global==tracker.inline_table_parent && channel==tracker.inline_table_channel &&
                tracker.field>=2 && channel==tracker.channel &&
                (field==(tracker.field&~1) || field==(tracker.field|1)))pair=59;
-            f80_put(r.y+3+line,x,shown,visible,pair,
+            f80_put(r.y+3+line,field_x,shown,row_visible,pair,
                     highlighted && (editrow || playhead));
             if(selected && !tracker.selecting) {
                 int highlight=field==0?3:field==1?2:width;
-                if(highlight>visible)highlight=visible;
-                f80_put(r.y+3+line,x,shown,highlight,
+                if(highlight>row_visible)highlight=row_visible;
+                f80_put(r.y+3+line,field_x,shown,highlight,
                         tracker.grid_value_editing?grid_value_edit_pair():3,1);
             }
         }
@@ -4570,6 +4599,30 @@ static int paste_available(void) {
     return tracker.clip_kind==TT_CLIP_TABLE && right==left &&
         tracker.table_clip_left==0 && tracker.table_clip_right>=4;
 }
+static void selection_dimensions_text(char *text,size_t capacity) {
+    int rows=0,columns=0;
+    const char *selection_kind="GRID";
+    if(tracker.inline_table_selection_active) {
+        int top,left,bottom,right;
+        inline_selection_bounds(&top,&left,&bottom,&right);
+        rows=bottom-top+1;columns=1;selection_kind="TBL";
+    } else {
+        int top,left,bottom,right;
+        selection_bounds(&top,&left,&bottom,&right);
+        rows=bottom-top+1;columns=right-left+1;
+    }
+    const char *clip_kind=tracker.clip_kind==TT_CLIP_TABLE?"TBL":
+                          tracker.clip_kind==TT_CLIP_PATTERN?"GRID":NULL;
+    if(clip_kind)
+        snprintf(text,capacity,"%s SEL %d x %d | CLIP %s %d x %d | %s | %s",
+            selection_kind,rows,columns,clip_kind,tracker.clip_rows,
+            tracker.clip_channels,paste_available()?"PASTE READY":"NO MATCH",
+            tracker.message);
+    else
+        snprintf(text,capacity,"%s SEL %d x %d | CLIP -- | %s | %s",
+            selection_kind,rows,columns,paste_available()?"PASTE READY":"NO CLIP",
+            tracker.message);
+}
 static void paste_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(!paste_available()) { tt_tracker_message("Select an area matching the clipboard size");return; }
@@ -5659,12 +5712,8 @@ static void update_labels(void) {
         snprintf(tracker.details_text,sizeof(tracker.details_text),
                  "REFERENCE  %s  |  %s",reference,tracker.message);
     else if(tracker.selecting) {
-        int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-        snprintf(tracker.details_text,sizeof(tracker.details_text),
-                 "SELECT R%02X-%02X CH%d-%d (%d x %d) | CLIP %d x %d%s | %s",
-                 top,bottom,left+1,right+1,bottom-top+1,right-left+1,
-                 tracker.clip_rows,tracker.clip_channels,
-                 paste_available()?" PASTE READY":"",tracker.message);
+        selection_dimensions_text(tracker.details_text,
+                                  sizeof(tracker.details_text));
     } else {
         char shown[8]="";
         const TtCell *cell=&tracker.pattern.cell[tracker.step][tracker.channel];
@@ -6796,7 +6845,9 @@ static void handle_mouse(int x,int y,int wheel) {
                 }
                 if(index>tracker.field_scroll && field==0)++position;
                 int width=pattern_field_width(field);
-                if(x>=position && x<position+width) {
+                int field_x=position+pattern_row_field_extra(&tracker.pattern,
+                    base_global%tracker.song.pattern_rows,channel,field);
+                if(x>=field_x && x<field_x+width) {
                     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
                                 .a=channel,.b=field});
                     break;
@@ -6829,7 +6880,9 @@ static int tracker_grid_tap_hits_cell(int x,int y) {
         }
         if(index>tracker.field_scroll && field==0)++position;
         int width=pattern_field_width(field);
-        if(x>=position && x<position+width)
+        int field_x=position+pattern_row_field_extra(&tracker.pattern,
+            grid_base_row(global)%tracker.song.pattern_rows,channel,field);
+        if(x>=field_x && x<field_x+width)
             return channel==tracker.channel && field==tracker.field;
         position+=width;
     }

@@ -162,6 +162,14 @@ int main(void) {
            demo.table[0].tick[5].effect[0].value==0xfa);
     assert(demo.table[5].length==6);
     assert(inline_table_row_width()==27);
+    TtPattern effect_spacing={0};tt_edit_clear_pattern(&effect_spacing);
+    effect_spacing.cell[0][0].effect=TT_EFFECT_M;
+    effect_spacing.cell[0][0].effect2=TT_EFFECT_S;
+    effect_spacing.cell[1][0].effect=TT_EFFECT_M;
+    assert(pattern_row_field_extra(&effect_spacing,0,0,2)==0 &&
+           pattern_row_field_extra(&effect_spacing,0,0,4)==1 &&
+           pattern_row_field_extra(&effect_spacing,0,1,0)==1 &&
+           pattern_row_field_extra(&effect_spacing,1,0,4)==0);
 #ifndef __EMSCRIPTEN__
     int mouse_x=-1,mouse_y=-1,mouse_wheel=0;mmask_t mouse_state=0;
     assert(native_decode_sgr_mouse("0;241;17",'M',
@@ -508,6 +516,9 @@ int main(void) {
     assert(tracker.clip_kind==TT_CLIP_TABLE && tracker.clip_rows==3 &&
            tracker.clip_channels==1 && tracker.table_clip_left==0 &&
            tracker.table_clip_right==4);
+    char dimensions[192];
+    selection_dimensions_text(dimensions,sizeof(dimensions));
+    assert(strstr(dimensions,"TBL SEL 3 x 1 | CLIP TBL 3 x 1"));
     assert(tracker.clipboard[0][0].note==60 &&
            tracker.clipboard[0][0].instrument==2 &&
            tracker.clipboard[0][0].effect=='M' &&
@@ -536,6 +547,8 @@ int main(void) {
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_COPY_SELECTION}));
     assert(tracker.clip_kind==TT_CLIP_PATTERN && tracker.clip_rows==3 &&
            tracker.clip_channels==1);
+    selection_dimensions_text(dimensions,sizeof(dimensions));
+    assert(strstr(dimensions,"GRID SEL 3 x 1 | CLIP GRID 3 x 1"));
     tracker.selecting=0;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
         .a=0,.b=0}));
@@ -547,6 +560,8 @@ int main(void) {
         assert(handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
             .index=F80_KEY_RIGHT}));
     assert(paste_available()); /* Pattern cells paste into all visible table fields. */
+    selection_dimensions_text(dimensions,sizeof(dimensions));
+    assert(strstr(dimensions,"TBL SEL 3 x 1 | CLIP GRID 3 x 1"));
     tracker.song.table[5].tick[0].note=-1;
     paste_selection(NULL,NULL);
     assert(tracker.song.table[5].tick[0].note==60 &&
