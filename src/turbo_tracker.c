@@ -2937,28 +2937,20 @@ static int pattern_field_width(int field) {
     if(field==1 || field%2==0)return 3;
     return 2;
 }
-static int pattern_cell_effect_count(const TtCell *cell) {
-    int count=0;
-    for(int slot=0;slot<3;++slot)
-        count+=tt_cell_effect_const(cell,slot)->command!=TT_EFFECT_NONE;
-    return count;
+static int pattern_effect_gap_before(int visible_slots,int field) {
+    if(field<4 || visible_slots<=1)return 0;
+    int slot=(field-2)/2;
+    if(slot>=visible_slots)slot=visible_slots-1;
+    return slot>0?slot:0;
 }
-static int pattern_row_field_extra(const TtPattern *pattern,int row,
-                                   int channel,int field) {
+static int pattern_field_extra(int channel,int field) {
     int extra=0;
     for(int ch=0;ch<channel;++ch) {
-        int count=pattern_cell_effect_count(&pattern->cell[row][ch]);
-        if(count>1)extra+=count-1;
+        int slots=pattern_effect_slots_visible(ch);
+        if(slots>1)extra+=slots-1;
     }
-    if(field<4)return extra;
-    const TtCell *cell=&pattern->cell[row][channel];
-    int slot=(field-2)/2;
-    if(tt_cell_effect_const(cell,slot)->command!=TT_EFFECT_NONE)
-        for(int prior=0;prior<slot;++prior)
-            if(tt_cell_effect_const(cell,prior)->command!=TT_EFFECT_NONE) {
-                ++extra;break;
-            }
-    return extra;
+    return extra+pattern_effect_gap_before(
+        pattern_effect_slots_visible(channel),field);
 }
 static int inline_table_column_width(int column) {
     return column==0?3:column==1?2:5;
@@ -3067,8 +3059,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
         }
         int width=pattern_field_width(field),visible=width;
         if(visible>right-x)visible=right-x;
-        int cursor_x=x+pattern_row_field_extra(&tracker.pattern,tracker.step,
-                                                channel,field);
+        int cursor_x=x+pattern_field_extra(channel,field);
         if(start[channel]<0)start[channel]=cursor_x;
         end[channel]=cursor_x+visible;
         float level=tt_audio_level(channel);
@@ -3158,8 +3149,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             const TtPattern *pattern=pattern_index==tracker.pattern_index?
                 &tracker.pattern:&tracker.song.pattern[pattern_index];
             const TtCell *cell=&pattern->cell[row][channel];
-            int field_x=x+(inline_line?0:
-                pattern_row_field_extra(pattern,row,channel,field));
+            int field_x=x+(inline_line?0:pattern_field_extra(channel,field));
             int row_visible=right-field_x;
             if(row_visible>width)row_visible=width;
             if(row_visible<0)row_visible=0;
@@ -3214,6 +3204,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
             if(editrow && editcol && field==0 && tracker.note_input_length)
                 memcpy(shown,tracker.note_input,(size_t)tracker.note_input_length);
             int selected=editrow && editcol && field==tracker.field;
+            int pattern_range_selected=!inline_line &&
+                selected_cell(base_global,channel);
             int table_selected=inline_line && tracker.inline_table_selected &&
                 channel==tracker.inline_table_channel && table_tick==tracker.inline_table_tick &&
                 field==tracker.inline_table_field;
@@ -3230,7 +3222,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                      field==0?4:field==1?8:9;
             if(table_selected)pair=tracker.grid_value_editing?
                 grid_value_edit_pair():3;
-            else if(!inline_line && selected_cell(base_global,channel))
+            else if(pattern_range_selected)
                 pair=tracker.grid_selection_invalid?15:65;
             if(!inline_line && tracker.inline_table_open &&
                base_global==tracker.inline_table_parent && channel==tracker.inline_table_channel &&
@@ -3238,6 +3230,16 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                (field==(tracker.field&~1) || field==(tracker.field|1)))pair=59;
             f80_put(r.y+3+line,field_x,shown,row_visible,pair,
                     highlighted && (editrow || playhead));
+            if(!inline_line && field>=4 &&
+               pattern_effect_gap_before(pattern_effect_slots_visible(channel),field)>0) {
+                int group_start=field-(field%2);
+                int gap_x=field_x-(field%2?pattern_field_width(group_start):0)-1;
+                int gap_pair=pattern_range_selected?
+                    (tracker.grid_selection_invalid?15:65):
+                    selected && !tracker.selecting?
+                    (tracker.grid_value_editing?grid_value_edit_pair():3):1;
+                f80_put(r.y+3+line,gap_x," ",1,gap_pair,0);
+            }
             if(selected && !tracker.selecting) {
                 int highlight=field==0?3:field==1?2:width;
                 if(highlight>row_visible)highlight=row_visible;
@@ -6845,8 +6847,7 @@ static void handle_mouse(int x,int y,int wheel) {
                 }
                 if(index>tracker.field_scroll && field==0)++position;
                 int width=pattern_field_width(field);
-                int field_x=position+pattern_row_field_extra(&tracker.pattern,
-                    base_global%tracker.song.pattern_rows,channel,field);
+                int field_x=position+pattern_field_extra(channel,field);
                 if(x>=field_x && x<field_x+width) {
                     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_CURSOR,
                                 .a=channel,.b=field});
@@ -6880,8 +6881,7 @@ static int tracker_grid_tap_hits_cell(int x,int y) {
         }
         if(index>tracker.field_scroll && field==0)++position;
         int width=pattern_field_width(field);
-        int field_x=position+pattern_row_field_extra(&tracker.pattern,
-            grid_base_row(global)%tracker.song.pattern_rows,channel,field);
+        int field_x=position+pattern_field_extra(channel,field);
         if(x>=field_x && x<field_x+width)
             return channel==tracker.channel && field==tracker.field;
         position+=width;

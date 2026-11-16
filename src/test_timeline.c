@@ -162,14 +162,10 @@ int main(void) {
            demo.table[0].tick[5].effect[0].value==0xfa);
     assert(demo.table[5].length==6);
     assert(inline_table_row_width()==27);
-    TtPattern effect_spacing={0};tt_edit_clear_pattern(&effect_spacing);
-    effect_spacing.cell[0][0].effect=TT_EFFECT_M;
-    effect_spacing.cell[0][0].effect2=TT_EFFECT_S;
-    effect_spacing.cell[1][0].effect=TT_EFFECT_M;
-    assert(pattern_row_field_extra(&effect_spacing,0,0,2)==0 &&
-           pattern_row_field_extra(&effect_spacing,0,0,4)==1 &&
-           pattern_row_field_extra(&effect_spacing,0,1,0)==1 &&
-           pattern_row_field_extra(&effect_spacing,1,0,4)==0);
+    assert(pattern_effect_gap_before(1,4)==0 &&
+           pattern_effect_gap_before(2,4)==1 &&
+           pattern_effect_gap_before(3,4)==1 &&
+           pattern_effect_gap_before(3,6)==2);
 #ifndef __EMSCRIPTEN__
     int mouse_x=-1,mouse_y=-1,mouse_wheel=0;mmask_t mouse_state=0;
     assert(native_decode_sgr_mouse("0;241;17",'M',
