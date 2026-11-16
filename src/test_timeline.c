@@ -2181,6 +2181,42 @@ int main(void) {
     assert(tracker.pattern.cell[0][4].note==original_note);
     edit_items[1].action(NULL,NULL);
     assert(tracker.pattern.cell[0][4].note==72);
+    tracker.focus=FOCUS_PHRASE;tracker.inline_table_open=1;
+    tracker.inline_table_selected=1;tracker.inline_table_selection_active=0;
+    tracker.inline_table_index=5;tracker.inline_table_tick=0;
+    TtTableTick picker_table_original=tracker.song.table[5].tick[0];
+    tracker.inline_table_field=2;
+    handle_key(13);
+    assert(tracker.app.modal==tracker.effect_picker_dialog);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_CURSOR,
+                                       .index=17}));
+    handle_key(13);
+    assert(tracker.song.table[5].tick[0].effect[0].command==TT_EFFECT_R);
+    tracker.inline_table_field=3;
+    handle_key(13);
+    assert(tracker.app.modal==tracker.byte_picker_dialog &&
+           !picker_value_is_instrument());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=0x45}));
+    handle_key(13);
+    assert(tracker.song.table[5].tick[0].effect[0].value==0x45);
+    tracker.inline_table_field=1;
+    handle_key(13);
+    assert(tracker.app.modal==tracker.byte_picker_dialog &&
+           picker_value_is_instrument());
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BYTE_PICKER_CURSOR,
+                                       .index=0x2a}));
+    handle_key(13);
+    assert(tracker.song.table[5].tick[0].instrument==0x2a);
+    tracker.inline_table_field=0;
+    handle_key(13);
+    assert(tracker.app.modal==tracker.note_picker_dialog);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_NOTE_PICKER_CURSOR,
+                                       .index=48}));
+    handle_key(13);
+    assert(tracker.song.table[5].tick[0].note==60);
+    tracker.song.table[5].tick[0]=picker_table_original;
+    tracker.inline_table_selected=tracker.inline_table_open=0;
     tt_edit_history_free(edit_history);edit_history=NULL;
     F80Widget root={.visible=1,.window_role=F80_WINDOW_BLUE};
     assert(f80_palette_pair(&root,F80_COLOR_FRAME_ACTIVE)==72);
