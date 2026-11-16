@@ -161,7 +161,7 @@ int main(void) {
     assert(demo.table[0].tick[1].effect[0].command=='V' &&
            demo.table[0].tick[5].effect[0].value==0xfa);
     assert(demo.table[5].length==6);
-    assert(inline_table_row_width()==42);
+    assert(inline_table_row_width()==27);
 #ifndef __EMSCRIPTEN__
     int mouse_x=-1,mouse_y=-1,mouse_wheel=0;mmask_t mouse_state=0;
     assert(native_decode_sgr_mouse("0;241;17",'M',
@@ -464,9 +464,11 @@ int main(void) {
     int inline_tick=-1;
     assert(grid_is_inline_table_row(1,&inline_tick) && inline_tick==0);
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
-        .a=5,.b=13}));
+        .a=5,.b=TT_TABLE_RENDER_FIELDS-1}));
     assert(tracker.inline_table_selected && tracker.inline_table_tick==5 &&
-           tracker.inline_table_field==13);
+           tracker.inline_table_field==TT_TABLE_RENDER_FIELDS-1);
+    assert(!handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=5,.b=TT_TABLE_RENDER_FIELDS}));
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
         .index=3,.a=0,.b=2}));
     assert(tracker.inline_table_open && tracker.inline_table_index==3 &&

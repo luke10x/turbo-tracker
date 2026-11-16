@@ -405,6 +405,8 @@ static int pattern_edit_fields_per_channel(int channel);
 static int pattern_max_field_scroll(int available);
 static void inline_table_commit(TtTableTick tick);
 static void inline_table_clear_field(void);
+enum { TT_TABLE_RENDER_EFFECTS=3, TT_TABLE_RENDER_COLUMNS=5,
+       TT_TABLE_RENDER_FIELDS=2+TT_TABLE_RENDER_EFFECTS*2 };
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_PATTERN_ONLY, TT_UI_SELECT_ORDER,
     TT_UI_SELECT_ORDER_AT_CELL,
@@ -1300,7 +1302,8 @@ static int handle_ui_event(TtUiEvent event) {
         if(!tracker.inline_table_open)return 0;
         if(event.a==-1) { tracker.inline_table_selected=0;return 1; }
         int length=inline_table_length();
-        if(event.a<0 || event.a>=length || event.b<0 || event.b>=14)return 0;
+        if(event.a<0 || event.a>=length || event.b<0 ||
+           event.b>=TT_TABLE_RENDER_FIELDS)return 0;
         tracker.note_input_length=0;
         tracker.inline_table_tick=event.a;tracker.inline_table_field=event.b;
         tracker.inline_table_selected=1;
@@ -2846,7 +2849,7 @@ static int inline_table_column_width(int column) {
 }
 static int inline_table_row_width(void) {
     int width=7;
-    for(int column=0;column<8;++column)
+    for(int column=0;column<TT_TABLE_RENDER_COLUMNS;++column)
         width+=inline_table_column_width(column);
     return width;
 }
@@ -2981,7 +2984,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                     int playhead=voice->active && voice->table==tracker.inline_table_index &&
                         table_tick==(voice->tick>0?voice->tick-1:0);
                     int table_x=r.x+5;
-                    for(int column=0;column<8;++column) {
+                    for(int column=0;column<TT_TABLE_RENDER_COLUMNS;++column) {
                         int width=inline_table_column_width(column);
                         int visible=width;
                         if(table_x>=right)break;
@@ -3020,7 +3023,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                         if(selected)pair=3;
                         f80_put(r.y+3+line,table_x,shown,visible,pair,
                                 highlighted && playhead);
-                        table_x+=width+(column<7?1:0);
+                        table_x+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
                     }
                 }
                 continue;
@@ -4005,10 +4008,10 @@ static void show_table(F80Widget *button,void *user) {
     tracker.table_panel=f80_add(dialog,f80_window(F80_WINDOW_BLUE,F80_COL));
     tracker.table_canvas=f80_add(tracker.table_panel,f80_canvas(paint_table,NULL));
     tracker.table_canvas->focusable=1;
-    static const int widths[]={3,2,3,3,3,3,3,3};
-    static const char *const headings[]={"NTE","IN","FX1","FX2","FX3","FX4","FX5","FX6"};
+    static const int widths[]={3,2,3,3,3};
+    static const char *const headings[]={"NTE","IN","FX1","FX2","FX3"};
     f80_grid_init(&tracker.table_grid,tracker.song.table[tracker.table_index].length,
-                  8,widths,headings);
+                  TT_TABLE_RENDER_COLUMNS,widths,headings);
     f80_wrap_init(&tracker.table_actions,1,0);
     tracker.table_buttons[0]=f80_add(dialog,f80_button("Tbl -",table_select,(void *)(long)-1));
     tracker.table_buttons[1]=f80_add(dialog,f80_button("Tbl +",table_select,(void *)(long)1));
@@ -4038,7 +4041,7 @@ static void show_help(F80Widget *button,void *user) {
         "SLC04 plays 0 to 4; SFA plays F to A backward.",
         "File > Song settings changes BPM, pattern rows, and table ticks.",
         "Instruments > Source packs WAVs or selects an external shared file.",
-        "Table ticks show note, instrument, and six FX slots."
+        "Table ticks show note, instrument, and three visible FX slots."
     };
     F80Widget *dialog=f80_dialog("Sample tracker keys",lines,NULL,17,0);
     dialog->dialog_align=1;
@@ -4361,7 +4364,8 @@ static void inline_table_move_tick(int delta) {
 }
 static void inline_table_move_field(int delta) {
     if(!tracker.inline_table_open)return;
-    int field=clamp(tracker.inline_table_field+delta,0,13);
+    int field=clamp(tracker.inline_table_field+delta,0,
+                    TT_TABLE_RENDER_FIELDS-1);
     handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
         .a=tracker.inline_table_tick,.b=field});
 }
@@ -5215,15 +5219,16 @@ static void inline_table_key(int key) {
     }
     if(key==F80_KEY_LEFT || key==F80_KEY_RIGHT) {
         clear_note_input();
-        field=clamp(field+(key==F80_KEY_LEFT?-1:1),0,13);
+        field=clamp(field+(key==F80_KEY_LEFT?-1:1),0,
+                    TT_TABLE_RENDER_FIELDS-1);
         handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,.a=tick,.b=field});
         return;
     }
     if(key==9 || key==F80_KEY_BTAB) {
         clear_note_input();
         field+=key==9?1:-1;
-        if(field>13) { field=0;tick=(tick+1)%tracker.song.table[tracker.inline_table_index].length; }
-        else if(field<0) { field=13;tick=(tick+tracker.song.table[tracker.inline_table_index].length-1)%tracker.song.table[tracker.inline_table_index].length; }
+        if(field>=TT_TABLE_RENDER_FIELDS) { field=0;tick=(tick+1)%tracker.song.table[tracker.inline_table_index].length; }
+        else if(field<0) { field=TT_TABLE_RENDER_FIELDS-1;tick=(tick+tracker.song.table[tracker.inline_table_index].length-1)%tracker.song.table[tracker.inline_table_index].length; }
         handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,.a=tick,.b=field});
         return;
     }
@@ -6531,7 +6536,8 @@ static void handle_mouse(int x,int y,int wheel) {
             int table_tick=-1,inline_line=grid_is_inline_table_row(global,&table_tick);
             if(inline_line) {
                 int position=r.x+5;
-                for(int column=0;column<8 && position<r.x+r.w-1;++column) {
+                for(int column=0;column<TT_TABLE_RENDER_COLUMNS &&
+                    position<r.x+r.w-1;++column) {
                     int width=inline_table_column_width(column);
                     if(x>=position && x<position+width) {
                         int field=column==0?0:column==1?1:
@@ -6540,7 +6546,7 @@ static void handle_mouse(int x,int y,int wheel) {
                             .a=table_tick,.b=field});
                         return;
                     }
-                    position+=width+(column<7?1:0);
+                    position+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
                 }
                 return;
             }
