@@ -436,7 +436,7 @@ typedef enum {
     TT_UI_MENU_PULL, TT_UI_PLAY_TOOLBAR_FOCUS,
     TT_UI_CONTROLLER_SCREEN_NAV_START, TT_UI_CONTROLLER_SCREEN_NAV_MOVE,
     TT_UI_CONTROLLER_SCREEN_NAV_EXIT,
-    TT_UI_ZOOM_WAVE_AT,
+    TT_UI_ZOOM_WAVE_AT, TT_UI_BEGIN_WAVE_DRAG, TT_UI_PAN_WAVE_DRAG,
     TT_UI_EFFECT_PICKER_OPEN, TT_UI_EFFECT_PICKER_MOVE,
     TT_UI_EFFECT_PICKER_CURSOR, TT_UI_EFFECT_PICKER_ACCEPT,
     TT_UI_EFFECT_PICKER_CLEAR,
@@ -473,6 +473,8 @@ static void selection_actions_paste(F80Widget *,void *);
 static void selection_actions_paint(F80Widget *,void *);
 static int begin_order_range(int x,int y);
 static void zoom_wave_at(int direction,int x);
+static void begin_wave_gesture(int x);
+static void pan_wave_touch(int x);
 static int dx7_grid_vertical_target(int kind,int field,int direction,
                                     int *target_kind,int *target_field);
 static int widget_is_inside(F80Widget *widget,F80Widget *parent);
@@ -1550,6 +1552,14 @@ static int handle_ui_event(TtUiEvent event) {
         return begin_touch_selection(event.a,event.b);
     if(event.type==TT_UI_BEGIN_ORDER_SELECTION)
         return begin_order_range(event.a,event.b);
+    if(event.type==TT_UI_BEGIN_WAVE_DRAG) {
+        begin_wave_gesture(event.a);
+        return 1;
+    }
+    if(event.type==TT_UI_PAN_WAVE_DRAG) {
+        pan_wave_touch(event.a);
+        return 1;
+    }
     if(event.type==TT_UI_ZOOM_WAVE_AT) {
         if(tracker.wave.instrument_type!=TT_INSTRUMENT_SAMPLE ||
            !tracker.wave.pcm || !tracker.wave_canvas)return 0;
@@ -7292,7 +7302,7 @@ static void touch_scroll_fields(int fields) {
     handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_PHRASE});
 }
 static struct {
-    int x,last_x,visible,marker_frame;
+    int x,last_x,visible,marker_frame,start_view;
 } wave_touch;
 #ifndef __EMSCRIPTEN__
 static int wave_touch_area(int x,int y) {
@@ -7305,12 +7315,13 @@ static void begin_wave_gesture(int x) {
     handle_ui_event((TtUiEvent){TT_UI_FOCUS,FOCUS_WAVE});
     wave_touch.x=wave_touch.last_x=x;
     wave_touch.visible=visible_frames();
+    wave_touch.start_view=tracker.view_start;
 }
 static void pan_wave_touch(int x) {
     F80Rect r=tracker.wave_canvas->rect;
     if(tracker.app.modal || tracker.wave.instrument_type!=TT_INSTRUMENT_SAMPLE || !tracker.wave.pcm || r.w<1)return;
-    tracker.view_start+=(int)((long long)(wave_touch.last_x-x)*
-                              visible_frames()/r.w);
+    tracker.view_start=wave_touch.start_view+
+        (int)((long long)(wave_touch.x-x)*wave_touch.visible/r.w);
     wave_touch.last_x=x;
     clamp_view();
 }
@@ -7422,14 +7433,14 @@ EMSCRIPTEN_KEEPALIVE void tt_tracker_drag_table_selection(int x,int y) {
     f80_grid_drag(&tracker.table_grid,x,y);
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_begin_wave_gesture(int x) {
-    begin_wave_gesture(x);
+    handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_WAVE_DRAG,.a=x});
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_zoom_wave_touch(int direction,int x) {
     handle_ui_event((TtUiEvent){.type=TT_UI_ZOOM_WAVE_AT,
                                 .index=direction,.a=x});
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_pan_wave_touch(int x) {
-    pan_wave_touch(x);
+    handle_ui_event((TtUiEvent){.type=TT_UI_PAN_WAVE_DRAG,.a=x});
 }
 EMSCRIPTEN_KEEPALIVE void tt_tracker_hold_wave_marker(int x) {
     hold_wave_marker(x);
@@ -7510,7 +7521,8 @@ static void native_move(int x,int y) {
                             tracker.table_buttons,5);
     } else if(x!=native_touch.last_x) {
         if(native_touch.selecting)move_wave_marker_touch(x);
-        else if(native_touch.moved)pan_wave_touch(x);
+        else if(native_touch.moved)
+            handle_ui_event((TtUiEvent){.type=TT_UI_PAN_WAVE_DRAG,.a=x});
     }
     native_touch.last_x=x;
     native_touch.last_y=y;
@@ -7637,7 +7649,7 @@ static void native_mouse_event_at(int x,int y,mmask_t bstate) {
             native_touch.kind=NATIVE_TOUCH_SCROLL;
         } else if(wave_touch_area(x,y)) {
             native_touch.kind=NATIVE_TOUCH_WAVE;
-            begin_wave_gesture(x);
+            handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_WAVE_DRAG,.a=x});
         } else native_touch.kind=0;
         if(native_touch.kind) {
             native_touch.down=1;

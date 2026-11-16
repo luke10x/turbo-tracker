@@ -1402,6 +1402,11 @@ int main(void) {
     assert(tracker.zoom==1 && tracker.view_start+
            50*visible_frames()/wave.rect.w==pinch_anchor);
     assert(tracker.view_start!=tracker.phrase.marker[1]-visible_frames()/2);
+    tracker.zoom=5;tracker.view_start=200;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_WAVE_DRAG,.a=60}));
+    for(int x=59;x>=56;--x)
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_PAN_WAVE_DRAG,.a=x}));
+    assert(tracker.view_start==201);
     tracker.wave=saved_wave;tracker.zoom=saved_zoom;
     tracker.view_start=saved_view_start;
     tracker.marker=saved_pinch_marker;
@@ -1814,6 +1819,8 @@ int main(void) {
     int perspective_before=tracker.perspective;
     tracker.wave_frame=&instrument_wave_frame;
     instrument_wave_frame.rect=f80_rect(0,1,80,8);
+    F80Rect wheel_wave_rect=wave.rect;
+    wave.rect=f80_rect(0,2,80,6);
     tracker.perspective=TT_PERSPECTIVE_INSTRUMENTS;
     tracker.zoom=0;
     handle_mouse(0,1,1); /* instrument view zooms from the wave frame edge too */
@@ -1823,6 +1830,7 @@ int main(void) {
     tracker.zoom=0;
     tracker.perspective=perspective_before;
     tracker.wave_frame=NULL;
+    wave.rect=wheel_wave_rect;
     wave.rect=f80_rect(0,1,80,8);
     tracker.marker=0;
     int marker_x=wave_x_from_frame(tracker.phrase.marker[5],wave.rect.w*2)/2;
