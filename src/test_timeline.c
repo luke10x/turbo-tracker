@@ -545,6 +545,18 @@ int main(void) {
            tracker.clip_channels==1);
     selection_dimensions_text(dimensions,sizeof(dimensions));
     assert(strstr(dimensions,"GRID SEL 3 x 1 | CLIP GRID 3 x 1"));
+    int cursor_step_before_freeze=tracker.step;
+    int cursor_channel_before_freeze=tracker.channel;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_FREEZE_SELECTION}));
+    tracker.step=7;tracker.channel=3;
+    int frozen_top,frozen_left,frozen_bottom,frozen_right;
+    selection_bounds(&frozen_top,&frozen_left,&frozen_bottom,&frozen_right);
+    assert(frozen_top==0 && frozen_bottom==2 && frozen_left==1 &&
+           frozen_right==1 && tracker.selecting && !tracker.visual_selecting);
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    assert(!tracker.selecting && !tracker.selection_frozen);
+    tracker.step=cursor_step_before_freeze;
+    tracker.channel=cursor_channel_before_freeze;
     tracker.selecting=0;
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
         .a=0,.b=0}));
@@ -654,7 +666,8 @@ int main(void) {
     assert(!memcmp(&tracker.pattern.cell[0][1],&selected_before,sizeof(TtCell)));
     handle_key('y');
     assert(!memcmp(&tracker.clipboard[0][0],&selected_before,sizeof(TtCell)));
-    assert(!tracker.visual_selecting && !tracker.selecting);
+    assert(!tracker.visual_selecting && !tracker.selecting &&
+           !tracker.selection_frozen);
     tracker.step=1;tracker.field=0;clear_note_input();
     handle_key('c');handle_key('-');handle_key('4');
     assert(tracker.pattern.cell[1][1].note==60);
@@ -2080,12 +2093,19 @@ int main(void) {
     handle_key('y');
     assert(tracker.clip_rows==2 && tracker.clip_channels==2 &&
            tracker.clipboard[0][0].note==60 && tracker.clipboard[1][1].value==0x34);
+    tracker.selecting=1;tracker.visual_selecting=0;tracker.selection_frozen=0;
     handle_key('x');
     assert(tracker.pattern.cell[2][0].note<0 && tracker.pattern.cell[3][1].effect==TT_EFFECT_NONE);
     tracker.selecting=1;tracker.visual_selecting=0;
     handle_key('p');
     assert(tracker.pattern.cell[2][0].note==60 && tracker.pattern.cell[3][1].value==0x34);
     tracker.selecting=0;
+    tracker.visual_selecting=0;tracker.step=4;tracker.channel=2;
+    handle_key(F80_KEY_FOCUS);
+    assert(tracker.selecting && tracker.visual_selecting &&
+           tracker.anchor_step==4 && tracker.anchor_channel==2 &&
+           tracker.step==4 && tracker.channel==2);
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
     tracker.step=5;tracker.channel=2;
     tracker.pattern.cell[5][3]=tt_cell_empty();
     handle_key(22); /* Ctrl-V */
@@ -2098,13 +2118,14 @@ int main(void) {
     assert(tracker.pattern.cell[5][3].note<0);
     handle_key(22);
     handle_key('y');
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(!tracker.selecting && !tracker.visual_selecting && !tracker.selection_frozen);
     handle_key(22);
     handle_key('x');
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(!tracker.selecting && !tracker.visual_selecting && !tracker.selection_frozen);
     handle_key(22);
     handle_key('p');
-    assert(!tracker.selecting && !tracker.visual_selecting);
+    assert(!tracker.selecting && !tracker.visual_selecting && !tracker.selection_frozen);
+    handle_key(27);
     F80Widget shortcut_wave_row={.visible=1},shortcut_grid_row={.visible=1},
         shortcut_phrase={.visible=1},shortcut_instruments={.visible=1},
         shortcut_order={.visible=1},shortcut_wave={.visible=1},

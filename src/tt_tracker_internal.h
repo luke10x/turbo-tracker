@@ -43,6 +43,8 @@ typedef struct {
     int note_input_length;
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
+    int selection_frozen,selection_top,selection_bottom,selection_left,selection_right;
+    int selection_table_top,selection_table_bottom;
     int clip_kind;
     int grid_value_editing;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
@@ -83,6 +85,8 @@ typedef struct {
     F80Widget *decimal_picker_dialog,*decimal_picker_canvas;
     int decimal_picker_cursor,decimal_picker_min,decimal_picker_max;
     int decimal_picker_parameter;
+    F80Widget *selection_actions_dialog,*selection_actions_canvas;
+    int selection_actions_cursor;
     F80Grid table_grid;
     F80PointerGesture grid_pointer_gesture;
     int grid_touch_mode,grid_touch_x,grid_touch_y;

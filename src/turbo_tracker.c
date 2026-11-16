@@ -422,7 +422,10 @@ typedef enum {
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_BEGIN_POINTER_SELECTION,
     TT_UI_BEGIN_ORDER_SELECTION,
     TT_UI_EXTEND_VISUAL_SELECTION, TT_UI_COPY_SELECTION,
-    TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
+    TT_UI_END_VISUAL_SELECTION, TT_UI_FREEZE_SELECTION,
+    TT_UI_SELECTION_ACTION_DISMISS, TT_UI_SELECTION_ACTION_MOVE,
+    TT_UI_SELECTION_ACTION_CURSOR,
+    TT_UI_SELECTION_ACTION_ACCEPT, TT_UI_PATTERN_CURSOR,
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
     TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
     TT_UI_ORDER_TOGGLE_ACTIVITY,
@@ -459,6 +462,15 @@ static int handle_ui_event(TtUiEvent event);
 static void handle_key(int key);
 static int begin_touch_selection(int x,int y);
 static int selection_copy_to_clipboard(void);
+static void selection_bounds(int *,int *,int *,int *);
+static void inline_selection_bounds(int *,int *,int *,int *);
+static int paste_available(void);
+static void selection_actions_close(int clear);
+static void selection_actions_back(F80Widget *,void *);
+static void selection_actions_copy(F80Widget *,void *);
+static void selection_actions_cut(F80Widget *,void *);
+static void selection_actions_paste(F80Widget *,void *);
+static void selection_actions_paint(F80Widget *,void *);
 static int begin_order_range(int x,int y);
 static void zoom_wave_at(int direction,int x);
 static int dx7_grid_vertical_target(int kind,int field,int direction,
@@ -811,8 +823,8 @@ static int handle_ui_event(TtUiEvent event) {
             return 1;
         }
         if(tracker.focus==FOCUS_PHRASE && !tracker.grid_value_editing) {
-            /* Focus is a pane action. Space advances grid subcells; Focus
-               remains available for visual selection with a direction key. */
+            return handle_ui_event((TtUiEvent){
+                .type=TT_UI_BEGIN_VISUAL_SELECTION});
         } else {
             f80_focus_next(&tracker.app,1);
             tracker_note_panel_focus(tracker.app.focus);
@@ -1440,6 +1452,8 @@ static int handle_ui_event(TtUiEvent event) {
     }
     if(event.type==TT_UI_BEGIN_VISUAL_SELECTION) {
         if(tracker.focus!=FOCUS_PHRASE)return 0;
+        tracker.selection_frozen=0;
+        tracker.inline_table_selection_active=0;
         if(tracker.inline_table_open && tracker.inline_table_selected) {
             tracker.inline_table_selection_active=1;
             tracker.inline_table_anchor_tick=tracker.inline_table_tick;
@@ -1507,10 +1521,57 @@ static int handle_ui_event(TtUiEvent event) {
         return 1;
     }
     if(event.type==TT_UI_END_VISUAL_SELECTION) {
-        if(!tracker.visual_selecting)return 0;
+        if(!tracker.selecting && !tracker.visual_selecting &&
+           !tracker.selection_frozen)return 0;
         tracker.selecting=tracker.visual_selecting=0;
+        tracker.selection_frozen=0;
         tracker.inline_table_selection_active=0;
         tt_tracker_log_event("UI","Visual selection ended");
+        return 1;
+    }
+    if(event.type==TT_UI_FREEZE_SELECTION) {
+        if(!tracker.selecting || tracker.focus!=FOCUS_PHRASE)return 0;
+        if(tracker.inline_table_selection_active) {
+            int top,left,bottom,right;
+            inline_selection_bounds(&top,&left,&bottom,&right);
+            tracker.selection_table_top=top;
+            tracker.selection_table_bottom=bottom;
+            (void)left;(void)right;
+        } else {
+            selection_bounds(&tracker.selection_top,&tracker.selection_left,
+                             &tracker.selection_bottom,&tracker.selection_right);
+        }
+        tracker.selection_frozen=1;
+        tracker.visual_selecting=0;
+        tt_tracker_log_event("UI","Selection range retained");
+        return 1;
+    }
+    if(event.type==TT_UI_SELECTION_ACTION_MOVE) {
+        if(tracker.app.modal!=tracker.selection_actions_dialog)return 0;
+        int next=clamp(tracker.selection_actions_cursor+event.a,0,3);
+        if(next==2 && !paste_available())next=event.a<0?1:3;
+        tracker.selection_actions_cursor=next;
+        return 1;
+    }
+    if(event.type==TT_UI_SELECTION_ACTION_CURSOR) {
+        if(tracker.app.modal!=tracker.selection_actions_dialog ||
+           event.index<0 || event.index>3 ||
+           (event.index==2 && !paste_available()))return 0;
+        tracker.selection_actions_cursor=event.index;
+        return 1;
+    }
+    if(event.type==TT_UI_SELECTION_ACTION_DISMISS) {
+        if(tracker.app.modal!=tracker.selection_actions_dialog)return 0;
+        selection_actions_close(1);
+        return 1;
+    }
+    if(event.type==TT_UI_SELECTION_ACTION_ACCEPT) {
+        if(tracker.app.modal!=tracker.selection_actions_dialog)return 0;
+        if(tracker.selection_actions_cursor==0)selection_actions_copy(NULL,NULL);
+        else if(tracker.selection_actions_cursor==1)selection_actions_cut(NULL,NULL);
+        else if(tracker.selection_actions_cursor==2 && paste_available())
+            selection_actions_paste(NULL,NULL);
+        else selection_actions_back(NULL,NULL);
         return 1;
     }
     if(event.type==TT_UI_COPY_SELECTION) {
@@ -1674,12 +1735,22 @@ static void move_pattern_row(int delta) {
     handle_ui_event((TtUiEvent){.type=TT_UI_PATTERN_ROW_CURSOR,.a=row});
 }
 static void selection_bounds(int *top,int *left,int *bottom,int *right) {
+    if(tracker.selection_frozen && !tracker.inline_table_selection_active) {
+        *top=tracker.selection_top;*left=tracker.selection_left;
+        *bottom=tracker.selection_bottom;*right=tracker.selection_right;
+        return;
+    }
     *top=tracker.anchor_step<tracker.step?tracker.anchor_step:tracker.step;
     *bottom=tracker.anchor_step>tracker.step?tracker.anchor_step:tracker.step;
     *left=tracker.anchor_channel<tracker.channel?tracker.anchor_channel:tracker.channel;
     *right=tracker.anchor_channel>tracker.channel?tracker.anchor_channel:tracker.channel;
 }
 static void inline_selection_bounds(int *top,int *left,int *bottom,int *right) {
+    if(tracker.selection_frozen && tracker.inline_table_selection_active) {
+        *top=tracker.selection_table_top;*bottom=tracker.selection_table_bottom;
+        *left=0;*right=TT_TABLE_RENDER_FIELDS-1;
+        return;
+    }
     *top=tracker.inline_table_anchor_tick<tracker.inline_table_tick?
         tracker.inline_table_anchor_tick:tracker.inline_table_tick;
     *bottom=tracker.inline_table_anchor_tick>tracker.inline_table_tick?
@@ -4930,7 +5001,53 @@ static const F80StatusItem *current_status(void) {
     if(tracker.status)tracker.status->status_count=6;
     return items;
 }
+static void selection_actions_close(int clear) {
+    if(tracker.app.modal==tracker.selection_actions_dialog)
+        f80_hide_modal(&tracker.app);
+    tracker.selection_actions_dialog=NULL;
+    tracker.selection_actions_canvas=NULL;
+    if(clear)handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+}
+static void selection_actions_back(F80Widget *button,void *user) {
+    (void)button;(void)user;selection_actions_close(1);
+}
+static void selection_actions_copy(F80Widget *button,void *user) {
+    (void)button;(void)user;copy_selection(NULL,NULL);selection_actions_close(1);
+}
+static void selection_actions_cut(F80Widget *button,void *user) {
+    (void)button;(void)user;cut_selection(NULL,NULL);selection_actions_close(1);
+}
+static void selection_actions_paste(F80Widget *button,void *user) {
+    (void)button;(void)user;paste_selection(NULL,NULL);selection_actions_close(1);
+}
+static void selection_actions_paint(F80Widget *canvas,void *user) {
+    (void)user;
+    static const char *const labels[]={"Copy","Cut","Paste","Back"};
+    F80Rect r=canvas->rect;
+    f80_fill(r,F80_COLOR_PANEL);
+    for(int i=0;i<4;++i) {
+        int disabled=i==2 && !paste_available();
+        int pair=disabled?F80_COLOR_SHADOW:
+            i==tracker.selection_actions_cursor?F80_COLOR_BUTTON_FOCUS:
+                                                F80_COLOR_TEXT;
+        f80_put(r.y+i,r.x+1,labels[i],r.w-2,pair,1);
+    }
+}
 static void special_action(void) {
+    if(tracker.focus==FOCUS_PHRASE && tracker.selecting) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_FREEZE_SELECTION});
+        F80Widget *dialog=f80_dialog("Selection",NULL,NULL,0,0);
+        if(!dialog)return;
+        dialog->style=F80_COLOR_PANEL;
+        dialog->window_role=F80_WINDOW_PURPLE;
+        tracker.selection_actions_canvas=f80_add(dialog,
+            f80_canvas(selection_actions_paint,NULL));
+        tracker.selection_actions_canvas->focusable=1;
+        tracker.selection_actions_cursor=0;
+        tracker.selection_actions_dialog=dialog;
+        f80_show_modal(&tracker.app,dialog);
+        return;
+    }
     if(tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected &&
        tracker.inline_table_open) {
         handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
@@ -5799,6 +5916,17 @@ static void handle_key(int key) {
             else f80_key(&tracker.app,key);
             return;
         }
+        if(tracker.app.modal==tracker.selection_actions_dialog) {
+            if(key==F80_KEY_UP || key==F80_KEY_DOWN)
+                handle_ui_event((TtUiEvent){.type=TT_UI_SELECTION_ACTION_MOVE,
+                    .a=key==F80_KEY_UP?-1:1});
+            else if(key==10 || key==13)
+                handle_ui_event((TtUiEvent){.type=TT_UI_SELECTION_ACTION_ACCEPT});
+            else if(key==27)
+                handle_ui_event((TtUiEvent){.type=TT_UI_SELECTION_ACTION_DISMISS});
+            else f80_key(&tracker.app,key);
+            return;
+        }
         if(tracker.app.modal==tracker.note_picker_dialog) {
             if(key==F80_KEY_UP || key==F80_KEY_DOWN ||
                key==F80_KEY_LEFT || key==F80_KEY_RIGHT)
@@ -5842,6 +5970,8 @@ static void handle_key(int key) {
         } else if(key==27) {
             if(tracker.app.modal==tracker.effect_picker_dialog)
                 handle_ui_event((TtUiEvent){.type=TT_UI_EFFECT_PICKER_CLEAR});
+            else if(tracker.app.modal==tracker.selection_actions_dialog)
+                selection_actions_back(NULL,NULL);
             else if(tracker.app.modal==tracker.exit_dialog)
                 handle_ui_event((TtUiEvent){.type=TT_UI_EXIT_CANCEL});
             else if(tracker.app.modal==tracker.manage_dialog)close_manage(NULL,NULL);
@@ -6024,6 +6154,15 @@ static void handle_key(int key) {
         }
     }
     if((key==9 || key==F80_KEY_BTAB) && tracker.focus==FOCUS_PHRASE)return;
+    if(tracker.focus==FOCUS_PHRASE && tracker.selection_frozen &&
+       key!='y' && key!='x' && key!='p' && key!=F80_KEY_UP &&
+       key!=F80_KEY_DOWN && key!=F80_KEY_LEFT && key!=F80_KEY_RIGHT)
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    if(tracker.focus==FOCUS_PHRASE && tracker.selection_frozen &&
+       key!='y' && key!='x' && key!='p' && key!=2005 &&
+       key!=F80_KEY_UP && key!=F80_KEY_DOWN && key!=F80_KEY_LEFT &&
+       key!=F80_KEY_RIGHT)
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
     if(key==' ' && tracker.focus==FOCUS_PHRASE && tracker.inline_table_selected) {
         inline_table_move_field(1);return;
     }
@@ -6054,9 +6193,8 @@ static void handle_key(int key) {
     case 27:
         if(tracker.focus==FOCUS_ORDER && tracker.order_range_active)
             send_play(TT_PLAY_CLEAR_ORDER_RANGE,0,0);
-        if(tracker.selecting || tracker.visual_selecting)
+        if(tracker.selecting || tracker.visual_selecting || tracker.selection_frozen)
             handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
-        tracker.selecting=0;
         return;
     case '[':change_octave(-1);return;
     case ']':change_octave(1);return;
@@ -6121,28 +6259,33 @@ static void handle_key(int key) {
         }
         if((key==F80_KEY_UP || key==F80_KEY_DOWN) &&
            inline_table_vertical_key(key))return;
-        if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
-           key==F80_KEY_RIGHT || key==27)tracker.selecting=0;
+        if(!tracker.selection_frozen &&
+           (key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
+            key==F80_KEY_RIGHT || key==27))tracker.selecting=0;
         if(key==F80_KEY_UP || key==F80_KEY_DOWN || key==F80_KEY_LEFT ||
            key==F80_KEY_RIGHT)leave_follow();
-        if(tracker.selecting) {
-            if(key=='y') {
-                copy_selection(NULL,NULL);
-                if(tracker.visual_selecting)
-                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
-            }
-            else if(key=='x') {
-                cut_selection(NULL,NULL);
-                if(tracker.visual_selecting)
-                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
-            }
-            else if(key=='p') {
-                paste_selection(NULL,NULL);
-                if(tracker.visual_selecting)
-                    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+        if(tracker.selecting && !tracker.selection_frozen) {
+            if(key=='y' || key=='x' || key=='p') {
+                handle_ui_event((TtUiEvent){.type=TT_UI_FREEZE_SELECTION});
+                if(key=='y')copy_selection(NULL,NULL);
+                else if(key=='x')cut_selection(NULL,NULL);
+                else paste_selection(NULL,NULL);
+                handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
             }
             return;
         }
+        if(tracker.selecting && tracker.selection_frozen &&
+           (key=='y' || key=='x' || key=='p')) {
+            if(key=='y')copy_selection(NULL,NULL);
+            else if(key=='x')cut_selection(NULL,NULL);
+            else paste_selection(NULL,NULL);
+            handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+            return;
+        }
+        if(tracker.selection_frozen && key!='y' && key!='x' && key!='p' &&
+           key!=F80_KEY_UP && key!=F80_KEY_DOWN && key!=F80_KEY_LEFT &&
+           key!=F80_KEY_RIGHT)
+            handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
         if(tracker.inline_table_selected) {
             if(key==9 || key==F80_KEY_BTAB)return;
             inline_table_key(key);return;
@@ -6527,6 +6670,18 @@ static void handle_mouse(int x,int y,int wheel) {
     if(wheel==F80_MOUSE_RELEASE)return;
     controller_navigation_exit();
     if(tracker.app.modal) {
+        if(tracker.app.modal==tracker.selection_actions_dialog &&
+           tracker.selection_actions_canvas && wheel==0 &&
+           f80_contains(tracker.selection_actions_canvas->rect,x,y)) {
+            int row=y-tracker.selection_actions_canvas->rect.y;
+            if(row>=0 && row<4 && (row!=2 || paste_available())) {
+                handle_ui_event((TtUiEvent){
+                    .type=TT_UI_SELECTION_ACTION_CURSOR,.index=row});
+                handle_ui_event((TtUiEvent){
+                    .type=TT_UI_SELECTION_ACTION_ACCEPT});
+            }
+            return;
+        }
         if(tracker.app.modal==tracker.note_picker_dialog &&
            tracker.note_picker_canvas && wheel==0 &&
            f80_contains(tracker.note_picker_canvas->rect,x,y)) {
@@ -7703,6 +7858,7 @@ static int frame(void *user) {
         }
         /* Keep the picker geometry independent of the established dialogs. */
         if(tracker.app.modal==tracker.effect_picker_dialog) { w=43;h=10; }
+        if(tracker.app.modal==tracker.selection_actions_dialog) { w=30;h=8; }
         if(tracker.app.modal==tracker.byte_picker_dialog) {
             w=55;h=tracker.field==1?20:21;
         }
@@ -7733,6 +7889,11 @@ static int frame(void *user) {
             F80Rect r=tracker.app.modal->rect;
             f80_layout(tracker.decimal_picker_canvas,
                        f80_rect(r.x+2,r.y+2,r.w-4,10));
+        }
+        if(tracker.app.modal==tracker.selection_actions_dialog) {
+            F80Rect r=tracker.app.modal->rect;
+            f80_layout(tracker.selection_actions_canvas,
+                       f80_rect(r.x+2,r.y+2,r.w-4,4));
         }
         if(tracker.app.modal==tracker.order_dialog)order_refresh();
         if(tracker.app.modal==tracker.archive_dialog) {
