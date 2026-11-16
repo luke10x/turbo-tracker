@@ -404,9 +404,11 @@ static int pattern_fields_per_channel(int channel);
 static int pattern_edit_fields_per_channel(int channel);
 static int pattern_max_field_scroll(int available);
 static void inline_table_commit(TtTableTick tick);
+static void inline_table_select_cursor(int tick,int field,int begin);
 static void inline_table_clear_field(void);
 enum { TT_TABLE_RENDER_EFFECTS=3, TT_TABLE_RENDER_COLUMNS=5,
        TT_TABLE_RENDER_FIELDS=2+TT_TABLE_RENDER_EFFECTS*2 };
+enum { TT_CLIP_NONE, TT_CLIP_PATTERN, TT_CLIP_TABLE };
 typedef enum {
     TT_UI_SELECT_PATTERN, TT_UI_SELECT_PATTERN_ONLY, TT_UI_SELECT_ORDER,
     TT_UI_SELECT_ORDER_AT_CELL,
@@ -419,7 +421,7 @@ typedef enum {
     TT_UI_PATTERN_LOCK,
     TT_UI_BEGIN_VISUAL_SELECTION, TT_UI_BEGIN_POINTER_SELECTION,
     TT_UI_BEGIN_ORDER_SELECTION,
-    TT_UI_EXTEND_VISUAL_SELECTION,
+    TT_UI_EXTEND_VISUAL_SELECTION, TT_UI_COPY_SELECTION,
     TT_UI_END_VISUAL_SELECTION, TT_UI_PATTERN_CURSOR,
     TT_UI_PATTERN_ROW_CURSOR, TT_UI_INLINE_TABLE_TOGGLE,
     TT_UI_INLINE_TABLE_CURSOR, TT_UI_GRID_VALUE_EDITING,
@@ -456,6 +458,7 @@ typedef struct { TtUiType type; int index,a,b; } TtUiEvent;
 static int handle_ui_event(TtUiEvent event);
 static void handle_key(int key);
 static int begin_touch_selection(int x,int y);
+static int selection_copy_to_clipboard(void);
 static int begin_order_range(int x,int y);
 static void zoom_wave_at(int direction,int x);
 static int dx7_grid_vertical_target(int kind,int field,int direction,
@@ -1287,10 +1290,14 @@ static int handle_ui_event(TtUiEvent event) {
         if(tracker.inline_table_open && tracker.inline_table_index==table &&
            tracker.inline_table_parent==event.a && tracker.inline_table_channel==event.b) {
             tracker.inline_table_open=0;tracker.inline_table_selected=0;
+            tracker.inline_table_selection_active=0;
+            tracker.selecting=tracker.visual_selecting=0;
             tt_tracker_log_event("UI","Inline table collapsed");
         } else {
             tracker.inline_table_open=1;tracker.inline_table_index=table;
             tracker.inline_table_parent=event.a;tracker.inline_table_channel=event.b;
+            tracker.inline_table_selection_active=0;
+            tracker.selecting=tracker.visual_selecting=0;
             tracker.inline_table_selected=0;tracker.inline_table_tick=0;
             tracker.inline_table_field=0;
             tt_tracker_log_event("UI","Inline table expanded");
@@ -1346,7 +1353,13 @@ static int handle_ui_event(TtUiEvent event) {
             f80_grid_set_editing(&tracker.dx7_operators_grid,0);
         }
         tracker.focus=event.index;
-        if(event.index!=FOCUS_PHRASE)tracker.inline_table_selected=0;
+        if(event.index!=FOCUS_PHRASE) {
+            tracker.inline_table_selected=0;
+            if(tracker.inline_table_selection_active) {
+                tracker.inline_table_selection_active=0;
+                tracker.selecting=tracker.visual_selecting=0;
+            }
+        }
         tracker.app.focus=event.index==FOCUS_ORDER?tracker.order_list:
             event.index==FOCUS_PHRASE?tracker.phrase_canvas:
             tracker.perspective==TT_PERSPECTIVE_INSTRUMENTS &&
@@ -1427,6 +1440,15 @@ static int handle_ui_event(TtUiEvent event) {
     }
     if(event.type==TT_UI_BEGIN_VISUAL_SELECTION) {
         if(tracker.focus!=FOCUS_PHRASE)return 0;
+        if(tracker.inline_table_open && tracker.inline_table_selected) {
+            tracker.inline_table_selection_active=1;
+            tracker.inline_table_anchor_tick=tracker.inline_table_tick;
+            tracker.inline_table_anchor_field=tracker.inline_table_field;
+            tracker.selecting=tracker.visual_selecting=1;
+            tracker.grid_selection_invalid=0;
+            tt_tracker_log_event("UI","Table tick selection started");
+            return 1;
+        }
         tracker.anchor_step=tracker.step;
         tracker.anchor_channel=tracker.channel;
         tracker.grid_selection_invalid=0;
@@ -1448,6 +1470,24 @@ static int handle_ui_event(TtUiEvent event) {
         if(tracker.focus!=FOCUS_PHRASE || !tracker.selecting ||
            !tracker.visual_selecting)return 0;
         leave_follow();
+        if(tracker.inline_table_selection_active &&
+           tracker.inline_table_open && tracker.inline_table_selected) {
+            if(event.index==F80_KEY_UP)
+                tracker.inline_table_tick=clamp(tracker.inline_table_tick-1,0,
+                    inline_table_length()-1);
+            else if(event.index==F80_KEY_DOWN)
+                tracker.inline_table_tick=clamp(tracker.inline_table_tick+1,0,
+                    inline_table_length()-1);
+            else if(event.index==F80_KEY_LEFT)
+                tracker.inline_table_field=clamp(tracker.inline_table_field-1,0,
+                    TT_TABLE_RENDER_FIELDS-1);
+            else if(event.index==F80_KEY_RIGHT)
+                tracker.inline_table_field=clamp(tracker.inline_table_field+1,0,
+                    TT_TABLE_RENDER_FIELDS-1);
+            else return 0;
+            tracker.reveal_cursor=1;
+            return 1;
+        }
         if(event.index==F80_KEY_UP || event.index==F80_KEY_DOWN) {
             tracker.step=clamp(tracker.step+
                 (event.index==F80_KEY_UP?-1:1),0,tracker.song.pattern_rows-1);
@@ -1469,7 +1509,13 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_END_VISUAL_SELECTION) {
         if(!tracker.visual_selecting)return 0;
         tracker.selecting=tracker.visual_selecting=0;
+        tracker.inline_table_selection_active=0;
         tt_tracker_log_event("UI","Visual selection ended");
+        return 1;
+    }
+    if(event.type==TT_UI_COPY_SELECTION) {
+        if(!selection_copy_to_clipboard())return 0;
+        tt_tracker_log_event("UI","Selection copied to clipboard");
         return 1;
     }
     if(event.type==TT_UI_GRID_VALUE_EDITING) {
@@ -1633,8 +1679,55 @@ static void selection_bounds(int *top,int *left,int *bottom,int *right) {
     *left=tracker.anchor_channel<tracker.channel?tracker.anchor_channel:tracker.channel;
     *right=tracker.anchor_channel>tracker.channel?tracker.anchor_channel:tracker.channel;
 }
-static int selected_cell(int global,int channel) {
+static void inline_selection_bounds(int *top,int *left,int *bottom,int *right) {
+    *top=tracker.inline_table_anchor_tick<tracker.inline_table_tick?
+        tracker.inline_table_anchor_tick:tracker.inline_table_tick;
+    *bottom=tracker.inline_table_anchor_tick>tracker.inline_table_tick?
+        tracker.inline_table_anchor_tick:tracker.inline_table_tick;
+    *left=tracker.inline_table_anchor_field<tracker.inline_table_field?
+        tracker.inline_table_anchor_field:tracker.inline_table_field;
+    *right=tracker.inline_table_anchor_field>tracker.inline_table_field?
+        tracker.inline_table_anchor_field:tracker.inline_table_field;
+}
+static int selection_copy_to_clipboard(void) {
     if(!tracker.selecting || tracker.focus!=FOCUS_PHRASE)return 0;
+    if(tracker.inline_table_selection_active && tracker.inline_table_open &&
+       tracker.inline_table_selected) {
+        int top,left,bottom,right;
+        inline_selection_bounds(&top,&left,&bottom,&right);
+        TtTable *table=&tracker.song.table[tracker.inline_table_index];
+        tracker.clip_kind=TT_CLIP_TABLE;
+        tracker.clip_rows=bottom-top+1;tracker.clip_channels=1;
+        tracker.table_clip_rows=tracker.clip_rows;
+        tracker.table_clip_left=0;tracker.table_clip_right=4;
+        (void)left;(void)right;
+        for(int row=0;row<tracker.clip_rows;++row) {
+            TtTableTick tick=table->tick[top+row];
+            tracker.table_clip[row]=tick;
+            TtCell cell=tt_cell_empty();
+            cell.note=tick.note;cell.instrument=tick.instrument;
+            for(int slot=0;slot<TT_TABLE_RENDER_EFFECTS;++slot) {
+                const TtTableEffect *src=&tick.effect[slot];
+                TtPatternEffect *dst=tt_cell_effect(&cell,slot);
+                dst->command=(unsigned char)src->command;dst->value=src->value;
+            }
+            tracker.clipboard[row][0]=cell;
+        }
+        tt_tracker_message("Table selection copied");
+        return 1;
+    }
+    int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
+    tracker.clip_kind=TT_CLIP_PATTERN;
+    tracker.clip_rows=bottom-top+1;tracker.clip_channels=right-left+1;
+    for(int row=0;row<tracker.clip_rows;++row)
+        for(int channel=0;channel<tracker.clip_channels;++channel)
+            tracker.clipboard[row][channel]=tracker.pattern.cell[top+row][left+channel];
+    tt_tracker_message("Selection copied");
+    return 1;
+}
+static int selected_cell(int global,int channel) {
+    if(!tracker.selecting || tracker.focus!=FOCUS_PHRASE ||
+       tracker.inline_table_selection_active)return 0;
     if(tracker.grid_selection_invalid) {
         int top=tracker.grid_selection_anchor<tracker.grid_selection_end?
             tracker.grid_selection_anchor:tracker.grid_selection_end;
@@ -2984,6 +3077,17 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                     int playhead=voice->active && voice->table==tracker.inline_table_index &&
                         table_tick==(voice->tick>0?voice->tick-1:0);
                     int table_x=r.x+5;
+                    int row_selected=0;
+                    if(tracker.inline_table_selection_active && tracker.selecting) {
+                        int sel_top,sel_left,sel_bottom,sel_right;
+                        inline_selection_bounds(&sel_top,&sel_left,
+                                                &sel_bottom,&sel_right);
+                        (void)sel_left;(void)sel_right;
+                        row_selected=table_tick>=sel_top && table_tick<=sel_bottom;
+                    }
+                    if(row_selected)
+                        for(int fill=table_x;fill<right;++fill)
+                            f80_put(r.y+3+line,fill," ",1,65,0);
                     for(int column=0;column<TT_TABLE_RENDER_COLUMNS;++column) {
                         int width=inline_table_column_width(column);
                         int visible=width;
@@ -3012,7 +3116,9 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                             memcpy(shown,pair,5);
                             empty=effect.command==0;
                         }
-                        int selected=tracker.inline_table_selected &&
+                        int selected=0;
+                        if(row_selected)selected=1;
+                        else selected=tracker.inline_table_selected &&
                             table_tick==tracker.inline_table_tick &&
                             (column==0?tracker.inline_table_field==0:
                              column==1?tracker.inline_table_field==1:
@@ -3020,7 +3126,7 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                              tracker.inline_table_field==3+(column-2)*2);
                         int pair=!highlighted?66:playhead?4:empty?1:
                             column==0?4:column==1?8:9;
-                        if(selected)pair=3;
+                        if(selected)pair=65;
                         f80_put(r.y+3+line,table_x,shown,visible,pair,
                                 highlighted && playhead);
                         table_x+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
@@ -3073,7 +3179,8 @@ static void paint_phrase(F80Widget *canvas,void *user) {
                 else memcpy(shown,pair+3,3);
                 empty=fx->command==TT_EFFECT_NONE;
             }
-            int editrow=!inline_line && editable && tracker.focus==FOCUS_PHRASE && row==tracker.step;
+            int editrow=!inline_line && !tracker.inline_table_selection_active &&
+                editable && tracker.focus==FOCUS_PHRASE && row==tracker.step;
             int editcol=tracker.focus==FOCUS_PHRASE && channel==tracker.channel;
             if(editrow && editcol && field==0 && tracker.note_input_length)
                 memcpy(shown,tracker.note_input,(size_t)tracker.note_input_length);
@@ -4369,6 +4476,29 @@ static void inline_table_move_field(int delta) {
     handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
         .a=tracker.inline_table_tick,.b=field});
 }
+static int inline_table_field_at(int x,int grid_x) {
+    int position=grid_x+5;
+    for(int column=0;column<TT_TABLE_RENDER_COLUMNS;++column) {
+        int width=inline_table_column_width(column);
+        if(x>=position && x<position+width)
+            return column==0?0:column==1?1:
+                2+(column-2)*2+(x-position>=3);
+        position+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
+    }
+    return -1;
+}
+static void inline_table_select_cursor(int tick,int field,int begin) {
+    if(!tracker.inline_table_open)return;
+    tick=clamp(tick,0,inline_table_length()-1);
+    field=clamp(field,0,TT_TABLE_RENDER_FIELDS-1);
+    handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=tick,.b=field});
+    if(begin) {
+        if(tracker.visual_selecting)
+            handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+        handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION});
+    }
+}
 static void inline_table_tick_down(F80Widget *button,void *user) {
     (void)button;(void)user;inline_table_move_tick(-1);
 }
@@ -4397,35 +4527,96 @@ static void transpose_up(F80Widget *button,void *user) {
 }
 static void copy_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
-    if(!tracker.selecting)return;
-    int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    tracker.clip_rows=bottom-top+1;tracker.clip_channels=right-left+1;
-    for(int row=0;row<tracker.clip_rows;++row)
-        for(int channel=0;channel<tracker.clip_channels;++channel)
-            tracker.clipboard[row][channel]=tracker.pattern.cell[top+row][left+channel];
-    tt_tracker_message("Selection copied");
+    handle_ui_event((TtUiEvent){.type=TT_UI_COPY_SELECTION});
 }
 static void clear_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(!tracker.selecting)return;
+    if(tracker.inline_table_selection_active && tracker.inline_table_open) {
+        int top,left,bottom,right;
+        inline_selection_bounds(&top,&left,&bottom,&right);
+        (void)left;(void)right;
+        TtEditEvent event={.type=TT_EDIT_TABLE_TICKS_BULK};
+        event.table_ticks=(TtEditTableTicksBulk){TT_BULK_CLEAR,
+            tracker.inline_table_index,top,0,bottom,4,NULL};
+        if(emit_edit(&event))tt_tracker_message("Table selection cleared");
+        return;
+    }
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
     edit_cells(TT_BULK_CLEAR,top,left,bottom,right,0,NULL,0);
     tt_tracker_message("Selection cleared");
 }
 static void cut_selection(F80Widget *button,void *user) {
-    copy_selection(button,user);clear_selection(button,user);tt_tracker_message("Selection cut");
+    copy_selection(button,user);
+    if(tracker.clip_kind!=TT_CLIP_NONE)clear_selection(button,user);
+    tt_tracker_message("Selection cut");
 }
 static int paste_available(void) {
     if(!tracker.selecting || !tracker.clip_rows)return 0;
+    if(tracker.inline_table_selection_active && tracker.inline_table_open &&
+       tracker.inline_table_selected) {
+        int top,left,bottom,right;
+        inline_selection_bounds(&top,&left,&bottom,&right);
+        if(bottom-top+1!=tracker.clip_rows)return 0;
+        (void)left;(void)right;
+        return tracker.clip_channels==1 &&
+            (tracker.clip_kind==TT_CLIP_PATTERN ||
+             tracker.clip_kind==TT_CLIP_TABLE);
+    }
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    return bottom-top+1==tracker.clip_rows && right-left+1==tracker.clip_channels;
+    if(bottom-top+1!=tracker.clip_rows)return 0;
+    if(tracker.clip_kind==TT_CLIP_PATTERN)
+        return right-left+1==tracker.clip_channels;
+    return tracker.clip_kind==TT_CLIP_TABLE && right==left &&
+        tracker.table_clip_left==0 && tracker.table_clip_right>=4;
 }
 static void paste_selection(F80Widget *button,void *user) {
     (void)button;(void)user;
     if(!paste_available()) { tt_tracker_message("Select an area matching the clipboard size");return; }
+    if(tracker.inline_table_selection_active && tracker.inline_table_open) {
+        int top,left,bottom,right;
+        inline_selection_bounds(&top,&left,&bottom,&right);
+        (void)left;(void)right;
+        TtTableTick data[TT_TABLE_MAX_TICKS];
+        for(int row=0;row<tracker.clip_rows;++row) {
+            if(tracker.clip_kind==TT_CLIP_TABLE)data[row]=tracker.table_clip[row];
+            else {
+                TtCell cell=tracker.clipboard[row][0];
+                data[row]=tracker.song.table[tracker.inline_table_index].tick[top+row];
+                data[row].note=cell.note;data[row].instrument=cell.instrument;
+                for(int slot=0;slot<TT_TABLE_RENDER_EFFECTS;++slot) {
+                    const TtPatternEffect *src=tt_cell_effect_const(&cell,slot);
+                    data[row].effect[slot]=(TtTableEffect){
+                        (char)src->command,src->value};
+                }
+            }
+        }
+        TtEditEvent event={.type=TT_EDIT_TABLE_TICKS_BULK};
+        event.table_ticks=(TtEditTableTicksBulk){TT_BULK_PASTE,
+            tracker.inline_table_index,top,0,bottom,4,data};
+        if(emit_edit(&event))tt_tracker_message("Table selection pasted");
+        return;
+    }
     int top,left,bottom,right;selection_bounds(&top,&left,&bottom,&right);
-    edit_cells(TT_BULK_PASTE,top,left,top+tracker.clip_rows-1,left+tracker.clip_channels-1,0,
-               &tracker.clipboard[0][0],TT_CHANNELS);
+    if(tracker.clip_kind==TT_CLIP_PATTERN) {
+        edit_cells(TT_BULK_PASTE,top,left,top+tracker.clip_rows-1,
+                   left+tracker.clip_channels-1,0,
+                   &tracker.clipboard[0][0],TT_CHANNELS);
+    } else {
+        TtCell data[TT_TABLE_MAX_TICKS];
+        for(int row=0;row<tracker.clip_rows;++row) {
+            data[row]=tt_cell_empty();
+            const TtTableTick *tick=&tracker.table_clip[row];
+            data[row].note=tick->note;data[row].instrument=tick->instrument;
+            for(int slot=0;slot<TT_TABLE_RENDER_EFFECTS;++slot) {
+                const TtTableEffect *src=&tick->effect[slot];
+                TtPatternEffect *dst=tt_cell_effect(&data[row],slot);
+                dst->command=(unsigned char)src->command;dst->value=src->value;
+            }
+        }
+        edit_cells(TT_BULK_PASTE,top,left,top+tracker.clip_rows-1,left,0,
+                   data,1);
+    }
     tt_tracker_message("Selection pasted");
 }
 static void oct_down(F80Widget *button,void *user);
@@ -5081,13 +5272,45 @@ static void table_copy_area(void) {
     tracker.table_clip_left=left;tracker.table_clip_right=right;
     for(int row=0;row<tracker.table_clip_rows;++row)
         tracker.table_clip[row]=table->tick[top+row];
+    tracker.clip_kind=TT_CLIP_TABLE;
+    tracker.clip_rows=tracker.table_clip_rows;tracker.clip_channels=1;
+    for(int row=0;row<tracker.clip_rows;++row) {
+        TtCell cell=tt_cell_empty();
+        cell.note=tracker.table_clip[row].note;
+        cell.instrument=tracker.table_clip[row].instrument;
+        for(int slot=0;slot<TT_TABLE_RENDER_EFFECTS;++slot) {
+            const TtTableEffect *src=&tracker.table_clip[row].effect[slot];
+            TtPatternEffect *dst=tt_cell_effect(&cell,slot);
+            dst->command=(unsigned char)src->command;dst->value=src->value;
+        }
+        tracker.clipboard[row][0]=cell;
+    }
     tt_tracker_message("Table selection copied");
 }
 static void table_paste_area(void) {
     int top,left,bottom,right;
     f80_grid_bounds(&tracker.table_grid,&top,&left,&bottom,&right);
-    if(!tracker.table_clip_rows || left!=tracker.table_clip_left ||
-       right!=tracker.table_clip_right || bottom-top+1!=tracker.table_clip_rows) {
+    if(tracker.clip_kind==TT_CLIP_PATTERN) {
+        if(tracker.clip_channels!=1 || left!=0 || right!=4 ||
+           bottom-top+1!=tracker.clip_rows) {
+            tt_tracker_message("Select all visible table fields to paste pattern cells");return;
+        }
+        TtTableTick data[TT_TABLE_MAX_TICKS];
+        for(int row=0;row<tracker.clip_rows;++row) {
+            TtCell cell=tracker.clipboard[row][0];
+            data[row]=tracker.song.table[tracker.table_index].tick[top+row];
+            data[row].note=cell.note;data[row].instrument=cell.instrument;
+            for(int slot=0;slot<TT_TABLE_RENDER_EFFECTS;++slot) {
+                const TtPatternEffect *src=tt_cell_effect_const(&cell,slot);
+                data[row].effect[slot]=(TtTableEffect){(char)src->command,src->value};
+            }
+        }
+        edit_table_ticks(TT_BULK_PASTE,top,left,top+tracker.clip_rows-1,right,data);
+        tt_tracker_message("Pattern cells pasted into table");return;
+    }
+    if(!tracker.table_clip_rows || tracker.clip_kind!=TT_CLIP_TABLE ||
+       left!=tracker.table_clip_left || right!=tracker.table_clip_right ||
+       bottom-top+1!=tracker.table_clip_rows) {
         tt_tracker_message("Select matching table fields and ticks to paste");return;
     }
     edit_table_ticks(TT_BULK_PASTE,top,left,top+tracker.table_clip_rows-1,right,
@@ -5827,10 +6050,6 @@ static void handle_key(int key) {
         else if(key=='-')zoom_wave(-1);
         else f80_key(&tracker.app,key);
     } else if(tracker.focus==FOCUS_PHRASE) {
-        if(tracker.inline_table_selected) {
-            if(key==9 || key==F80_KEY_BTAB)return;
-            inline_table_key(key);return;
-        }
         if(key==F80_KEY_SHIFT_UP || key==F80_KEY_SHIFT_DOWN ||
            key==F80_KEY_SHIFT_LEFT || key==F80_KEY_SHIFT_RIGHT) {
             if(!tracker.visual_selecting)
@@ -5872,6 +6091,10 @@ static void handle_key(int key) {
                     handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
             }
             return;
+        }
+        if(tracker.inline_table_selected) {
+            if(key==9 || key==F80_KEY_BTAB)return;
+            inline_table_key(key);return;
         }
         TtCell edited=tracker.pattern.cell[tracker.step][tracker.channel],*entry=&edited;
         int digit=hex_digit(key);
@@ -6356,6 +6579,12 @@ static void handle_mouse(int x,int y,int wheel) {
        (tracker.app.menu->menu_active || y==tracker.app.menu->rect.y)) {
         f80_mouse(&tracker.app,x,y,wheel);return;
     }
+    if(wheel==2 && tracker.inline_table_selection_active &&
+       tracker.phrase_canvas) {
+        F80Rect grid=tracker.phrase_canvas->rect;
+        int visual=tracker.phrase_scroll+y-grid.y-3;
+        if(!grid_is_inline_table_row(visual,NULL))return;
+    }
     /* Keep an active grid drag alive beyond the panel edge. Scroll the view
        toward the pointer and move the selection to the newly exposed edge. */
     if(wheel==2 && tracker.selecting && tracker.phrase_canvas &&
@@ -6519,6 +6748,16 @@ static void handle_mouse(int x,int y,int wheel) {
             int global=tracker.phrase_scroll+y-r.y-3;
             int base_global=grid_base_row(global);
             int target_order=grid_order_for_row(global);
+            int table_tick=-1;
+            int inline_line=grid_is_inline_table_row(global,&table_tick);
+            if(tracker.inline_table_selection_active && wheel!=2)
+                handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+            if(wheel==2 && tracker.inline_table_selection_active) {
+                if(!inline_line)return;
+                int field=inline_table_field_at(x,r.x);
+                if(field>=0)inline_table_select_cursor(table_tick,field,0);
+                return;
+            }
             if(global>=grid_total_rows() ||
                ((wheel==2 || tracker.visual_selecting) && target_order>=0 &&
                 target_order!=tracker.edit_order) ||
@@ -6527,28 +6766,20 @@ static void handle_mouse(int x,int y,int wheel) {
                 return;
             leave_follow();
             int old_step=tracker.step,old_channel=tracker.channel;
+            if(inline_line) {
+                int field=inline_table_field_at(x,r.x);
+                if(field>=0) {
+                    if(wheel==2)inline_table_select_cursor(table_tick,field,1);
+                    else handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+                        .a=table_tick,.b=field});
+                }
+                return;
+            }
             if(wheel==2 && !tracker.selecting) {
                 tracker.anchor_step=old_step;
                 tracker.anchor_channel=old_channel;
                 tracker.grid_selection_invalid=0;
                 tracker.selecting=1;
-            }
-            int table_tick=-1,inline_line=grid_is_inline_table_row(global,&table_tick);
-            if(inline_line) {
-                int position=r.x+5;
-                for(int column=0;column<TT_TABLE_RENDER_COLUMNS &&
-                    position<r.x+r.w-1;++column) {
-                    int width=inline_table_column_width(column);
-                    if(x>=position && x<position+width) {
-                        int field=column==0?0:column==1?1:
-                            2+(column-2)*2+(x-position>=3);
-                        handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
-                            .a=table_tick,.b=field});
-                        return;
-                    }
-                    position+=width+(column<TT_TABLE_RENDER_COLUMNS-1?1:0);
-                }
-                return;
             }
             if(target_order>=0 && target_order!=tracker.edit_order &&
                !handle_ui_event((TtUiEvent){.type=TT_UI_SELECT_ORDER_AT_CELL,
@@ -6641,8 +6872,10 @@ static int begin_touch_selection(int x,int y) {
        (tracker.pattern_lock && tracker.edit_order>=0 &&
         grid_order_for_row(global)!=tracker.edit_order))
         return 0;
-    if(grid_is_inline_table_row(global,NULL)) {
-        handle_mouse(x,y,0);
+    int table_tick=-1;
+    if(grid_is_inline_table_row(global,&table_tick)) {
+        int field=inline_table_field_at(x,r.x);
+        if(field>=0)inline_table_select_cursor(table_tick,field,1);
         return 1;
     }
     if(tracker.visual_selecting)

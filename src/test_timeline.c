@@ -485,6 +485,86 @@ int main(void) {
         .index=5,.a=0,.b=5}));
     assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_TOGGLE,
         .index=5,.a=0,.b=1}));
+    tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;
+    tracker.song.table[5].tick[0].note=60;
+    tracker.song.table[5].tick[0].instrument=2;
+    tracker.song.table[5].tick[0].effect[0]=(TtTableEffect){'M',7};
+    tracker.song.table[5].tick[1].note=55;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=0,.b=0}));
+    handle_key(22); /* Ctrl-V starts a bounded selection in inline ticks. */
+    assert(tracker.inline_table_selection_active && tracker.visual_selecting);
+    assert(!selected_cell(0,1)); /* A table range never paints pattern rows. */
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_COPY_SELECTION}));
+    assert(tracker.clip_rows==1 && tracker.table_clip_left==0 &&
+           tracker.table_clip_right==4); /* One subcell selects the whole tick row. */
+    handle_key(F80_KEY_SHIFT_DOWN);
+    handle_key(F80_KEY_SHIFT_DOWN);
+    for(int field=0;field<TT_TABLE_RENDER_FIELDS;++field)
+        handle_key(F80_KEY_SHIFT_RIGHT);
+    assert(tracker.inline_table_tick==2 &&
+           tracker.inline_table_field==TT_TABLE_RENDER_FIELDS-1);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_COPY_SELECTION}));
+    assert(tracker.clip_kind==TT_CLIP_TABLE && tracker.clip_rows==3 &&
+           tracker.clip_channels==1 && tracker.table_clip_left==0 &&
+           tracker.table_clip_right==4);
+    assert(tracker.clipboard[0][0].note==60 &&
+           tracker.clipboard[0][0].instrument==2 &&
+           tracker.clipboard[0][0].effect=='M' &&
+           tracker.clipboard[0][0].value==7);
+    assert(paste_available());
+    tracker.song.table[5].tick[1].note=12;
+    TtEditDoc clipboard_doc={.song=&tracker.song,.active=&tracker.pattern,
+        .active_index=&tracker.pattern_index,.samples=tracker.samples,
+        .active_wave=&tracker.wave,.active_phrase=&tracker.phrase,
+        .sample_count=&tracker.sample_count,.sample_index=&tracker.sample_index,
+        .active_loaded_path=tracker.loaded_path,
+        .active_source_ref=tracker.source_ref,.active_csv_path=tracker.csv_path};
+    edit_history=tt_edit_history_new(&clipboard_doc);assert(edit_history);
+    paste_selection(NULL,NULL);
+    assert(tracker.song.table[5].tick[1].note==55);
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    tracker.anchor_step=0;tracker.step=2;tracker.anchor_channel=1;
+    tracker.channel=1;tracker.selecting=1;
+    assert(paste_available()); /* Table rows paste into a one-channel pattern range. */
+    for(int row=0;row<3;++row)tracker.pattern.cell[row][1]=tt_cell_empty();
+    paste_selection(NULL,NULL);
+    assert(tracker.pattern.cell[0][1].note==60 &&
+           tracker.pattern.cell[0][1].instrument==2 &&
+           tracker.pattern.cell[0][1].effect=='M' &&
+           tracker.pattern.cell[0][1].value==7);
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_COPY_SELECTION}));
+    assert(tracker.clip_kind==TT_CLIP_PATTERN && tracker.clip_rows==3 &&
+           tracker.clip_channels==1);
+    tracker.selecting=0;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=0,.b=0}));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION}));
+    for(int row=0;row<2;++row)
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+            .index=F80_KEY_DOWN}));
+    for(int field=0;field<TT_TABLE_RENDER_FIELDS;++field)
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+            .index=F80_KEY_RIGHT}));
+    assert(paste_available()); /* Pattern cells paste into all visible table fields. */
+    tracker.song.table[5].tick[0].note=-1;
+    paste_selection(NULL,NULL);
+    assert(tracker.song.table[5].tick[0].note==60 &&
+           tracker.song.table[5].tick[0].effect[0].command=='M' &&
+           tracker.song.table[5].tick[0].effect[0].value==7);
+    tt_edit_history_free(edit_history);edit_history=NULL;
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    tracker.selecting=0;
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_INLINE_TABLE_CURSOR,
+        .a=5,.b=7}));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION}));
+    assert(handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+        .index=F80_KEY_DOWN}));
+    assert(tracker.inline_table_tick==5); /* Table selection cannot escape its end. */
+    handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    assert(grid_base_row(1)==0 && grid_visual_row(1)==1+TT_TABLE_DEFAULT_TICKS);
+    tracker.inline_table_selected=0;tracker.inline_table_selection_active=0;
+    tracker.selecting=0;tracker.visual_selecting=0;
     tracker.inline_table_open=0;
     tracker.focus=FOCUS_PHRASE;tracker.step=0;tracker.channel=1;tracker.field=2;
     tracker.pattern.cell[0][1].effect=TT_EFFECT_T;

@@ -43,6 +43,7 @@ typedef struct {
     int note_input_length;
     char note_input[4];
     int selecting,visual_selecting,anchor_step,anchor_channel,clip_rows,clip_channels;
+    int clip_kind;
     int grid_value_editing;
     TtCell clipboard[TT_MAX_STEPS][TT_CHANNELS];
     int phrase_scroll,field_scroll,path_action,edit_order,reveal_cursor;
@@ -60,6 +61,8 @@ typedef struct {
     int grid_selection_anchor,grid_selection_end,grid_selection_invalid;
     int inline_table_open,inline_table_index,inline_table_parent,inline_table_channel;
     int inline_table_selected,inline_table_tick,inline_table_field;
+    int inline_table_selection_active,inline_table_anchor_tick;
+    int inline_table_anchor_field;
     Uint64 next_audition_tick_at;
     int audition_effect_active;
     int tick_phase,tick_remainder;
