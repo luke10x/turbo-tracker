@@ -1970,7 +1970,8 @@ static int selection_copy_to_clipboard(void) {
 }
 static int selected_cell(int global,int channel) {
     if(!tracker.selecting ||
-       (tracker.focus!=FOCUS_PHRASE && tracker.focus!=FOCUS_SELECTION) ||
+       (tracker.focus!=FOCUS_PHRASE && tracker.focus!=FOCUS_SELECTION &&
+        tracker.focus!=FOCUS_ORDER) ||
        tracker.inline_table_selection_active)return 0;
     if(tracker.grid_selection_invalid) {
         int top=tracker.grid_selection_anchor<tracker.grid_selection_end?
@@ -4813,7 +4814,7 @@ static void selection_panel_edit(F80Widget *button,void *user) {
     (void)button;
     long action=(long)user;
     TtUiEvent event={.type=TT_UI_SELECTION_EDIT};
-    if(action>=-16 && action<=16) {
+    if(action==-12 || action==12 || action==-1 || action==1) {
         event.index=TT_BULK_TRANSPOSE;event.a=(int)action;
     } else if(action==100)event.index=TT_BULK_RELATIVE_LEFT;
     else if(action==101)event.index=TT_BULK_ABSOLUTE_LEFT;
@@ -8497,27 +8498,33 @@ int main(int argc,char **argv) {
     tracker.selection_frame->title="Selection";
     tracker.selection_frame->visible=0;
     f80_sized(tracker.selection_frame,f80_grow(),f80_grow());
-    F80Widget *transpose_row=f80_add(tracker.selection_frame,f80_box(F80_ROW));
+    F80Widget *selection_body=f80_add(tracker.selection_frame,f80_box(F80_ROW));
+    f80_sized(selection_body,f80_grow(),f80_grow());
+    F80Widget *selection_actions=f80_add(selection_body,f80_box(F80_COL));
+    f80_sized(selection_actions,f80_grow(),f80_grow());
+    F80Widget *transpose_row=f80_add(selection_actions,f80_box(F80_ROW));
     f80_sized(transpose_row,f80_grow(),f80_fixed(2));
-    const char *transpose_labels[]={"-16","+16","-1","+1"};
-    const long transpose_values[]={-16,16,-1,1};
+    const char *transpose_labels[]={"-C","+C","-1","+1"};
+    const long transpose_values[]={-12,12,-1,1};
     for(int i=0;i<4;++i)f80_add(transpose_row,
         f80_button(transpose_labels[i],selection_panel_edit,
                    (void *)transpose_values[i]));
-    F80Widget *optimize_row=f80_add(tracker.selection_frame,f80_box(F80_ROW));
+    F80Widget *optimize_row=f80_add(selection_actions,f80_box(F80_ROW));
     f80_sized(optimize_row,f80_grow(),f80_fixed(2));
     tracker.selection_to_left=f80_add(optimize_row,
         f80_button("To >",selection_panel_edit,(void *)100));
     tracker.selection_from_left=f80_add(optimize_row,
         f80_button("From >",selection_panel_edit,(void *)101));
-    F80Widget *base_row=f80_add(tracker.selection_frame,f80_box(F80_ROW));
+    F80Widget *base_row=f80_add(selection_actions,f80_box(F80_ROW));
     f80_sized(base_row,f80_grow(),f80_fixed(2));
     f80_add(base_row,f80_button("To +/-",selection_panel_edit,(void *)102));
     f80_add(base_row,f80_button("From +/-",selection_panel_edit,(void *)103));
     f80_add(base_row,f80_button(tracker.selection_base_label,
                                 selection_base_pick,NULL));
-    f80_add(tracker.selection_frame,f80_label("Selection scope"));
-    tracker.selection_scope_group=f80_add(tracker.selection_frame,
+    F80Widget *scope_panel=f80_add(selection_body,f80_box(F80_COL));
+    scope_panel->frame=1;scope_panel->title="Selection Scope";
+    f80_sized(scope_panel,f80_fixed(18),f80_grow());
+    tracker.selection_scope_group=f80_add(scope_panel,
         f80_check_group(selection_scope_items,5,selection_scope_changed,NULL));
     for(int i=0;i<5;++i)f80_set_checked(tracker.selection_scope_group,i,1);
     tracker.grid_row=f80_add(tracker.root,f80_box(F80_ROW));
