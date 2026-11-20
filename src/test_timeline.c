@@ -458,6 +458,21 @@ int main(void) {
     assert(tracker.focus==FOCUS_ORDER && tracker.app.focus==tracker.order_list);
     handle_key(9);
     assert(tracker.focus==FOCUS_PHRASE && tracker.app.focus==tracker.phrase_canvas);
+    for(int repeat=0;repeat<2;++repeat) {
+        tracker.grid_value_editing=1;
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_BEGIN_VISUAL_SELECTION}));
+        assert(tracker.visual_selecting && !tracker.grid_value_editing &&
+               tracker.app.focus==tracker.phrase_canvas);
+        assert(handle_ui_event((TtUiEvent){.type=TT_UI_EXTEND_VISUAL_SELECTION,
+            .index=F80_KEY_DOWN}));
+        assert(tracker.step>tracker.anchor_step);
+        handle_key(9);
+        assert(tracker.focus==FOCUS_SELECTION && tracker.selection_frozen);
+        handle_key(9);
+        handle_key(9);
+        assert(tracker.focus==FOCUS_PHRASE);
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+    }
     f80_free(tracker.root);
 
     memset(&tracker,0,sizeof(tracker));
@@ -1736,6 +1751,25 @@ int main(void) {
                                       .a=TT_EFFECT_REGISTER_COUNT,.b=0xff}));
     tt_play_flush();
     assert(tracker.effect_registers[0]==0);
+    float *old_selection_preview=tracker.selection_preview_pcm;
+    int old_selection_preview_frames=tracker.selection_preview_frames;
+    TtPlayEvent invalid_selection_render={.type=TT_PLAY_RENDER_SELECTION};
+    invalid_selection_render.selection.pattern=tracker.song.pattern_count;
+    invalid_selection_render.selection.top=0;
+    invalid_selection_render.selection.bottom=0;
+    invalid_selection_render.selection.left=0;
+    invalid_selection_render.selection.right=0;
+    assert(tt_play_emit(invalid_selection_render));tt_play_flush();
+    assert(tracker.selection_preview_pcm==old_selection_preview &&
+           tracker.selection_preview_frames==old_selection_preview_frames);
+    int old_inline_selection=tracker.inline_table_selection_active;
+    tracker.inline_table_selection_active=1;
+    tracker.inline_table_index=TT_SONG_TABLES;
+    selection_preview_refresh();
+    tracker.inline_table_index=0;
+    assert(tracker.selection_preview_pcm==old_selection_preview &&
+           tracker.selection_preview_frames==old_selection_preview_frames);
+    tracker.inline_table_selection_active=old_inline_selection;
     tracker.pattern=tracker.song.pattern[2];
     tracker.pattern_index=tracker.loop_pattern_index=2;
     tracker.play_mode=PLAY_PATTERN;
@@ -2558,6 +2592,38 @@ int main(void) {
     assert(tt_audio_voice_pcm(0) && tt_audio_voice_pcm(0)!=tracker.wave.pcm);
     send_play(TT_PLAY_STOP,0,0);
     assert(!tt_audio_voice_active(0));
+    tracker.pattern=tracker.song.pattern[0];tracker.pattern_index=0;
+    tracker.song.pattern[0].cell[0][0]=(TtCell){60,0,TT_EFFECT_S,0x01,
+                                                TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[0][0]=tracker.song.pattern[0].cell[0][0];
+    tracker.song.pattern[0].cell[0][1]=(TtCell){64,0,TT_EFFECT_NONE,-1,
+                                                TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.pattern.cell[0][1]=tracker.song.pattern[0].cell[0][1];
+    TtPlayEvent selection_render={.type=TT_PLAY_RENDER_SELECTION};
+    selection_render.selection.pattern=0;
+    selection_render.selection.top=0;selection_render.selection.bottom=1;
+    selection_render.selection.left=0;selection_render.selection.right=1;
+    assert(tt_play_emit(selection_render));tt_play_flush();
+    assert(tracker.selection_preview_pcm && tracker.selection_preview_frames>0);
+    assert(tracker.selection_preview_rate==TT_AUDIO_OUTPUT_RATE &&
+           strstr(tracker.selection_preview_title,"Selection"));
+    float selection_peak=0;
+    for(int frame=0;frame<tracker.selection_preview_frames;++frame) {
+        float peak=fabsf(tracker.selection_preview_pcm[(size_t)frame*2]);
+        if(peak>selection_peak)selection_peak=peak;
+    }
+    assert(selection_peak>0 && tracker.selection_preview_frames>8192);
+    assert(!tracker.playing);
+    tracker.pattern.cell[0][0]=(TtCell){60,1,TT_EFFECT_T,0,
+        TT_EFFECT_NONE,-1,TT_EFFECT_NONE,-1};
+    tracker.song.table[0].tick[0].note=60;
+    tracker.song.table[0].tick[0].instrument=1;
+    selection_render.selection.table_selection=1;
+    selection_render.selection.table=0;selection_render.selection.parent=0;
+    selection_render.selection.channel=0;
+    selection_render.selection.top=selection_render.selection.bottom=0;
+    assert(tt_play_emit(selection_render));tt_play_flush();
+    assert(tracker.selection_preview_pcm && tracker.selection_preview_frames>0 && !tracker.playing);
     snprintf(tracker.loaded_path,sizeof(tracker.loaded_path),"%s","samples/sine-c4.wav");
     snprintf(tracker.source_ref,sizeof(tracker.source_ref),"%s","./shared.wav");
     snprintf(tracker.song_path,sizeof(tracker.song_path),"%s","default.ttt");
@@ -2642,6 +2708,7 @@ int main(void) {
     assert(!tt_edit_apply_recorded(edit_history,&delete_doc,&delete_pattern) &&
            tracker.song.pattern_count==2 && tracker.song.order[1]==1);
     tt_edit_history_free(edit_history);edit_history=NULL;
+    free(tracker.selection_preview_pcm);tracker.selection_preview_pcm=NULL;
     f80_free(source_root);
     puts("default song, ordered grid, playback follow and DX7 editor events passed");
     return 0;

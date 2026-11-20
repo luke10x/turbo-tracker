@@ -64,6 +64,11 @@ int main(void) {
     TtDx7Patch live=init;live.data[139]=60;live.data[143]=4;live.data[138]=30;
     for(int c=0;c<2;++c){tt_synth_stop(c);tt_synth_start(c,&live,69,100);}
     for(int i=0;i<5013;++i)assert(tt_synth_sample(0,0)==tt_synth_sample(1,0));
+    tt_synth_snapshot_save();
+    float captured_next=tt_synth_sample(0,0);
+    tt_synth_snapshot_restore();
+    assert(tt_synth_sample(0,0)==captured_next);
+    assert(tt_synth_sample(1,0)==captured_next);
     assert(tt_synth_update(0,&live));
     for(int i=0;i<5000;++i)assert(tt_synth_sample(0,0)==tt_synth_sample(1,0));
     TtDx7Patch invalid=live;invalid.data[134]=32;

@@ -463,6 +463,18 @@ int main(void) {
     assert(!tt_edit_can_undo(history));
     for(int i=0;i<32;++i)assert(tt_edit_redo(history,&doc));
     assert(song.bpm==134);
+    int previous_count=sample_count;
+    TtCell previous_cell=active.cell[0][0];
+    TtWave rendered={.pcm=calloc(128,sizeof(float)),.frames=128,.rate=48000};
+    assert(rendered.pcm);
+    e=(TtEditEvent){.type=TT_EDIT_SELECTION_RESAMPLE};
+    e.resample.wave=&rendered;e.resample.table=-1;e.resample.reference=60;
+    assert(tt_edit_apply_recorded(history,&doc,&e));
+    assert(!rendered.pcm && sample_count==previous_count+1 && phrase.reference_note==60);
+    assert(active.cell[0][0].note==60 && active.cell[0][0].instrument==sample_count);
+    assert(tt_edit_undo(history,&doc) && sample_count==previous_count);
+    assert(!memcmp(&active.cell[0][0],&previous_cell,sizeof(previous_cell)));
+    assert(tt_edit_redo(history,&doc) && sample_count==previous_count+1);
     tt_edit_history_free(history);
     puts("edit events, undo/redo, and sample renumbering passed");
     return 0;

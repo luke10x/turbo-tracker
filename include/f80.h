@@ -71,7 +71,7 @@ struct F80Widget {
     F80Direction direction;
     F80Align align;
     F80Justify justify;
-    int padding_x, padding_y, gap, frame, fill;
+    int padding_x, padding_y, gap, frame, fill; /* frame: 0 none, 1 double, 2 single */
     /* Explicit listbox override: keep the inherited window colors when unfocused. */
     int preserve_window_colors_when_unfocused;
     F80WindowRole window_role;

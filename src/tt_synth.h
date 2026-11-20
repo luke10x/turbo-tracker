@@ -21,6 +21,17 @@ void tt_synth_release(int channel);
 void tt_synth_stop(int channel);
 int tt_synth_finished(int channel);
 float tt_synth_sample(int channel,double semitones);
+void tt_synth_snapshot_save(void);
+void tt_synth_snapshot_restore(void);
+void *tt_synth_context_create(void);
+void tt_synth_context_destroy(void *context);
+void tt_synth_context_start(void *context,int channel,const TtDx7Patch *patch,
+                            int note,int velocity);
+int tt_synth_context_update(void *context,int channel,const TtDx7Patch *patch);
+void tt_synth_context_release(void *context,int channel);
+void tt_synth_context_stop(void *context,int channel);
+int tt_synth_context_finished(void *context,int channel);
+float tt_synth_context_sample(void *context,int channel,double semitones);
 #ifdef __cplusplus
 }
 #endif

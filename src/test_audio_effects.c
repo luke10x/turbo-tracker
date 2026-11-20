@@ -5,17 +5,19 @@
 static void voice(void) {
     static float pcm[1000];
     tt_audio_stop();
-    audio.voice[0].pcm=pcm;
-    audio.voice[0].frames=1000;
-    audio.voice[0].start=100;
-    audio.voice[0].end=1000;
-    audio.voice[0].source_rate=48000;
-    audio.voice[0].active=1;
-    audio.voice[0].position=150;
-    audio.voice[0].increment=audio.voice[0].base_increment=1;
-    audio.glide_current[0]=1;
+    active_audio->voice[0].pcm=pcm;
+    active_audio->voice[0].frames=1000;
+    active_audio->voice[0].start=100;
+    active_audio->voice[0].end=1000;
+    active_audio->voice[0].source_rate=48000;
+    active_audio->voice[0].active=1;
+    active_audio->voice[0].position=150;
+    active_audio->voice[0].increment=active_audio->voice[0].base_increment=1;
+    active_audio->glide_current[0]=1;
 }
 int main(void) {
+    assert(fabsf(tt_audio_resampled_mono(.175f,.175f)-.5f)<1e-6f);
+    assert(fabsf(tt_audio_resampled_mono(-.175f,-.175f)+.5f)<1e-6f);
     voice();tt_audio_note_off(0);
     assert(!tt_audio_active());
     voice();tt_audio_command(0,'P',0);
@@ -66,22 +68,22 @@ int main(void) {
     TtVoice reversed=make_voice(&wave,start,end,60,60);
     assert(reversed.position==start-1 && reversed.increment<0 &&
            reversed.end==end);
-    voice();audio.voice[0]=reversed;
+    voice();active_audio->voice[0]=reversed;
     SDL_AudioSpec spec={SDL_AUDIO_F32,2,OUTPUT_RATE};
     SDL_AudioStream *stream=SDL_CreateAudioStream(&spec,&spec);
     assert(stream);
-    fill_audio(NULL,stream,4*(int)(sizeof(float)*2),0);
+    fill_audio(active_audio,stream,4*(int)(sizeof(float)*2),0);
     float rendered[8];
     assert(SDL_GetAudioStreamData(stream,rendered,sizeof(rendered))==
            (int)sizeof(rendered));
     assert(rendered[0]>rendered[2] && rendered[2]>rendered[4]);
     tt_audio_stop();
-    fill_audio(NULL,stream,37*(int)(sizeof(float)*2),0);
+    fill_audio(active_audio,stream,37*(int)(sizeof(float)*2),0);
     static float constant[1000];
     for(int frame=0;frame<1000;++frame)constant[frame]=1;
     TtWave pulse={.pcm=constant,.frames=1000,.rate=OUTPUT_RATE};
-    audio.voice[0]=make_voice(&pulse,0,1000,60,60);
-    fill_audio(NULL,stream,4*(int)(sizeof(float)*2),0);
+    active_audio->voice[0]=make_voice(&pulse,0,1000,60,60);
+    fill_audio(active_audio,stream,4*(int)(sizeof(float)*2),0);
     float aligned[41*2];
     assert(SDL_GetAudioStreamData(stream,aligned,sizeof(aligned))==
            (int)sizeof(aligned));
@@ -95,22 +97,22 @@ int main(void) {
     tt_audio_stop();
     tt_audio_set_stretch(0,0x40);
     assert(fabs(tt_audio_stretch(0)-2)<1e-10);
-    audio.voice[0]=make_voice(&stretched_wave,0,10000,60,60);
-    fill_audio(NULL,stream,2400*(int)(sizeof(float)*2),0);
-    assert(fabs(audio.voice[0].position-1200)<1);
+    active_audio->voice[0]=make_voice(&stretched_wave,0,10000,60,60);
+    fill_audio(active_audio,stream,2400*(int)(sizeof(float)*2),0);
+    assert(fabs(active_audio->voice[0].position-1200)<1);
     float stretched_output[2400*2];
     assert(SDL_GetAudioStreamData(stream,stretched_output,sizeof(stretched_output))==
            (int)sizeof(stretched_output));
     assert(fabsf(stretched_output[100*2]-stretched_pcm[100]*.35f)<.001f);
     tt_audio_set_stretch(0,0xc0);
     assert(fabs(tt_audio_stretch(0)-.5)<1e-10);
-    audio.voice[0]=make_voice(&stretched_wave,0,10000,60,60);
-    fill_audio(NULL,stream,2400*(int)(sizeof(float)*2),0);
-    assert(fabs(audio.voice[0].position-4800)<1);
+    active_audio->voice[0]=make_voice(&stretched_wave,0,10000,60,60);
+    fill_audio(active_audio,stream,2400*(int)(sizeof(float)*2),0);
+    assert(fabs(active_audio->voice[0].position-4800)<1);
     SDL_DestroyAudioStream(stream);
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER,"dummy");
     assert(tt_audio_begin_song());
-    assert(audio.song_mode);
+    assert(active_audio->song_mode);
     tt_audio_note_off(0);
     assert(tt_audio_play_channel_delayed(0,&pulse,0,1000,60,60,37));
     assert(!tt_audio_voice_active(0));
@@ -125,9 +127,9 @@ int main(void) {
     tt_audio_note_off(0);tt_audio_note_off(1);
     assert(tt_audio_play_channel_delayed(0,&synth,0,0,60,60,37));
     tt_audio_render_song(37);assert(!tt_audio_voice_active(0));
-    tt_audio_render_song(1);assert(tt_audio_voice_active(0) && audio.voice[0].synth);
+    tt_audio_render_song(1);assert(tt_audio_voice_active(0) && active_audio->voice[0].synth);
     assert(tt_audio_play_channel(1,&pulse,0,1000,60,60));
-    assert(!audio.voice[1].synth && tt_audio_voice_active(1));
+    assert(!active_audio->voice[1].synth && tt_audio_voice_active(1));
     tt_audio_note_off(0);assert(tt_audio_voice_active(0)); /* release tail */
     for(int i=0;i<1000 && tt_audio_voice_active(0);++i)tt_audio_render_song(512);
     assert(!tt_audio_voice_active(0));
@@ -136,7 +138,7 @@ int main(void) {
     for(int i=0;i<20;++i)tt_audio_tick();
     assert(fabs(tt_audio_increment(0)-2)<.001);
     assert(tt_audio_play_channel(0,&pulse,0,1000,60,60));
-    assert(!audio.voice[0].synth && tt_audio_voice_pcm(0)==pulse.pcm);
+    assert(!active_audio->voice[0].synth && tt_audio_voice_pcm(0)==pulse.pcm);
     assert(tt_audio_play_channel_delayed(0,&synth,0,0,60,60,100));
     tt_audio_note_off(0);tt_audio_render_song(101);assert(!tt_audio_voice_active(0));
     /* Two instruments can share identical patch bytes but edits follow slot
@@ -147,15 +149,25 @@ int main(void) {
     assert(tt_audio_play_instrument_delayed(3,2,&synth,0,0,72,60,100));
     TtDx7Patch edited=synth.dx7;edited.data[134]=17;
     assert(tt_audio_update_dx7(2,&edited));
-    assert(audio.voice[0].patch.data[134]==17 && audio.voice[2].patch.data[134]==17);
-    assert(audio.voice[1].patch.data[134]==synth.dx7.data[134]);
-    assert(audio.delayed_voice[3].patch.data[134]==17 && audio.delayed_frames[3]==100);
+    assert(active_audio->voice[0].patch.data[134]==17 && active_audio->voice[2].patch.data[134]==17);
+    assert(active_audio->voice[1].patch.data[134]==synth.dx7.data[134]);
+    assert(active_audio->delayed_voice[3].patch.data[134]==17 && active_audio->delayed_frames[3]==100);
     edited.data[134]=32;assert(!tt_audio_update_dx7(2,&edited));
     assert(!tt_audio_update_dx7(-1,&synth.dx7));
-    assert(audio.voice[0].patch.data[134]==17);
-    tt_audio_render_song(101);assert(audio.voice[3].patch.data[134]==17);
+    assert(active_audio->voice[0].patch.data[134]==17);
+    tt_audio_render_song(101);assert(active_audio->voice[3].patch.data[134]==17);
     tt_audio_end_song();
-    assert(!audio.song_mode);
+    assert(!active_audio->song_mode);
+    assert(tt_audio_play_channel(0,&pulse,0,1000,60,60));
+    int live_paused=SDL_AudioStreamDevicePaused(live_audio.stream);
+    assert(tt_audio_capture_begin());
+    assert(SDL_AudioStreamDevicePaused(live_audio.stream)==live_paused);
+    assert(tt_audio_begin_song());tt_audio_render_song(128);
+    float isolated_capture[128*2];
+    assert(tt_audio_capture_read(isolated_capture,128)==128);
+    for(int i=0;i<128*2;++i)assert(isolated_capture[i]==0);
+    tt_audio_capture_end();
+    assert(active_audio==&live_audio && tt_audio_voice_pcm(0)==pulse.pcm);
     tt_audio_stop();tt_audio_close();
     puts("pitch, gain, pan, retrigger, and reverse slice effects passed");
     return 0;

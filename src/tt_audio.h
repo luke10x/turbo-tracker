@@ -4,6 +4,10 @@
 #include "tt_sample.h"
 
 enum { TT_AUDIO_OUTPUT_RATE=48000 };
+/* Invert the centered mono mixer gain when importing its stereo output. */
+static inline float tt_audio_resampled_mono(float left,float right) {
+    return (left+right)/0.7f;
+}
 
 int tt_audio_open(void);
 int tt_audio_recover(void);
@@ -13,6 +17,10 @@ int tt_audio_begin_song(void);
 int tt_audio_song_buffered_frames(void);
 void tt_audio_render_song(int frames);
 void tt_audio_end_song(void);
+/* Render to an isolated mixer/synth context without pausing live playback. */
+int tt_audio_capture_begin(void);
+int tt_audio_capture_read(float *stereo,int max_frames);
+void tt_audio_capture_end(void);
 int tt_audio_play(const TtWave *wave,int start,int end,int note,int reference_note);
 int tt_audio_play_channel(int channel,const TtWave *wave,int start,int end,
                               int note,int reference_note);

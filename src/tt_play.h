@@ -15,7 +15,7 @@ typedef enum {
     TT_PLAY_PATTERN_JUMP, TT_PLAY_ROW_JUMP, TT_PLAY_SET_TICKS_PER_ROW,
     TT_PLAY_SET_BPM, TT_PLAY_SET_EFFECT_REGISTER,
     TT_PLAY_DX7_PATCH_UPDATE,
-    TT_PLAY_APPLY_PENDING_FLOW
+    TT_PLAY_APPLY_PENDING_FLOW, TT_PLAY_RENDER_SELECTION, TT_PLAY_AUDIT_SELECTION
 } TtPlayType;
 
 typedef struct {
@@ -23,6 +23,7 @@ typedef struct {
     int a,b,c;
     struct { int instrument; TtDx7Patch patch; } dx7_patch;
     struct { int instrument; char path[1024]; } preview_sample;
+    struct { int pattern,top,bottom,left,right; int table_selection,table,parent,channel; } selection;
 } TtPlayEvent;
 
 /* Events are consumed by the playback scheduler. UI callers can flush before

@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "tt_audio.h"
@@ -9,6 +10,9 @@
 
 static void play_start_now(F80Widget *button,void *user);
 static void preview_stop_now(int resume);
+static int selection_render_active,selection_render_rows,selection_rendered_rows;
+static int selection_render_table_tick=-1,selection_render_table_channel;
+static int render_selection_now(const TtPlayEvent *event);
 
 static const TtPattern *playing_pattern(void) {
     if(tracker.play_mode==PLAY_PATTERN && !tracker.order_range_active)
@@ -318,6 +322,10 @@ static void table_play_note(int channel,const TtCell *cell,int glide_rate,
 }
 
 void tt_play_table_ticks(void) {
+    if(selection_render_active && selection_render_table_tick>=0) {
+        tracker.table_voice[selection_render_table_channel].tick=selection_render_table_tick;
+        selection_render_table_tick=-1;
+    }
     for(int channel=0;channel<TT_CHANNELS;++channel) {
         TableVoice *voice=&tracker.table_voice[channel];
         voice->pending=0;
@@ -566,6 +574,31 @@ static void preview_sample_now(const TtPlayEvent *event) {
     if(!preview_active)preview_resume_if_needed();
 }
 
+static void audit_selection_now(void) {
+    if(!tracker.selection_preview_pcm || tracker.selection_preview_frames<=0)return;
+    int resume=tracker.playing || (preview_active && preview_resume_playback);
+    preview_stop_now(0);
+    preview_resume_playback=resume;
+    if(tracker.playing)play_toggle_now(NULL,NULL);
+    int frames=tracker.selection_preview_frames;
+    preview_loaded_wave=(TtWave){.instrument_type=TT_INSTRUMENT_SAMPLE,
+        .frames=frames,.rate=TT_AUDIO_OUTPUT_RATE};
+    preview_loaded_wave.pcm=malloc((size_t)frames*sizeof(float));
+    if(!preview_loaded_wave.pcm) { preview_resume_if_needed();return; }
+    for(int frame=0;frame<frames;++frame)
+        preview_loaded_wave.pcm[frame]=tt_audio_resampled_mono(
+            tracker.selection_preview_pcm[(size_t)frame*2],
+            tracker.selection_preview_pcm[(size_t)frame*2+1]);
+    if(tt_audio_play(&preview_loaded_wave,0,frames,60,60)) {
+        preview_active=1;
+        preview_deadline=SDL_GetTicks()+((Uint64)frames*1000+TT_AUDIO_OUTPUT_RATE-1)/TT_AUDIO_OUTPUT_RATE;
+        tt_tracker_message("Auditing selection");
+    } else {
+        tt_free(&preview_loaded_wave);
+        preview_resume_if_needed();
+    }
+}
+
 static void advance_preview_now(void) {
     if(!preview_active)return;
     if(!tt_audio_voice_active(0) || SDL_GetTicks()>=preview_deadline)
@@ -597,7 +630,12 @@ static void advance_playback_now(void) {
                 tracker.playback_ticks_per_row:tracker.song.ticks_per_row;
             if(++tracker.tick_phase>=ticks_per_row) {
                 tracker.tick_phase=0;
-                if(tracker.pending_flow) {
+                if(selection_render_active) {
+                    ++tracker.play_step;
+                    if(++selection_rendered_rows>=selection_render_rows)
+                        tracker.song_finished=1;
+                    tracker.pending_flow=0;
+                } else if(tracker.pending_flow) {
                     if(tt_play_emit((TtPlayEvent){.type=TT_PLAY_APPLY_PENDING_FLOW}))
                         tt_play_flush();
                 } else if(++tracker.play_step>=tracker.song.pattern_rows) {
@@ -685,6 +723,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_CLEAR_ORDER_RANGE:name="clear order range";break;
     case TT_PLAY_AUDITION:name="audition";break;
     case TT_PLAY_AUDITION_CELL:name="audition cell";break;
+    case TT_PLAY_AUDIT_SELECTION:name="audit selection";break;
     case TT_PLAY_PREVIEW_SAMPLE:name="preview sample";break;
     case TT_PLAY_CANCEL_PREVIEW:name="cancel sample preview";break;
     case TT_PLAY_ROW_PLAYED:name="row played";break;
@@ -697,6 +736,7 @@ int tt_play_emit(TtPlayEvent event) {
     case TT_PLAY_SET_BPM:name="set playback BPM";break;
     case TT_PLAY_SET_EFFECT_REGISTER:name="set effect register";break;
     case TT_PLAY_APPLY_PENDING_FLOW:name="apply flow jump";break;
+    case TT_PLAY_RENDER_SELECTION:name="render selected pattern";break;
     }
     char detail[96];
     if(event.type==TT_PLAY_ROW_PLAYED && event.c>=0)
@@ -724,7 +764,8 @@ int tt_play_emit(TtPlayEvent event) {
     else if(event.type==TT_PLAY_SET_ORDER_RANGE)
         snprintf(detail,sizeof(detail),"%s %02X-%02X",name,event.a,event.b);
     else snprintf(detail,sizeof(detail),"%s",name);
-    if(event.type!=TT_PLAY_ROW_PLAYED || event.a==0)
+    if(!selection_render_active &&
+       (event.type!=TT_PLAY_ROW_PLAYED || event.a==0))
         tt_tracker_log_event("PLAY",detail);
     return 1;
 }
@@ -887,6 +928,9 @@ void tt_play_flush(void) {
         case TT_PLAY_DX7_PATCH_UPDATE:
             tt_audio_update_dx7(event.dx7_patch.instrument,&event.dx7_patch.patch);
             break;
+        case TT_PLAY_RENDER_SELECTION:
+            render_selection_now(&event);break;
+        case TT_PLAY_AUDIT_SELECTION:audit_selection_now();break;
         case TT_PLAY_PREVIEW_SAMPLE:preview_sample_now(&event);break;
         case TT_PLAY_CANCEL_PREVIEW:preview_stop_now(1);break;
         case TT_PLAY_AUDITION:play_audition_now(NULL,NULL);break;
@@ -928,4 +972,162 @@ void tt_play_advance(void) {
     advance_audition_now();
     advance_preview_now();
     tt_play_flush();
+}
+
+static int render_selection_now(const TtPlayEvent *input) {
+    TtPlayEvent adjusted=*input;
+    const TtPlayEvent *event=&adjusted;
+    if(input->selection.table_selection) {
+        if(input->selection.table<0 || input->selection.table>=TT_SONG_TABLES ||
+           input->selection.parent<0 || input->selection.parent>=tracker.song.pattern_rows ||
+           input->selection.channel<0 || input->selection.channel>=TT_CHANNELS ||
+           input->selection.top<0 || input->selection.bottom<input->selection.top ||
+           input->selection.bottom>=tracker.song.table[input->selection.table].length)return 0;
+        adjusted.selection.top=adjusted.selection.bottom=input->selection.parent;
+        adjusted.selection.left=adjusted.selection.right=input->selection.channel;
+    }
+    if(!event || event->selection.pattern<0 ||
+       event->selection.pattern>=tracker.song.pattern_count ||
+       event->selection.top<0 || event->selection.bottom<event->selection.top ||
+       event->selection.bottom>=tracker.song.pattern_rows ||
+       event->selection.left<0 || event->selection.right<event->selection.left ||
+       event->selection.right>=TT_CHANNELS)return 0;
+    TtTracker *saved=(TtTracker *)malloc(sizeof(*saved));
+    if(!saved) { tt_tracker_message("Could not allocate selection render state");return 0; }
+    *saved=tracker;
+    if(!tt_audio_capture_begin()) {
+        free(saved);tt_tracker_message("Audio unavailable for selection resampling");
+        return 0;
+    }
+    TtPattern source=event->selection.pattern==tracker.pattern_index?
+        tracker.pattern:tracker.song.pattern[event->selection.pattern];
+    tracker.pattern=source;
+    tracker.pattern_index=event->selection.pattern;
+    memset(tracker.previous_note,0xff,sizeof(tracker.previous_note));
+    for(int row=0;row<event->selection.top;++row) {
+        int row_note[TT_CHANNELS];
+        for(int channel=0;channel<=event->selection.right;++channel) {
+            const TtCell *cell=&source.cell[row][channel];
+            int note=cell->note;
+            if(tt_note_is_relative(note)) {
+                int root=tt_note_is_left_relative(note)?
+                    (channel>0?row_note[channel-1]:-1):
+                    tracker.previous_note[channel];
+                note=resolve_relative_note(note,root);
+            }
+            row_note[channel]=note>=0?note:-1;
+            if(note>=0)tracker.previous_note[channel]=note;
+        }
+    }
+    for(int row=event->selection.top;row<=event->selection.bottom;++row) {
+        int row_note[TT_CHANNELS];
+        for(int channel=0;channel<=event->selection.right;++channel) {
+            const TtCell *cell=&source.cell[row][channel];
+            int note=cell->note;
+            if(tt_note_is_relative(note)) {
+                int root=tt_note_is_left_relative(note)?
+                    (channel>0?row_note[channel-1]:-1):
+                    tracker.previous_note[channel];
+                note=resolve_relative_note(note,root);
+                if(channel>=event->selection.left)
+                    tracker.pattern.cell[row][channel].note=note;
+            }
+            row_note[channel]=note>=0?note:-1;
+            if(note>=0)tracker.previous_note[channel]=note;
+        }
+    }
+    for(int row=0;row<tracker.song.pattern_rows;++row)
+        for(int channel=0;channel<TT_CHANNELS;++channel)
+            if(row<event->selection.top || row>event->selection.bottom ||
+               channel<event->selection.left || channel>event->selection.right)
+                tracker.pattern.cell[row][channel]=tt_cell_empty();
+    if(input->selection.table_selection) {
+        TtCell caller=source.cell[input->selection.parent][input->selection.channel];
+        int count=input->selection.bottom-input->selection.top+1;
+        for(int row=0;row<TT_MAX_STEPS;++row)
+            for(int channel=0;channel<TT_CHANNELS;++channel)
+                tracker.pattern.cell[row][channel]=tt_cell_empty();
+        tracker.pattern.cell[0][input->selection.channel]=caller;
+        for(int fx=0;fx<3;++fx) {
+            TtPatternEffect *effect=tt_cell_effect(&tracker.pattern.cell[0][input->selection.channel],fx);
+            if(effect->command==TT_EFFECT_T)effect->value=input->selection.table;
+        }
+        selection_render_table_tick=input->selection.top;
+        selection_render_table_channel=input->selection.channel;
+        tracker.song.rows_per_beat*=tracker.song.ticks_per_row;
+        adjusted.selection.top=0;adjusted.selection.bottom=count-1;
+    }
+    tracker.play_mode=PLAY_PATTERN;
+    tracker.loop_pattern_index=event->selection.pattern;
+    tracker.order_range_active=0;
+    tracker.play_order=0;
+    tracker.play_step=event->selection.top;
+    tracker.active_step=tracker.active_pattern_index=tracker.active_order_index=-1;
+    tracker.playing=tracker.started=1;
+    tracker.playback_bpm=tracker.song.bpm;
+    tracker.playback_ticks_per_row=input->selection.table_selection?1:tracker.song.ticks_per_row;
+    tracker.tick_phase=tracker.tick_remainder=tracker.frames_to_tick=0;
+    tracker.song_written_frames=0;
+    tracker.song_finished=tracker.pending_flow=0;
+    tracker.display_head=tracker.display_tail=0;
+    tracker.audition_effect_active=0;
+    memset(tracker.effect_registers,0,sizeof(tracker.effect_registers));
+    memset(tracker.table_voice,0,sizeof(tracker.table_voice));
+    selection_render_active=1;
+    selection_render_rows=event->selection.bottom-event->selection.top+1;
+    selection_rendered_rows=0;
+
+    int ok=tt_audio_begin_song();
+    for(int channel=0;ok && channel<TT_CHANNELS;++channel)
+        tt_audio_set_volume(channel,255);
+    float *rendered=NULL;
+    int rendered_frames=0,capacity=0,iterations=0,stalled=0;
+    float chunk[8192*2];
+    while(ok && iterations++<20000) {
+        if(tracker.playing)tt_play_advance();
+        int received;
+        while((received=tt_audio_capture_read(chunk,8192))>0) {
+            if(rendered_frames+received>TT_MAX_FRAMES) { ok=0;break; }
+            int required=rendered_frames+received;
+            if(required>capacity) {
+                int next=capacity?capacity*2:8192;
+                while(next<required)next*=2;
+                if(next>TT_MAX_FRAMES)next=TT_MAX_FRAMES;
+                float *grown=(float *)realloc(rendered,
+                    (size_t)next*2*sizeof(*rendered));
+                if(!grown) { ok=0;break; }
+                rendered=grown;capacity=next;
+            }
+            memcpy(rendered+(size_t)rendered_frames*2,chunk,
+                   (size_t)received*2*sizeof(*rendered));
+            rendered_frames+=received;
+        }
+        if(!ok || (!tracker.playing && !tt_audio_song_buffered_frames()))break;
+        if(tt_audio_song_buffered_frames())stalled=0;
+        else if(++stalled>4) { ok=0;break; }
+    }
+    if(iterations>=20000)ok=0;
+    selection_render_active=0;
+    selection_render_table_tick=-1;
+    selection_render_rows=selection_rendered_rows=0;
+    tt_audio_capture_end();
+    tracker=*saved;
+    free(saved);
+    if(!ok || rendered_frames<=0) {
+        free(rendered);
+        tt_tracker_message("Could not render selected pattern range");
+        return 0;
+    }
+    free(tracker.selection_preview_pcm);
+    tracker.selection_preview_pcm=rendered;
+    tracker.selection_preview_frames=rendered_frames;
+    tracker.selection_preview_rate=TT_AUDIO_OUTPUT_RATE;
+    snprintf(tracker.selection_preview_title,sizeof(tracker.selection_preview_title),
+        "Selection %.2fs",(double)rendered_frames/TT_AUDIO_OUTPUT_RATE);
+    char status[96];
+    snprintf(status,sizeof(status),"Rendered %d selected rows to %.2f seconds",
+        event->selection.bottom-event->selection.top+1,
+        (double)rendered_frames/TT_AUDIO_OUTPUT_RATE);
+    tt_tracker_message(status);
+    return 1;
 }

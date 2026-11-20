@@ -71,6 +71,7 @@ typedef enum {
     TT_EDIT_DX7_PARAMETER,
     TT_EDIT_DX7_IMPORT,
     TT_EDIT_DX7_APPEND,
+    TT_EDIT_SELECTION_RESAMPLE,
     TT_EDIT_COUNT
 } TtEditType;
 
@@ -175,6 +176,7 @@ typedef struct {
 typedef struct {
     TtEditType type;
     union {
+        struct { TtWave *wave; int top,bottom,left,right,reference,table; } resample;
         TtEditCellSet cell_set;
         TtEditCellsBulk cells;
         TtEditPattern pattern;

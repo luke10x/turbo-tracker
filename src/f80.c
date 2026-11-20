@@ -1141,8 +1141,9 @@ void f80_draw(F80Widget *w) {
         if(w->fill || w->frame)f80_fill(r,w->style==15?15:w->style==7?7:1);
         if(w->frame) {
             int active=has_focus(w);
-            f80_frame(r,w->title,active?F80_COLOR_FRAME_ACTIVE:
-                                      F80_COLOR_FRAME_INACTIVE);
+            int frame_pair=active?F80_COLOR_FRAME_ACTIVE:F80_COLOR_FRAME_INACTIVE;
+            if(w->frame==2)f80_single_frame(r,frame_pair);
+            else f80_frame(r,w->title,frame_pair);
             if(w->title && w->style!=15 && w->style!=7 && r.w>6) {
                 int len=(int)strlen(w->title); if(len>r.w-6)len=r.w-6;
                 int title_pair=w->title_style?w->title_style:active?4:2;

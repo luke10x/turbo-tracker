@@ -49,6 +49,10 @@ typedef struct {
     int selection_base_note,note_picker_base_mode;
     char selection_base_label[20];
     F80Widget *selection_frame,*selection_scope_group;
+    F80Widget *selection_preview_panel,*selection_preview_canvas;
+    float *selection_preview_pcm;
+    int selection_preview_frames,selection_preview_rate;
+    char selection_preview_title[64];
     F80Widget *selection_to_left,*selection_from_left;
     int selection_table_top,selection_table_bottom;
     int clip_kind;

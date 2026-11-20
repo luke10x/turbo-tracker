@@ -746,6 +746,37 @@ int tt_edit_apply(TtEditDoc *doc,const TtEditEvent *event) {
         return apply_tones_autodetect(doc);
     case TT_EDIT_SAMPLE_SELECT:
         return apply_sample_select(doc,&event->sample);
+    case TT_EDIT_SELECTION_RESAMPLE: {
+        int top=event->resample.top,bottom=event->resample.bottom;
+        int left=event->resample.left,right=event->resample.right;
+        int table=event->resample.table;
+        if(top<0 || bottom<top || left<0 || right<left ||
+           event->resample.reference<0 || event->resample.reference>127)return 0;
+        if(table>=0) {
+            if(table>=TT_SONG_TABLES || bottom>=doc->song->table[table].length)return 0;
+        } else if(bottom>=doc->song->pattern_rows || right>=TT_CHANNELS)return 0;
+        TtEditLoadedWave loaded={.wave=event->resample.wave,.path="Resampled selection.wav"};
+        if(!apply_sample_append(doc,&loaded))return 0;
+        doc->active_phrase->reference_note=event->resample.reference;
+        if(table>=0) {
+            for(int tick=top;tick<=bottom;++tick) {
+                TtTableTick *entry=&doc->song->table[table].tick[tick];
+                entry->note=-1;entry->instrument=-1;
+                for(int effect=0;effect<TT_TABLE_EFFECTS;++effect)
+                    entry->effect[effect]=(TtTableEffect){TT_EFFECT_NONE,-1};
+            }
+            doc->song->table[table].tick[top].note=event->resample.reference;
+            doc->song->table[table].tick[top].instrument=*doc->sample_index+1;
+        } else {
+            for(int row=top;row<=bottom;++row)
+                for(int channel=left;channel<=right;++channel)
+                    doc->active->cell[row][channel]=tt_cell_empty();
+            doc->active->cell[top][left].note=event->resample.reference;
+            doc->active->cell[top][left].instrument=*doc->sample_index+1;
+            doc->song->pattern[*doc->active_index]=*doc->active;
+        }
+        return 1;
+    }
     case TT_EDIT_SAMPLE_APPEND:
         return apply_sample_append(doc,&event->loaded_wave);
     case TT_EDIT_SAMPLE_RECOVER:

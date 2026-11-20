@@ -111,7 +111,8 @@ static char event_console_menu_label[32]="~S~how event console";
 static F80Wrap order_pattern_actions,order_play_actions;
 static F80Widget *order_pattern_buttons[4],*order_play_buttons[4];
 static F80Wrap selection_actions_wrap;
-static F80Widget *selection_action_buttons[8];
+static F80Widget *selection_action_buttons[9];
+static void selection_preview_refresh(void);
 static F80Widget *selection_action_groups[2];
 static F80Widget *order_link_button,*order_unlink_button,*order_close_button;
 static void order_remove(F80Widget *,void *);
@@ -179,6 +180,7 @@ static const char *edit_event_name(TtEditType type) {
         [TT_EDIT_SAMPLE_SWAP]="sample swap",[TT_EDIT_SAMPLE_DELETE]="sample delete",
         [TT_EDIT_SAMPLE_SELECT]="sample select",[TT_EDIT_SAMPLE_APPEND]="sample append",
         [TT_EDIT_SAMPLE_RECOVER]="sample recover",
+        [TT_EDIT_SELECTION_RESAMPLE]="resample selection",
         [TT_EDIT_SAMPLE_SOURCE]="sample source",
         [TT_EDIT_MARKER_MOVE]="marker move",[TT_EDIT_SLICE_NOTE]="slice note",
         [TT_EDIT_BEATS_AUTODETECT]="beats auto-detect",
@@ -912,6 +914,9 @@ static int handle_ui_event(TtUiEvent event) {
             f80_focus_next(&tracker.app,event.a);
             return 1;
         }
+        if(tracker.focus==FOCUS_PHRASE && tracker.selecting &&
+           !tracker.selection_frozen)
+            handle_ui_event((TtUiEvent){.type=TT_UI_FREEZE_SELECTION});
         if(!f80_focus_panel_next(&tracker.app,event.a))return 0;
         tracker_note_panel_focus(tracker.app.focus);
         tt_tracker_log_event("UI",event.a<0?"Previous pane focused":
@@ -1566,6 +1571,10 @@ static int handle_ui_event(TtUiEvent event) {
     }
     if(event.type==TT_UI_BEGIN_VISUAL_SELECTION) {
         if(tracker.focus!=FOCUS_PHRASE)return 0;
+        tracker.grid_value_editing=0;
+        tracker.app.focus=tracker.phrase_canvas;
+        tracker.controller_screen_navigation=0;
+        tracker.controller_toolbar_mode=0;
         tracker.selection_frozen=0;
         tracker.inline_table_selection_active=0;
         if(tracker.inline_table_open && tracker.inline_table_selected) {
@@ -1704,6 +1713,9 @@ static int handle_ui_event(TtUiEvent event) {
     if(event.type==TT_UI_EXTEND_VISUAL_SELECTION) {
         if(tracker.focus!=FOCUS_PHRASE || !tracker.selecting ||
            !tracker.visual_selecting)return 0;
+        tracker.app.focus=tracker.phrase_canvas;
+        tracker.controller_screen_navigation=0;
+        tracker.controller_toolbar_mode=0;
         leave_follow();
         if(tracker.inline_table_selection_active &&
            tracker.inline_table_open && tracker.inline_table_selected) {
@@ -3192,6 +3204,47 @@ static void paint_wave(F80Widget *canvas,void *user) {
             f80_put(r.y+r.h-1,r.x+1+x,x>=at && x<at+thumb?"█":"▒",1,10,0);
         f80_put(r.y+r.h-1,r.x+r.w-1,"▶",1,8,1);
     }
+}
+static void paint_selection_preview(F80Widget *canvas,void *user) {
+    (void)user;
+    F80Rect r=canvas->rect;
+    if(r.w<2 || r.h<1)return;
+    f80_fill(r,1); /* Blue window background is intentional for this preview. */
+    if(tracker.selection_preview_frames<=0 || !tracker.selection_preview_pcm) {
+        return;
+    }
+    int graph_y=r.y,graph_h=r.h;
+    if(graph_h<1)return;
+    F80Raster raster=f80_raster(f80_rect(r.x,graph_y,r.w,graph_h));
+    if(!raster.dots)return;
+    int pixels=r.w*2,vertical=graph_h*4,frames=tracker.selection_preview_frames;
+    if(vertical<2)vertical=2;
+    float peak=0;
+    for(int frame=0;frame<frames;++frame) {
+        float value=(tracker.selection_preview_pcm[(size_t)frame*2]+
+                     tracker.selection_preview_pcm[(size_t)frame*2+1])*.5f;
+        float magnitude=fabsf(value);
+        if(magnitude>peak)peak=magnitude;
+    }
+    float display_gain=peak>1e-6f?1.0f/peak:1.0f;
+    for(int x=0;x<pixels;++x) {
+        int first=(int)((long long)x*frames/pixels);
+        int last=(int)((long long)(x+1)*frames/pixels);
+        if(last<=first)last=first+1;
+        if(last>frames)last=frames;
+        float low=1,high=-1;
+        for(int i=first;i<last;++i) {
+            float value=(tracker.selection_preview_pcm[(size_t)i*2]+
+                         tracker.selection_preview_pcm[(size_t)i*2+1])*.5f*display_gain;
+            if(value<low)low=value;if(value>high)high=value;
+        }
+        if(low<-1)low=-1;if(high>1)high=1;
+        int top=(int)((1-high)*(vertical-1)/2);
+        int bottom=(int)((1-low)*(vertical-1)/2);
+        f80_raster_line(&raster,x,top,x,bottom,10,2);
+    }
+    f80_raster_draw_quadrants(&raster);
+    f80_raster_free(&raster);
 }
 static int pattern_effect_slots_used(int channel) {
     int slots=1;
@@ -4884,6 +4937,53 @@ static void selection_base_pick(F80Widget *button,void *user) {
     (void)button;(void)user;
     handle_ui_event((TtUiEvent){.type=TT_UI_FOCUS,.index=FOCUS_SELECTION});
     handle_ui_event((TtUiEvent){.type=TT_UI_NOTE_PICKER_OPEN,.a=1});
+}
+static void selection_preview_refresh(void) {
+    int top,left,bottom,right;
+    if(tracker.inline_table_selection_active)inline_selection_bounds(&top,&left,&bottom,&right);
+    else selection_bounds(&top,&left,&bottom,&right);
+    TtPlayEvent event={.type=TT_PLAY_RENDER_SELECTION};
+    event.selection.table_selection=tracker.inline_table_selection_active;
+    event.selection.table=tracker.inline_table_index;
+    event.selection.parent=tracker.inline_table_parent;
+    event.selection.channel=tracker.inline_table_channel;
+    event.selection.pattern=tracker.pattern_index;
+    event.selection.top=top;event.selection.bottom=bottom;
+    event.selection.left=left;event.selection.right=right;
+    if(tt_play_emit(event))tt_play_flush();
+}
+static void selection_resample(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    selection_preview_refresh();
+    if(!tracker.selection_preview_pcm || tracker.selection_preview_frames<=0)return;
+    TtWave wave={.instrument_type=TT_INSTRUMENT_SAMPLE,
+        .rate=TT_AUDIO_OUTPUT_RATE,.frames=tracker.selection_preview_frames};
+    wave.pcm=malloc((size_t)wave.frames*sizeof(float));
+    if(!wave.pcm)return;
+    snprintf(wave.name,sizeof(wave.name),"Resampled selection.wav");
+    for(int frame=0;frame<wave.frames;++frame)
+        wave.pcm[frame]=tt_audio_resampled_mono(
+            tracker.selection_preview_pcm[(size_t)frame*2],
+            tracker.selection_preview_pcm[(size_t)frame*2+1]);
+    TtEditEvent event={.type=TT_EDIT_SELECTION_RESAMPLE};
+    event.resample.wave=&wave;
+    event.resample.reference=tracker.selection_base_note;
+    event.resample.table=tracker.inline_table_selection_active?tracker.inline_table_index:-1;
+    if(event.resample.table>=0)inline_selection_bounds(&event.resample.top,&event.resample.left,
+        &event.resample.bottom,&event.resample.right);
+    else selection_bounds(&event.resample.top,&event.resample.left,
+        &event.resample.bottom,&event.resample.right);
+    tt_play_flush();
+    if(emit_edit(&event)) {
+        handle_ui_event((TtUiEvent){.type=TT_UI_END_VISUAL_SELECTION});
+        perspective_instruments(NULL,NULL);
+    }
+    tt_free(&wave);
+}
+static void selection_audit(F80Widget *button,void *user) {
+    (void)button;(void)user;
+    selection_preview_refresh();
+    if(tt_play_emit((TtPlayEvent){.type=TT_PLAY_AUDIT_SELECTION}))tt_play_flush();
 }
 static void selection_scope_changed(F80Widget *group,void *user) {
     (void)user;
@@ -8009,6 +8109,11 @@ static int frame(void *user) {
             for(int index=0;index<tracker.sample_count;++index)
                 tt_free(&tracker.samples[index].wave);
         }
+        free(tracker.selection_preview_pcm);
+        tracker.selection_preview_pcm=NULL;
+        tracker.selection_preview_frames=0;
+        tracker.selection_preview_rate=0;
+        tracker.selection_preview_title[0]=0;
         f80_free(tracker.root);tracker.root=NULL;
         tt_package_cleanup_all();
         return 0;
@@ -8041,9 +8146,24 @@ static int frame(void *user) {
         f80_grow():f80_fixed(0);
     f80_layout(tracker.root,f80_rect(0,0,cols,rows));
     if(tracker.selection_frame && tracker.selection_frame->visible) {
+        static int previous[9];
+        int top,left,bottom,right;
+        if(tracker.inline_table_selection_active)inline_selection_bounds(&top,&left,&bottom,&right);
+        else selection_bounds(&top,&left,&bottom,&right);
+        int current[9]={1,tracker.pattern_index,top,left,bottom,right,
+            tracker.inline_table_selection_active,tracker.inline_table_index,tracker.inline_table_parent};
+        if(memcmp(previous,current,sizeof(current))) {
+            selection_preview_refresh();
+            memcpy(previous,current,sizeof(current));
+        }
         f80_wrap_layout(&selection_actions_wrap,
             selection_action_groups[0]->parent->rect,
             selection_action_groups,2);
+        F80Rect actions=selection_action_groups[0]->parent->rect;
+        int preview_y=actions.y+selection_actions_wrap.content_height;
+        if(preview_y>actions.y+actions.h)preview_y=actions.y+actions.h;
+        f80_layout(tracker.selection_preview_panel,
+            f80_rect(actions.x,preview_y,actions.w,actions.y+actions.h-preview_y));
     }
     if(tracker.perspective==TT_PERSPECTIVE_ORDERS && tracker.order_dialog) {
         F80Rect r=tracker.order_dialog->rect;
@@ -8569,6 +8689,8 @@ int main(int argc,char **argv) {
     selection_action_groups[0]=f80_add(selection_actions,f80_box(F80_ROW));
     selection_action_groups[1]=f80_add(selection_actions,f80_box(F80_ROW));
     selection_action_groups[0]->gap=selection_action_groups[1]->gap=1;
+    f80_sized(selection_action_groups[0],f80_grow(),f80_fixed(2));
+    f80_sized(selection_action_groups[1],f80_grow(),f80_fixed(2));
     const char *transpose_labels[]={"-C","+C","-1","+1"};
     const long transpose_values[]={-12,12,-1,1};
     for(int i=0;i<4;++i)
@@ -8582,9 +8704,21 @@ int main(int argc,char **argv) {
     selection_action_buttons[6]=f80_add(selection_action_groups[1],
         f80_button(tracker.selection_base_label,selection_base_pick,NULL));
     selection_action_buttons[7]=f80_add(selection_action_groups[1],
-        f80_button("Resample",NULL,NULL));
+        f80_button("Audit",selection_audit,NULL));
+    selection_action_buttons[8]=f80_add(selection_action_groups[1],
+        f80_button("Resample",selection_resample,NULL));
+    tracker.selection_preview_panel=f80_add(selection_actions,
+        f80_window(F80_WINDOW_BLUE,F80_COL));
+    tracker.selection_preview_panel->frame=2;
+    snprintf(tracker.selection_preview_title,sizeof(tracker.selection_preview_title),
+             "Selection Waveform");
+    tracker.selection_preview_panel->title=tracker.selection_preview_title;
+    f80_sized(tracker.selection_preview_panel,f80_grow(),f80_grow());
+    tracker.selection_preview_canvas=f80_add(tracker.selection_preview_panel,
+        f80_canvas(paint_selection_preview,NULL));
+    tracker.selection_preview_canvas->focusable=1;
     F80Widget *scope_panel=f80_add(selection_body,f80_box(F80_COL));
-    scope_panel->frame=1;scope_panel->title="Selection Scope";
+    scope_panel->frame=2;scope_panel->title="Scope";
     f80_sized(scope_panel,f80_fixed(18),f80_grow());
     tracker.selection_scope_group=f80_add(scope_panel,
         f80_check_group(selection_scope_items,5,selection_scope_changed,NULL));
